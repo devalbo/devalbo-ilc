@@ -851,9 +851,10 @@ Adopt the spirit of DEVALBO-ILC.md V1, but **sequence** work so Phase 1 does not
 | Define message types in protobuf | Three `.proto` layers — `common` (+ `IlcError` oneof), per-handler payloads, envelope. `TInput`/`TOutput` are proto, **not** CLI-native (per *Handler I/O & serialization*). |
 | Generate proto bindings | Rust `prost` (std) / `micropb`-`femtopb` (`no_std`); TS `ts-proto`; Python `protobuf`. Protobuf is the wire encoding — **not gRPC**. |
 | Cross-language round-trip parity tests | A message encoded by one language's codegen decodes identically in the others; bytes match the wire format. Beyond type-shape snapshots. |
+| **Per-language host *behavior* tests (standing rule)** | Every new capability lands with per-language host tests, not just codegen/type parity. **Lesson (2026-05-30):** `ilc-py`'s ConsoleIo host shipped "done" but crashed at runtime (awaited a non-awaitable) because nothing tested host *behavior* — only the golden codegen snapshots existed. Behavior parity is what keeps "Rust-lead, TS/Python in lockstep" honest. Pattern: the per-language test suites added for ConsoleIo (`unittest` / `node:test`). |
 | Document handler signature | e.g. Rust `async fn handle(env: &Environment<…>, input: TInput) -> Result<TOut, IlcError>`; TS `Promise<Result<…>>`; Python awaitable. |
 
-**Exit criterion:** Generated types cover the full V1 capability table in Rust and emit cleanly (or with understood, recorded gaps) to TS/Python; no requirement for production hosts yet.
+**Exit criterion:** Generated types cover the full V1 capability table in Rust and emit cleanly (or with understood, recorded gaps) to TS/Python; cross-language round-trip parity passes; **each capability has per-language host behavior tests** (no "done" without them). No requirement for production hosts yet.
 
 ### Phase 3 — Rust hosts (lead), other languages deferred (2–4 weeks)
 
@@ -869,7 +870,7 @@ Network there first. TS/Python keep generated types but their FS/Network hosts w
 | Shared internal adapter | `console_io_from_callbacks({ on_info, on_error, on_read_line })`-style pattern; hosts are thin wrappers over it. |
 | TS/Python FS+Network hosts | **Deferred** — types stay generated and golden-tested; build these hosts only when a consumer needs them. (TS `ConsoleIo` Node/browser/DevTools hosts already exist from Phase 1.) |
 
-**Exit criterion:** The same Rust handler module runs unchanged under the native, test, browser-WASM, and embedded hosts; capabilities a host lacks return `unavailable`.
+**Exit criterion:** The same Rust handler module runs unchanged under the native, test, browser-WASM, and embedded hosts; capabilities a host lacks return `unavailable`; **each host has behavior tests** (per the Phase 2 standing rule — behavior parity, not just codegen).
 
 ### Phase 4 — Pilot: BFT codec core (Rust) (1–2 weeks)
 
