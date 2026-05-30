@@ -8,7 +8,8 @@
   },
   "scripts": {
     "hello:node": "tsx examples/node-hello.ts",
-    "hello:test": "tsx examples/test-hello.ts"
+    "hello:test": "tsx examples/test-hello.ts",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

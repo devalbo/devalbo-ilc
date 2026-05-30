@@ -19,12 +19,12 @@ class CallbackConsoleIo:
 
     async def info(self, message: str) -> None:
         result = self._callbacks.on_info(message)
-        if result is not None:
+        if result is not None and hasattr(result, "__await__"):
             await result
 
     async def error(self, message: str) -> None:
         result = self._callbacks.on_error(message)
-        if result is not None:
+        if result is not None and hasattr(result, "__await__"):
             await result
 
     async def readLine(self) -> str | None:
