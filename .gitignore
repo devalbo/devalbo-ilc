@@ -1,0 +1,9 @@
+/target/
+**/__pycache__/
+*.pyc
+.venv/
+node_modules/
+packages/ilc-ts/node_modules/
+dist/
+*.egg-info/
+.DS_Store
