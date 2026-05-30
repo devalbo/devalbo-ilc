@@ -190,10 +190,23 @@ WASM/embedded builds never pull CLI deps:**
 | --- | --- | --- | --- |
 | Python | **Typer** (Click under it) | `Depends`-style / decorator injection of `env` into a Typer command | `ilc-py-typer` |
 | Rust | **clap** (derive) | `ilc_clap::run(handler)` builds the native `Environment`, passes the derived args struct as `input` | `ilc-rs-clap` (feature `clap`) |
-| TypeScript | **commander** / oclif | action callback builds `createNodeEnvironment()` then calls the handler | `ilc-ts-commander` |
+| TypeScript | **Optique** (type-safe parser combinators) | parser → typed args → shim maps to proto `TInput` → handler. Optique is *purely a parser* (no execution/scaffolding) = the cleanest "bind, don't supplant" fit; commander/oclif also work | `ilc-ts-optique` |
 
 These are binding *examples*; users can write their own for argparse / yargs / etc. ILC only
 requires the shim end up calling `handler(env, input)`.
+
+**The BFT pilot bootstraps these libraries (2026-05-30).** `ilc-rs-clap` / `ilc-py-typer` /
+`ilc-ts-optique` are *born* from the pilot — the first concrete coupling of ILC to each CLI platform,
+not throwaway glue. Disciplines:
+
+- **Concrete-first, extract-after.** Write BFT's binding inline per platform, get it working across
+  runtimes, *then* lift the reusable shim out. Keep the libraries **in-workspace / unpublished** until
+  a **second** consumer validates the shape (per the "premature triple-SDK publication" concern).
+- **One common contract, only step 1 differs:** `(1) parse argv` [platform-specific: clap / Typer /
+  Optique] → `(2) map parsed → TInput` [thin per-platform adapter] → `(3) build Environment` →
+  `(4) invoke the generated harness` (decode→handle→encode, route by `target`) → `(5) map IlcResult /
+  CapabilityError → exit code`. Steps 3–5 are **shared/generated**; the binding library is essentially
+  step 1 + the step-2 adapter + exit-code conventions. Resist leaking platform specifics into 3–5.
 
 **Resolves open Question 2 (CLI ownership):** ILC owns *only* handler + `Environment`; the CLI
 library owns argv/subcommands; a per-language shim bridges them. It also reframes the "handler
@@ -594,7 +607,7 @@ Phase 4 (TestEnvironment ×3)  → After NativeHost; network queue is the heavy 
 | **`devalbo-cli` (external repo)** | Natural CLI host; ILC avoids growing another ad-hoc context type. |
 | **New lab command with 1 HTTP + 1 file** | Smallest slice to validate `TestEnvironment` queue mocks. |
 
-Pick **one** pilot before **full-host** integration (Phase 4+); Phase 1 does not require a pilot—only a cross-language “hello `ConsoleIo`” sample.
+**Selected (2026-05-30): BFT decode/encode core** — currently duplicated `bft.js` / `bft.py`, a real cross-language-duplication forcing function; binary + pure transform + already multi-target. See *Phase 4*. (Phase 1 did not require a pilot — only a cross-language “hello `ConsoleIo`” sample.)
 
 ---
 
@@ -792,7 +805,7 @@ Adopt the spirit of DEVALBO-ILC.md V1, but **sequence** work so Phase 1 does not
 - [x] V1 capabilities → `ConsoleIo` + stdin + **basic binary-capable `FileSystem`**
 - [x] Virtual path scheme for `FileSystem` → **resolved (2026-05-30):** mount table over a single POSIX namespace; zero-config default mount per host; introspectable/mutable mounts as the advanced escape hatch; resolver ported from `tb-solid-pod` path.ts → branded `VirtualPath`. See *FileSystem — virtual path scheme*.
 - [x] Registration / dispatch model ~~(deferred from V1)~~ → **design settled (2026-05-30):** proto `service` declares → codegen types + routes → **explicit** entry-point registration → `envelope.target` routing; dynamic registry (std) / static table (embedded). Implementation lands **Phase 4+**. See *Binding & registration*.
-- [ ] Pilot project (Phase 4)
+- [x] Pilot project → **BFT codec core (2026-05-30):** port the duplicated `bft.js` / `bft.py` codec to one Rust core via ILC; ship as CLI + browser SPA, retiring both copies. Exercises ConsoleIo + binary FileSystem + proto I/O + test host across two runtimes; no Network/Store needed. See *Phase 4*.
 - [x] ILC vs `CliContext` from sw-principles → **reconciled (2026-05-30):** audited sibling repos; field-level mapping done (see *ILC ↔ `CliContext` reconciliation*). `CliContext` is a principle with two divergent realizations (`tb-solid-pod`, `devalbo-cli`); the IO/state/capability half maps onto the ILC `Environment`, residual is terminal-host presentation state. No new primitive needed; migration is re-homing not rewriting. **Pending only** the sw-principles + lab-mirror doc edits in `site-devalbo.com` (awaiting OK to write cross-repo).
 - [x] **Compiler dual front-end (before Phase 2):** ~~one IR or two pipelines~~ → **resolved: two independent front-ends** (WIT via `ilc compile`; proto via off-the-shelf `buf`/`protoc`), meeting at a generated handler harness keyed off proto `service` descriptors. See *Compiler architecture — dual front-end*. Capability-error-vs-app-error **locked (2026-05-30)**; remaining sub-decision: service-as-manifest.
 - [x] **`buf` for the `.proto` side — LOCKED (2026-05-30).** Local-only (no BSR required): `buf.yaml` (deps incl. `protovalidate`; lint; breaking = `WIRE_JSON`) + `buf.gen.yaml` (prost + prost-serde/pbjson, es, python); `buf build -o` produces the FileDescriptorSet the ILC harness reads. Gives lint + breaking-change detection + `protovalidate` deps + canonical-JSON codegen. See *Compiler architecture — dual front-end*.
@@ -858,15 +871,35 @@ Network there first. TS/Python keep generated types but their FS/Network hosts w
 
 **Exit criterion:** The same Rust handler module runs unchanged under the native, test, browser-WASM, and embedded hosts; capabilities a host lacks return `unavailable`.
 
-### Phase 4 — Rust pilot integration (1–2 weeks)
+### Phase 4 — Pilot: BFT codec core (Rust) (1–2 weeks)
+
+**Pilot (selected 2026-05-30):** `brute-force-transfer` — currently **duplicated** as `bft.js` + `bft.py`
+(+ `deflate`/`inflate` each, separate `test_bft.{js,py}`). Port the codec to **one Rust core** behind
+ILC, retiring both copies. Binary + pure transform + already multi-target = the sweet-spot first pilot.
 
 | Task | Detail |
 | --- | --- |
-| Extract handler | Pilot logic uses the generated `Environment`; no direct `std::fs` / `reqwest` / `web-sys` in core. |
-| Wire ≥2 entry points | Prove cross-runtime: e.g. a CLI (**clap + `ilc-rs-clap` shim** → native host) **and** a browser SPA (`wasm_bindgen(start)` → browser host) from one handler crate. Embedded boot host optional if hardware is in scope. |
-| Tests | Rust `TestEnvironment` covers core paths. |
+| Port codec to Rust | deflate/inflate + tree transform as a **pure Rust core** (`flate2`/`miniz_oxide`); no I/O in core. Seed **golden vectors** from `test_bft.{js,py}`. |
+| Define proto I/O | `.proto` messages for decode/encode requests + results; `service` methods → handler routes. |
+| Use the `Environment` | core reads/writes via `env.fs` (binary `read_bytes`/`write_bytes`) + `env.consoleIo`; **no** direct `std::fs` / `web-sys`. |
+| Wire 2 entry points | **CLI** (clap + `ilc-rs-clap` shim → native host): `bft decode in.bft` / `bft encode dir/`. **Browser SPA** (`wasm_bindgen(start)` → browser host): upload `.bft` / download. One crate, both. |
+| Tests | Rust `TestEnvironment` (in-memory FS + captured output) runs the shared golden vectors; **byte-parity** vs the legacy JS/Py outputs. |
 
-**Exit criterion:** One Rust handler crate ships to two+ runtimes with zero duplicated business logic; tests run against the in-memory host.
+**Exit criterion:** one Rust crate runs the BFT codec under CLI + browser + test hosts with **zero
+duplicated logic**, producing **byte-identical** output to the retired `bft.js` / `bft.py`.
+
+**Phase 4b — cross-language front-ends (stretch, additive).** Prove the cross-language *client* story:
+non-Rust **CLI front-ends** that bind to the *same* Rust codec — **never** reimplement it.
+
+| Front-end | Binding | Path to the Rust core |
+| --- | --- | --- |
+| Python (**Typer**) | `ilc-py-typer` shim | **PyO3/maturin** (or `uniffi`) native module; Typer parses → proto `TInput` → Rust handler |
+| TypeScript (**Optique**) | `ilc-ts-optique` shim | **napi-rs** native, *or* reuse the browser **WASM** artifact in Node; Optique parses → `TInput` → Rust |
+
+Rule: **codec logic stays single-source (Rust); these are front-ends only** (re-implementing it would
+resurrect the `bft.js`/`bft.py` duplication the pilot kills). Validates client-stub codegen + the
+language-barrier crossing. **Not** in the minimal exit criterion — do it after the Rust CLI+browser
+proves out; it pulls FFI/binding machinery (PyO3 / napi / `uniffi`) in earlier than the core pilot needs.
 
 ### Phase 5 — OpenBindings + publishing (deferred)
 
