@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package devalbo.ilc;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/ilc";
+
+// Standardized error taxonomy (the wire mirror of the WIT capability-error).
+// See docs/DEVALBO-ILC-GO-PLAN.md "Error taxonomy" + §7.2.
+message IlcError {
+  ErrorKind kind = 1;
+  uint32 code = 2; // host-native code (0 = unset): errno / HTTP status …
+  string message = 3;
+}
+
+enum ErrorKind {
+  ERROR_KIND_UNSPECIFIED = 0;
+  ERROR_KIND_NOT_FOUND = 1;
+  ERROR_KIND_PERMISSION_DENIED = 2;
+  ERROR_KIND_INVALID_INPUT = 3;
+  ERROR_KIND_UNAVAILABLE = 4; // capability not provided by this host
+  ERROR_KIND_TIMEOUT = 5;
+  ERROR_KIND_IO = 6;
+  ERROR_KIND_OTHER = 7;
+}

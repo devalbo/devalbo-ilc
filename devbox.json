@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/main/.schema/devbox.schema.json",
+  "packages": [
+    "go@latest",
+    "tinygo@latest",
+    "wasmtime@latest",
+    "wasm-tools@latest",
+    "buf@latest",
+    "nodejs@22"
+  ],
+  "shell": {
+    "init_hook": [
+      "export GOBIN=\"$PWD/.devbox/gobin\"",
+      "export PATH=\"$GOBIN:$PWD/node_modules/.bin:$PATH\"",
+      "command -v wit-bindgen-go   >/dev/null || go install go.bytecodealliance.org/cmd/wit-bindgen-go@latest",
+      "command -v protoc-gen-go-lite >/dev/null || go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@latest",
+      "command -v jco              >/dev/null || npm i -g @bytecodealliance/jco",
+      "command -v protoc-gen-es-lite >/dev/null || npm i -g @aptre/protobuf-es-lite"
+    ],
+    "scripts": {
+      "doctor": ["./scripts/preflight.sh"]
+    }
+  }
+}

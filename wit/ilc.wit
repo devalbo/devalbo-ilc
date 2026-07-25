@@ -1,0 +1,26 @@
+package devalbo:ilc;
+
+// The ILC capability world — BOOTSTRAP subset (Console + Filesystem only).
+//
+// Console I/O is standard WASI stdio (wasi:cli/stdout|stderr|stdin), and the
+// filesystem is standard wasi:filesystem — both provided by the TinyGo wasip2
+// target and host preopens, NOT custom interfaces. So this world only declares
+// the custom export. sqlite-host / event-host / display-host are added in later
+// phases. See docs/DEVALBO-ILC-GO-PLAN.md §6.
+
+interface types {
+  // Result of a handler invocation. `output` is protobuf-encoded (or canonical-JSON) bytes.
+  record command-result {
+    success: bool,
+    output: list<u8>,
+    error: option<string>,
+  }
+}
+
+world engine {
+  use types.{command-result};
+
+  // The custom PERSISTENT entry — callable many times on a live instance (reactive UI).
+  // A one-shot CLI may additionally use standard wasi:cli/command `run` + get-arguments.
+  export execute-cli: func(args: list<string>) -> command-result;
+}

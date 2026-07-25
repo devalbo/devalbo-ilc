@@ -1,9 +1,25 @@
-/target/
-**/__pycache__/
-*.pyc
-.venv/
+# Devbox / Nix (local state; devbox.lock IS committed)
+.devbox/
+
+# Generated: wit-bindgen-go + buf output
+/gen/
+
+# WASM build artifacts
+*.wasm
+
+# Go
+/bin/
+
+# Node / frontend
 node_modules/
-packages/ilc-ts/node_modules/
-dist/
-*.egg-info/
+frontend/dist/
+
+# Later tiers (embedded / desktop)
+hosts/embedded/.pio/
+hosts/desktop/build/
+
+# Retiring with the tri-language removal (compiler/ + packages/)
+/target/
+
+# OS
 .DS_Store

@@ -1,8 +1,0 @@
-[project]
-name = "devalbo-ilc"
-version = "0.1.0"
-description = "ILC Python SDK (generated capability protocols)"
-requires-python = ">=3.11"
-
-[tool.setuptools.packages.find]
-where = ["src"]

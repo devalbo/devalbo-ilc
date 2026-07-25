@@ -1,5 +1,0 @@
-/// Host capability bundle (Phase 1: console I/O only).
-/// WIT models this as a world import; emitters project `Environment` with `consoleIo()`.
-world environment {
-  import console-io;
-}

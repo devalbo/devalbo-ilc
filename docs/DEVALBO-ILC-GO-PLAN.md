@@ -175,9 +175,10 @@ hosts/desktop/build/    # wails output
 └── Makefile                        # build + verify targets per environment (§11)
 ```
 
-> **Per-app vs repo-level:** this is the **per-app** layout. Once the platform is extracted (§16.4) the
-> *repo* splits into `platform/` + `templates/` + `apps/` (§16.6), and the tree above lives under each
-> `apps/<name>/`.
+> **Per-app vs repo-level:** this is the **per-app** layout. The bootstrap repo root also carries
+> `scripts/`, `spikes/`, `templates/`, `docs/`, `devbox.json`, `go.mod`, and a **thin boundary README in
+> each major folder**. Once the platform is extracted (§16.4) the *repo* splits into `platform/` +
+> `templates/` + `apps/` (§16.6), and the app tree above lives under each `apps/<name>/`.
 
 ---
 
@@ -642,7 +643,7 @@ reshapes the plan before the pilot.
 | --- | --- | --- |
 | **0a — Repo migration** | Tag + remove the retired tri-language Phase-1 code; scaffold the Go layout (**§2**) | working tree matches §3; `compiler`/`packages`/root Cargo removed (tagged); `go.mod` + `devbox.json` in place |
 | **0b — Spikes** | The five §11 spikes | All green (or plan adjusted to the reality) |
-| **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (wasmtime); `dlc new` emits a minimal self-shaped skeleton; `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; golden **FS snapshot** defined |
+| **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (wasmtime); `dlc new` emits a minimal self-shaped skeleton; `dlc doctor` (readiness as a command, §16.7); `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; `dlc doctor` reports readiness; golden **FS snapshot** defined |
 | **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: SQLite-index (native + web), Events, lock-file write flow, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
 | **3 — Display + embedded** | Display capability (describe + draw-list) with React host + **ESP32-S3 WAMR host**; RP2350 + RP2040(native) | shared notes/list renders on browser **and** ESP32-S3 TFT from one engine; `unavailable` file-scan fallback verified; RP2040 native parity |
 | **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **core module** across the five wasm tiers; golden parity on all six; verification matrix green |
@@ -817,6 +818,7 @@ Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), bui
 | Command | Does |
 | --- | --- |
 | `dlc new <app> --caps=… --tiers=… --ui=… --storage=…` | scaffold (import base + fragments, §16.6); `--build --git --run` for one-step setup |
+| `dlc doctor` | assess readiness — system prereqs + per-tier toolchain/host; the **command form** of `scripts/preflight.sh` (Layer 1; the pure-bash script stays as the pre-toolchain Layer 0 gate — see prereqs doc) |
 | `dlc build` / `dlc verify` | build the engine (core-module + adapter/native) / run the §11 per-tier matrix |
 | `dlc proto …` | edit / regenerate the app's `.proto` (buf under the hood) |
 | `dlc host add <web\|desktop\|embedded>` | overlay a tier's host into an existing app (import a fragment) |

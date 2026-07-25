@@ -11,11 +11,11 @@
 set -uo pipefail
 
 # Colors only when stdout is a terminal (clean output under pipes / CI / make).
-if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Z=$'\033[0m'; else G=''; R=''; Z=''; fi
+if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Y=$'\033[33m'; Z=$'\033[0m'; else G=''; R=''; Y=''; Z=''; fi
 
 miss_sys=0
 
-chk() { # name  version-cmd  hint
+chk() { # name  version-cmd  hint  (required: ✗ when missing)
   if command -v "$1" >/dev/null 2>&1; then
     printf "  %-18s ${G}✓${Z}  %s\n" "$1" "$(eval "$2" 2>&1 | head -1)"
     return 0
@@ -25,13 +25,24 @@ chk() { # name  version-cmd  hint
   fi
 }
 
+chk_opt() { # name  version-cmd  note  (optional: ○ when missing — never a failure)
+  if command -v "$1" >/dev/null 2>&1; then
+    printf "  %-18s ${G}✓${Z}  %s\n" "$1" "$(eval "$2" 2>&1 | head -1)"
+  else
+    printf "  %-18s ${Y}○${Z}  %s\n" "$1" "$3"
+  fi
+}
+
 echo "OS: $(uname -s) $(uname -m)"
 echo
 echo "System prerequisites (install yourself):"
 chk git    "git --version"    "install git"                                        || miss_sys=$((miss_sys+1))
-chk nix    "nix --version"    "install: https://install.determinate.systems/"      || miss_sys=$((miss_sys+1))
-chk devbox "devbox version"   "install: https://get.jetify.com/devbox"             || miss_sys=$((miss_sys+1))
-chk direnv "direnv --version" "optional — auto-loads the devbox shell"             || true
+chk devbox "devbox version"   "install: https://www.jetify.com/docs/devbox/installing-devbox" || miss_sys=$((miss_sys+1))
+chk_opt direnv "direnv --version" "optional — auto-activates the env on 'cd' (else just run 'devbox shell')"
+
+echo
+echo "Managed by Devbox (diagnostic — you never install this by hand):"
+chk nix    "nix --version"    "Devbox installs this on first 'devbox shell'"        || true
 
 # Are we inside a devbox shell? (devbox sets this env var)
 in_devbox="${DEVBOX_SHELL_ENABLED:-}"

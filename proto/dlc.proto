@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package devalbo.dlc;
+
+import "common.proto";
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/dlc";
+
+// Bootstrap command messages for `dlc` (App #1): new, export-fs, import-fs.
+// These are the TInput/TOutput shapes the CLI shim + web host map onto. Later
+// commands (build, verify, proto, host add) arrive in the backlog.
+
+// `dlc new <name> --module … --caps … --tiers … --ui … --storage …`
+message NewRequest {
+  string name = 1;
+  string module = 2;
+  repeated string caps = 3;  // capability opt-ins (bootstrap: console, filesystem)
+  repeated string tiers = 4; // tier opt-ins (bootstrap: cli, web)
+  string ui = 5;             // react | none
+  string storage = 6;        // split | none
+}
+message NewResult {
+  string path = 1;               // where the project was scaffolded
+  repeated string files = 2;     // files written
+}
+
+// Filesystem export/import — the first-class platform primitive (§7.3).
+enum BundleFormat {
+  BUNDLE_FORMAT_BFT = 0;   // single human-readable JSON (default)
+  BUNDLE_FORMAT_ZIP = 1;
+  BUNDLE_FORMAT_PROTO = 2;
+}
+
+message ExportFsRequest {
+  string prefix = 1;
+  BundleFormat format = 2;
+}
+message ExportFsResult {
+  bytes bundle = 1;
+}
+
+message ImportFsRequest {
+  bytes bundle = 1;
+  string prefix = 2;
+}
+message ImportFsResult {
+  repeated string files = 1;
+}

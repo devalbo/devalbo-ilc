@@ -30,12 +30,12 @@ Reference tiers only for bootstrap: **CLI + Web**. (Desktop, embedded, and the n
 - [ ] Tag the current state: `git tag phase1-tri-language` (recoverable checkpoint)
 - [ ] Remove retired tri-language machinery: `compiler/`, `packages/ilc-{ts,py,rs}/`, root `Cargo.toml` + `Cargo.lock`
 - [ ] Remove `wit/environment.wit` and `wit/console-io.wit` (console is now WASI stdio — Decision 20)
-- [ ] Create `go.mod` (module path; TinyGo-compatible deps only in `engine/`)
-- [ ] Create the directory skeleton (§3): `wit/`, `proto/`, `engine/`, `gen/` (gitignored), `hosts/{native,web}/`, `frontend/`, `Makefile`
-- [ ] Extend `.gitignore` (§2.3): `/gen/`, `*.wasm`, `.devbox/`, `frontend/dist/`
-- [ ] Rewrite `README.md` → point at the Go plan; mark `DEVALBO-ILC-GO-PLAN.md` authoritative
+- [x] Create `go.mod` — `module github.com/devalbo/devalbo-ilc`, `go 1.23` (TinyGo-compatible deps only in `engine/`)
+- [x] Create the **flat bootstrap** directory skeleton — each major folder carries a **thin boundary README** (what belongs / what must NOT / link to plan §). Stay flat; defer the `platform/`+`apps/` split (§16.6) to App #2. Folders: `wit/ proto/ engine/ hosts/{native,web}/ frontend/ templates/ spikes/ scripts/`; `gen/` gitignored
+- [x] Refresh `.gitignore` for Go/wasm/devbox: `/gen/`, `*.wasm`, `.devbox/`, `node_modules/`, `frontend/dist/`, `/target/` (transitional)
+- [x] Rewrite `README.md` → real project README (present-tense), points at the Go plan / tasks / prereqs / test-steps; tri-language content removed
 - [ ] `devbox.json` core devshell (§4.1): Go, TinyGo, `wit-bindgen-go`, `wasm-tools`, buf + `protoc-gen-go-lite` + `protoc-gen-es-lite`, `wasmtime`, `nodejs`
-- [ ] `make doctor` preflight — assert git/Nix/Devbox present + the devbox toolchain resolves ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
+- [ ] `make doctor` preflight — assert git/Nix/Devbox present + the devbox toolchain resolves; this is the **Layer 0** pre-toolchain gate (pure bash, no `dlc` needed) that gets you to a first `dlc`, later complemented by `dlc doctor` (Layer 1, Phase B2) ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
 
 **Exit:** clean working tree matching §3 (CLI+web subset); `devbox shell` provisions the toolchain; `make doctor` green.
 
@@ -58,11 +58,11 @@ Do these *before* committing to the build shape; any red spike reshapes the plan
 ## Phase B2 — `dlc` engine + terminal (CLI host)
 
 ### Contract & codegen
-- [ ] `wit/ilc.wit` — bootstrap world: `import wasi:filesystem`, `wasi:cli` stdio; `export execute-cli(args) -> command-result` (§6)
-- [ ] `wit-bindgen-go` generates the capability bindings into `gen/`
-- [ ] `proto/common.proto` — `command-result`, `IlcError` (`buf.yaml`, `buf.gen.yaml` with go-lite + es-lite)
-- [ ] `proto/dlc.proto` — messages for the bootstrap commands (`new`, `export-fs`, `import-fs`)
-- [ ] `buf generate` wired into the Makefile (go-lite → `gen/go`, es-lite → `gen/ts`)
+- [x] `wit/ilc.wit` — bootstrap world (Console via WASI stdio + Filesystem via WASI, provided by the target/host); `export execute-cli(args) -> command-result` (§6)
+- [x] `proto/common.proto` — `IlcError` taxonomy; `proto/dlc.proto` — `new` / `export-fs` / `import-fs` messages
+- [x] `proto/buf.yaml` + `proto/buf.gen.yaml` (go-lite → `gen/go`, es-lite → `gen/ts`); `make gen` wires wit-bindgen-go + buf
+- [ ] **Validate under devbox:** `make gen` runs clean (`buf lint` + generate); shakes out `buf.gen.yaml` opts + go_package (Spike 2)
+- [ ] `wit-bindgen-go generate` produces the capability bindings in `gen/go` (Spike 1)
 
 ### Engine (Go → wasm; business logic only)
 - [ ] `engine/main.go` — implements `execute-cli`; reflection-free dispatch (route table + go-lite decode)
@@ -81,6 +81,7 @@ Do these *before* committing to the build shape; any red spike reshapes the plan
 - [ ] `hosts/native/` — `main()`: **kong** parses argv → proto `TInput` → wasmtime instantiates the component → run → `command-result` → exit code
 - [ ] Two-phase launch (§5.5): construct the native Environment (FS root = cwd/config dir, stdio) → invoke the engine
 - [ ] Wire `dlc new <app> [--module …]` end-to-end
+- [ ] `dlc doctor` — the **command form** of preflight (§16.7): assess system prereqs + per-tier toolchain/host readiness, exit non-zero if a prereq is missing. Layer 1 (assumes a `dlc` binary); `scripts/preflight.sh` stays as the pre-toolchain **Layer 0** bootstrap gate that gets you a first `dlc` ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
 
 ### Verify (terminal)
 - [ ] `dlc new myapp` produces a buildable project tree on disk
@@ -162,7 +163,7 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] Scaffolder verify in CI: `dlc new … → devbox run verify` (§11 Scaffolder row)
 - [ ] `--tiers` / `--caps` / `--ui` / `--storage` flag expansion + fragment overlays (§16.6)
 - [ ] FSA-granted directory backend for the web host (write to a user-picked local folder — Chromium) — §5.2
-- [ ] `dlc doctor` — automate the prerequisite/preflight assessment (per-tier readiness) — [`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md)
+- [→] `dlc doctor` — **promoted to Phase B2** (CLI host): the command form of preflight, assessing per-tier readiness — [`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md)
 
 ### Dispatch / distributed (Phase 5 territory)
 - [ ] Protobuf **envelope** + multi-handler routing + explicit registration (§8, §10 Decision 10)

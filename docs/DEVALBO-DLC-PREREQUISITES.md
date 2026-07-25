@@ -14,7 +14,8 @@ _Created 2026-07-25._
 `devbox shell` pins and provisions the rest (Go, TinyGo, wasm tooling, buf, wasmtime, Node/jco) at exact
 versions. So the real prerequisite list is short:
 
-> **Install yourself:** Nix · Devbox · git · a modern browser. (Optional: direnv.)
+> **Install yourself:** **Devbox** · git · a modern browser — **Devbox auto-installs Nix** on first
+> `devbox shell`. (Optional: direnv.)
 > **Everything else:** provisioned by `devbox.json` — do **not** install it manually.
 
 This is scoped to the **bootstrap** (CLI + Web tiers). The embedded toolchain (PlatformIO, board SDKs) is
@@ -27,13 +28,18 @@ This is scoped to the **bootstrap** (CLI + Web tiers). The embedded toolchain (P
 | Tool | Why | Install | Min |
 | --- | --- | --- | --- |
 | **git** | source control | OS package / Xcode CLT | any recent |
-| **Nix** | the package engine under Devbox | [Determinate Systems installer](https://install.determinate.systems/) (`curl --proto '=https' -sSf -L https://install.determinate.systems/nix \| sh -s -- install`) | 2.18+ |
-| **Devbox** (Jetify) | pins + provisions the toolchain from `devbox.json` | `curl -fsSL https://get.jetify.com/devbox \| bash` | recent |
+| **Devbox** (Jetify) | pins + provisions the toolchain; **auto-installs Nix** on first run | [installing-devbox](https://www.jetify.com/docs/devbox/installing-devbox) | recent |
 | **A modern browser** | the Web tier (OPFS) | Chrome / Edge / Firefox / Safari (current) | OPFS-capable |
-| direnv *(optional)* | auto-loads the devbox shell on `cd` | OS package | — |
+| direnv *(optional)* | **convenience only** — auto-activates the env on `cd` instead of `devbox shell` | OS package | — |
 
-**Node.js is *not* a required system install** — Devbox provides the Node used for jco/Vite. A system Node
-is fine to have but isn't used by the pinned build.
+**You never install Nix or Node.js by hand.** Devbox installs **Nix** (its underlying engine) on first
+`devbox shell`, and provides the **Node** used for jco/Vite. (A system Node is fine to have but isn't used
+by the pinned build. If Devbox's Nix auto-install ever fails, the [Determinate
+installer](https://install.determinate.systems/) is the fallback.)
+
+**direnv is optional and not needed.** With it, `cd`-ing into the project auto-activates the Devbox
+environment; without it, you just run `devbox shell`. Skip it unless you want that shortcut — the preflight
+shows it as `○` (optional), not `✗`.
 
 ---
 
@@ -90,13 +96,15 @@ exits non-zero if a system prerequisite is missing. Sample output on a fresh mac
 ```
 System prerequisites (install yourself):
   git                ✓  git version 2.50.1
-  nix                ✗  install: https://install.determinate.systems/
-  devbox             ✗  install: https://get.jetify.com/devbox
+  devbox             ✗  install: https://www.jetify.com/docs/devbox/installing-devbox
+
+Managed by Devbox (diagnostic — you never install this by hand):
+  nix                ✗  Devbox installs this on first 'devbox shell'
 ...
-→ NOT READY: install the 2 missing system prerequisite(s) above.
+→ NOT READY: install the 1 missing system prerequisite(s) above.
 ```
 
-**Readiness rule of thumb:** if **git + Nix + Devbox** are present, you're ready — `devbox shell` handles
+**Readiness rule of thumb:** if **git + Devbox** are present, you're ready — `devbox shell` handles
 the rest. A modern browser covers the Web tier.
 
 ### Assessment output legend
@@ -104,8 +112,11 @@ the rest. A modern browser covers the Web tier.
 - **Devbox rows ✗ outside the shell** → *expected*; they appear once you `devbox shell`.
 - **Devbox rows ✗ inside the shell** → a `devbox.json` gap — fix the manifest, not your machine.
 
-Automating this is a task: **`dlc doctor`** (and a `make doctor` target) will run the same checks and
-report per-tier readiness (see the tasks doc).
+**Two layers.** `scripts/preflight.sh` is **Layer 0** — a pure-bash, pre-toolchain gate that runs *before*
+a `dlc` binary exists (it answers "can this machine even build `dlc`?"). Once `dlc` exists, **`dlc doctor`**
+is **Layer 1** — the command form of this check, run against the `dlc` binary itself, reporting richer
+per-tier readiness. `dlc doctor` is a **Phase B2** task (see [tasks](./DEVALBO-DLC-GO-TASKS.md), plan
+§16.7); L0 stays as the bootstrap gate that gets you a first `dlc`. Both share a `make doctor` target.
 
 ---
 
