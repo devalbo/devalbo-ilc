@@ -56,7 +56,12 @@ fi
 
 miss_tool=0
 for t in go tinygo wit-bindgen-go wasm-tools buf wasmtime node jco protoc-gen-go-lite protoc-gen-es-lite; do
-  chk "$t" "$t --version" "provisioned by devbox.json" || miss_tool=$((miss_tool+1))
+  # Most tools take `--version`; go and tinygo use a `version` subcommand instead.
+  case "$t" in
+    go|tinygo) vcmd="$t version" ;;
+    *)         vcmd="$t --version" ;;
+  esac
+  chk "$t" "$vcmd" "provisioned by devbox.json" || miss_tool=$((miss_tool+1))
 done
 
 echo

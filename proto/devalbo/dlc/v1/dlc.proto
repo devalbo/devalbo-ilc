@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package devalbo.dlc;
+package devalbo.dlc.v1;
 
-import "common.proto";
+import "devalbo/ilc/v1/common.proto";
 
-option go_package = "github.com/devalbo/devalbo-ilc/gen/go/dlc";
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1;dlcv1";
 
 // Bootstrap command messages for `dlc` (App #1): new, export-fs, import-fs.
 // These are the TInput/TOutput shapes the CLI shim + web host map onto. Later
@@ -20,15 +20,17 @@ message NewRequest {
   string storage = 6;        // split | none
 }
 message NewResult {
-  string path = 1;               // where the project was scaffolded
-  repeated string files = 2;     // files written
+  string path = 1;                        // where the project was scaffolded
+  repeated string files = 2;              // files written
+  devalbo.ilc.v1.IlcError error = 3;      // set when success is false
 }
 
 // Filesystem export/import — the first-class platform primitive (§7.3).
 enum BundleFormat {
-  BUNDLE_FORMAT_BFT = 0;   // single human-readable JSON (default)
-  BUNDLE_FORMAT_ZIP = 1;
-  BUNDLE_FORMAT_PROTO = 2;
+  BUNDLE_FORMAT_UNSPECIFIED = 0; // treat as BFT (the default)
+  BUNDLE_FORMAT_BFT = 1;         // single human-readable JSON
+  BUNDLE_FORMAT_ZIP = 2;
+  BUNDLE_FORMAT_PROTO = 3;
 }
 
 message ExportFsRequest {

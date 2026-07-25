@@ -27,15 +27,15 @@ Reference tiers only for bootstrap: **CLI + Web**. (Desktop, embedded, and the n
 
 ## Phase B0 — Repo migration & scaffolding (§2, §12 Phase 0a)
 
-- [ ] Tag the current state: `git tag phase1-tri-language` (recoverable checkpoint)
-- [ ] Remove retired tri-language machinery: `compiler/`, `packages/ilc-{ts,py,rs}/`, root `Cargo.toml` + `Cargo.lock`
-- [ ] Remove `wit/environment.wit` and `wit/console-io.wit` (console is now WASI stdio — Decision 20)
+- [x] Tag the current state: `git tag phase1-tri-language` (recoverable checkpoint)
+- [x] Remove retired tri-language machinery: `compiler/`, `packages/ilc-{ts,py,rs}/`, root `Cargo.toml` + `Cargo.lock`
+- [x] Remove `wit/environment.wit` and `wit/console-io.wit` (console is now WASI stdio — Decision 20)
 - [x] Create `go.mod` — `module github.com/devalbo/devalbo-ilc`, `go 1.23` (TinyGo-compatible deps only in `engine/`)
 - [x] Create the **flat bootstrap** directory skeleton — each major folder carries a **thin boundary README** (what belongs / what must NOT / link to plan §). Stay flat; defer the `platform/`+`apps/` split (§16.6) to App #2. Folders: `wit/ proto/ engine/ hosts/{native,web}/ frontend/ templates/ spikes/ scripts/`; `gen/` gitignored
 - [x] Refresh `.gitignore` for Go/wasm/devbox: `/gen/`, `*.wasm`, `.devbox/`, `node_modules/`, `frontend/dist/`, `/target/` (transitional)
 - [x] Rewrite `README.md` → real project README (present-tense), points at the Go plan / tasks / prereqs / test-steps; tri-language content removed
-- [ ] `devbox.json` core devshell (§4.1): Go, TinyGo, `wit-bindgen-go`, `wasm-tools`, buf + `protoc-gen-go-lite` + `protoc-gen-es-lite`, `wasmtime`, `nodejs`
-- [ ] `make doctor` preflight — assert git/Nix/Devbox present + the devbox toolchain resolves; this is the **Layer 0** pre-toolchain gate (pure bash, no `dlc` needed) that gets you to a first `dlc`, later complemented by `dlc doctor` (Layer 1, Phase B2) ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
+- [x] `devbox.json` core devshell (§4.1): Go, TinyGo, `wit-bindgen-go`, `wasm-tools`, buf + `protoc-gen-go-lite` + `protoc-gen-es-lite`, `wasmtime`, `nodejs` — authored (init_hook installs the go/npm-delivered plugins); *provisioning verified under `devbox shell` = T-B0.2, pending*
+- [x] `make doctor` preflight — assert git/Nix/Devbox present + the devbox toolchain resolves; this is the **Layer 0** pre-toolchain gate (pure bash, no `dlc` needed) that gets you to a first `dlc`, later complemented by `dlc doctor` (Layer 1, Phase B2) ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
 
 **Exit:** clean working tree matching §3 (CLI+web subset); `devbox shell` provisions the toolchain; `make doctor` green.
 
@@ -59,10 +59,10 @@ Do these *before* committing to the build shape; any red spike reshapes the plan
 
 ### Contract & codegen
 - [x] `wit/ilc.wit` — bootstrap world (Console via WASI stdio + Filesystem via WASI, provided by the target/host); `export execute-cli(args) -> command-result` (§6)
-- [x] `proto/common.proto` — `IlcError` taxonomy; `proto/dlc.proto` — `new` / `export-fs` / `import-fs` messages
+- [x] `proto/devalbo/ilc/v1/common.proto` — `IlcError` taxonomy; `proto/devalbo/dlc/v1/dlc.proto` — `new` / `export-fs` / `import-fs` messages (versioned packages, idiomatic buf layout)
 - [x] `proto/buf.yaml` + `proto/buf.gen.yaml` (go-lite → `gen/go`, es-lite → `gen/ts`); `make gen` wires wit-bindgen-go + buf
-- [ ] **Validate under devbox:** `make gen` runs clean (`buf lint` + generate); shakes out `buf.gen.yaml` opts + go_package (Spike 2)
-- [ ] `wit-bindgen-go generate` produces the capability bindings in `gen/go` (Spike 1)
+- [x] **Validate under devbox:** `make gen` runs clean (`buf lint` + generate); shakes out `buf.gen.yaml` opts + go_package (Spike 2) — verified: TinyGo 0.41.1, buf `STANDARD` lint green with the versioned layout, go-lite + es-lite output in distinct `devalbo/*/v1` dirs
+- [x] `wit-bindgen-go generate` produces the capability bindings in `gen/go` (Spike 1) — `gen/go/devalbo/ilc/{engine,types}/`
 
 ### Engine (Go → wasm; business logic only)
 - [ ] `engine/main.go` — implements `execute-cli`; reflection-free dispatch (route table + go-lite decode)

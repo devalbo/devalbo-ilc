@@ -19,7 +19,8 @@ for d in engine hosts/native hosts/web wit proto frontend templates spikes scrip
 
 echo; echo "T-B0.4 — core files present:"
 for f in go.mod devbox.json Makefile .gitignore scripts/preflight.sh \
-         wit/ilc.wit proto/common.proto proto/dlc.proto proto/buf.yaml proto/buf.gen.yaml; do exists "$f"; done
+         wit/ilc.wit proto/devalbo/ilc/v1/common.proto proto/devalbo/dlc/v1/dlc.proto \
+         proto/buf.yaml proto/buf.gen.yaml; do exists "$f"; done
 
 echo; echo "boundary READMEs present:"
 for r in engine hosts wit proto templates frontend spikes scripts; do exists "$r/README.md"; done

@@ -124,7 +124,7 @@ nothing is lost. **This section is plan-only; nothing here is executed yet.**
 
 ### 2.2 New scaffolding to create (the target is §3)
 
-`go.mod` · `wit/ilc.wit` · `proto/{common,record,display}.proto` + `buf.yaml` / `buf.gen.yaml` ·
+`go.mod` · `wit/ilc.wit` · `proto/devalbo/{ilc,dlc,<app>}/v1/*.proto` + `buf.yaml` / `buf.gen.yaml` ·
 `engine/` · `gen/` (gitignored) · `hosts/{native,desktop,web,embedded}/` (embedded carries a
 `platformio.ini`) · `frontend/` (React + Vite) · `Makefile` · `devbox.json`.
 
@@ -155,10 +155,10 @@ hosts/desktop/build/    # wails output
 /
 ├── wit/
 │   └── ilc.wit                     # the capability world (§6)
-├── proto/
-│   ├── common.proto                # shared types + errors
-│   ├── record.proto                # notes/list domain (pilot)
-│   ├── display.proto               # DrawList + WidgetTree
+├── proto/                          # versioned packages in matching dirs (idiomatic buf; STANDARD lint)
+│   ├── devalbo/ilc/v1/common.proto # shared types + errors (IlcError)
+│   ├── devalbo/dlc/v1/dlc.proto    # dlc commands (new / export-fs / import-fs)
+│   ├── devalbo/<app>/v1/…          # per-app domain, e.g. record.proto / display.proto (pilot)
 │   └── buf.yaml / buf.gen.yaml      # local buf (lint + breaking=WIRE_JSON; gen go/ts)
 ├── engine/                         # THE SHARED ENGINE (Go, → wasm)  ── business logic only
 │   ├── main.go                     # implements exported execute-cli; imports generated WIT + proto
