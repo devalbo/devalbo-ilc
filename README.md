@@ -20,7 +20,7 @@ Phase 1 defines **`ConsoleIo`** (logger output + stdin) and minimal **`Environme
 | [`packages/ilc-ts`](packages/ilc-ts/) | TypeScript SDK + hosts |
 | [`packages/ilc-py`](packages/ilc-py/) | Python SDK + hosts |
 | [`packages/ilc-rs`](packages/ilc-rs/) | Rust SDK + hosts |
-| [`docs/PHASE1.md`](docs/PHASE1.md) | Phase 1 checklist and decisions |
+| [`docs/archives/PHASE1.md`](docs/archives/PHASE1.md) | Phase 1 checklist and decisions |
 
 ## WIT (Phase 1)
 

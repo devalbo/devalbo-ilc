@@ -7,7 +7,7 @@ authoritative ILC direction in [`DEVALBO-ILC-PLAN.md`](./DEVALBO-ILC-PLAN.md) (e
 
 _Review date: 2026-07-24._
 
-> **Status:** This review fed into **[`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md)** (authoritative).
+> **Status:** This review fed into **[`DEVALBO-ILC-GO-PLAN.md`](../DEVALBO-ILC-GO-PLAN.md)** (authoritative).
 
 ---
 

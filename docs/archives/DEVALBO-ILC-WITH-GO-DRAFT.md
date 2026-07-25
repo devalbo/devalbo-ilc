@@ -1,5 +1,5 @@
 > **Status (2026-07-24):** First Go-direction draft (a build-agent prompt). **Superseded by
-> [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md)** — kept as history. Reviewed in
+> [`DEVALBO-ILC-GO-PLAN.md`](../DEVALBO-ILC-GO-PLAN.md)** — kept as history. Reviewed in
 > [`DEVALBO-ILC-WITH-GO-FEEDBACK.md`](./DEVALBO-ILC-WITH-GO-FEEDBACK.md).
 
 Here is the comprehensive build plan, formatted as a direct prompt that you can copy and paste to an AI build agent (like Devin, Cursor, or Aider).

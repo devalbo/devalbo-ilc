@@ -1,9 +1,9 @@
 # DEVALBO-ILC — Go Plan
 
 A Go-centric re-plan of ILC (Inverted Line of Command). Supersedes the tri-language / Rust-lead
-direction in [`DEVALBO-ILC-PLAN.md`](./DEVALBO-ILC-PLAN.md) for the purpose of this build; incorporates
-[`DEVALBO-ILC-WITH-GO-DRAFT.md`](./DEVALBO-ILC-WITH-GO-DRAFT.md),
-[`DEVALBO-ILC-WITH-GO-2-DRAFT.md`](./DEVALBO-ILC-WITH-GO-2-DRAFT.md) (split-storage / WASI-filesystem /
+direction in [`DEVALBO-ILC-PLAN.md`](./archives/DEVALBO-ILC-PLAN.md) for the purpose of this build; incorporates
+[`DEVALBO-ILC-WITH-GO-DRAFT.md`](./archives/DEVALBO-ILC-WITH-GO-DRAFT.md),
+[`DEVALBO-ILC-WITH-GO-2-DRAFT.md`](./archives/DEVALBO-ILC-WITH-GO-2-DRAFT.md) (split-storage / WASI-filesystem /
 SQLite-index / events), and the design interview recorded 2026-07-24.
 
 _Plan date: 2026-07-24._

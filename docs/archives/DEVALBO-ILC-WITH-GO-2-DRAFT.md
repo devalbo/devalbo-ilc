@@ -1,5 +1,5 @@
 > **Status (2026-07-24):** Second Go-direction draft — adds the split-storage / WASI-filesystem /
-> SQLite-index / events model. **Superseded by [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md)** —
+> SQLite-index / events model. **Superseded by [`DEVALBO-ILC-GO-PLAN.md`](../DEVALBO-ILC-GO-PLAN.md)** —
 > kept as history.
 
 You are completely right — I’ve been giving you fragments across multiple messages, which makes for a terrible prompt for an AI agent. The interaction between Go's `os` package, the WASI shim, OPFS, and the SQLite index is the most complex part of this architecture and needs to be perfectly specified in one place.
