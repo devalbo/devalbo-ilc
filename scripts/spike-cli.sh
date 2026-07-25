@@ -8,7 +8,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 SPIKE=spikes/cli
-WASM="$SPIKE/engine.component.wasm"
+WASM="$SPIKE/engine.component.wasm"     # wasip2 component (the current/gating target)
+WASM1="$SPIKE/engine.core.wasm"         # wasip1 core (Portable/WAMR-shaped size probe)
 RESULTS=()
 lean_ok=0
 
@@ -23,7 +24,7 @@ run_variant() {
   if [ -n "$tags" ]; then printf ' (-tags %s)' "$tags"; fi
   printf ' ==\n'
 
-  local compile=no matrix=no size='—'
+  local compile=no matrix=no size='—' size1='—'
   local build_log
   build_log=$(mktemp)
   if tinygo build -target=wasip2 "${tag_args[@]}" \
@@ -40,12 +41,21 @@ run_variant() {
       matrix=no
     fi
   else
-    echo "  compile FAILED:"
+    echo "  compile FAILED (wasip2):"
     sed 's/^/    /' "$build_log" | tail -n 40
   fi
+
+  # Portable/WAMR-shaped size: the same package built as a wasip1 core module.
+  # Embedded/WAMR is a deferred tier — this is a forward-looking size probe, not a
+  # gate. wasip1 takes no WIT flags (it isn't a component).
+  if tinygo build -target=wasip1 "${tag_args[@]}" \
+      -o "$WASM1" "./$SPIKE" >"$build_log" 2>&1; then
+    size1=$(wc -c <"$WASM1" | tr -d ' ')
+  fi
   rm -f "$build_log"
-  RESULTS+=("$name|$compile|$matrix|$size")
-  printf '  → compile=%s matrix=%s size=%s\n' "$compile" "$matrix" "$size"
+
+  RESULTS+=("$name|$compile|$matrix|$size|$size1")
+  printf '  → compile=%s matrix=%s wasip2=%s wasip1=%s\n' "$compile" "$matrix" "$size" "$size1"
 }
 
 cd "$SPIKE" && npm install --silent --no-audit --no-fund
@@ -62,11 +72,11 @@ run_variant goarg  cligoarg  heavy
 echo
 echo "-------------------------------------------------"
 echo "Spike 4 bake-off summary"
-printf '%-8s %-8s %-8s %s\n' "variant" "compile" "matrix" "wasm bytes"
-printf '%-8s %-8s %-8s %s\n' "--------" "-------" "------" "----------"
+printf '%-8s %-8s %-8s %-13s %s\n' "variant" "compile" "matrix" "wasip2 bytes" "wasip1 core"
+printf '%-8s %-8s %-8s %-13s %s\n' "--------" "-------" "------" "------------" "-----------"
 for row in "${RESULTS[@]}"; do
-  IFS='|' read -r name compile matrix size <<<"$row"
-  printf '%-8s %-8s %-8s %s\n' "$name" "$compile" "$matrix" "$size"
+  IFS='|' read -r name compile matrix size size1 <<<"$row"
+  printf '%-8s %-8s %-8s %-13s %s\n' "$name" "$compile" "$matrix" "$size" "$size1"
 done
 echo "-------------------------------------------------"
 

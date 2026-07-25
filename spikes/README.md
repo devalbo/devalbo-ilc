@@ -270,18 +270,22 @@ bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).
 
 ### Bake-off (TinyGo → harness, 17-case matrix)
 
-Matrix run is wasip2 → jco → Node. Sizes also measured as wasip1 core (portable-shaped; same
-`spikes/cli` package compiles under both targets).
+Matrix run is wasip2 → jco → Node. `make spike-cli` also builds each variant as a **wasip1 core module**
+(same `spikes/cli` package, `-target=wasip1`, no WIT flags) and records its size — the Portable/WAMR-shaped
+number below. That tier is deferred, so wasip1 is a **size probe, not a gate**; the ffcli decision rests on
+the wasip2 column alone.
+
+Sizes are a representative `make spike-cli` run (2026-07-25); TinyGo output varies a few hundred bytes.
 
 | Variant | Tag | Compile | Matrix | wasip2 component | wasip1 core |
 | --- | --- | ---: | ---: | ---: | ---: |
-| stdlib `flag` | (default) | yes | yes | 1 050 185 | 837 777 |
-| `ff/v3/ffcli` | `cliffcli` | yes | yes | 1 362 722 | 1 232 811 |
-| hand-rolled | `clihand` | yes | yes | **592 883** | **497 389** |
-| `google/subcommands` | `clisub` | yes | no | 1 158 729 | — |
-| `spf13/cobra` | `clicobra` | yes | no | 2 519 247 | — |
-| `alecthomas/kong` | `clikong` | yes | no (panic) | 2 597 633 | — |
-| `alexflint/go-arg` | `cligoarg` | yes | **yes** | 1 512 511 | 1 404 397 |
+| stdlib `flag` | (default) | yes | yes | 1 049 921 | 837 513 |
+| `ff/v3/ffcli` | `cliffcli` | yes | yes | 1 361 930 | 1 232 019 |
+| hand-rolled | `clihand` | yes | yes | **592 619** | **497 125** |
+| `google/subcommands` | `clisub` | yes | no | 1 158 502 | 947 320 |
+| `spf13/cobra` | `clicobra` | yes | no | 2 517 699 | 2 478 311 |
+| `alecthomas/kong` | `clikong` | yes | no (panic) | 2 597 017 | 2 562 221 |
+| `alexflint/go-arg` | `cligoarg` | yes | **yes** | 1 511 895 | 1 403 781 |
 
 ### Decision 22 / 25 picks
 
