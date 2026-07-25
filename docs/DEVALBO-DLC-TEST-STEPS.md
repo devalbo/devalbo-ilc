@@ -103,7 +103,7 @@ ls gen/go gen/ts                     # bindings present
 Pass: `gen/` populated, clean lint — validates the `wit/` + `proto/` drafts (shakes out `buf.gen.yaml`
 opts + `go_package`).
 
-**6 — Spikes** · ⚪ needs spike code · T-B1.1–5 · ▶ **auto:** `make test-b1` → `scripts/test-b1.sh` (pending)
+**6 — Spikes** · 🟡 T-B1.1 ✅, T-B1.2–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
 ```bash
 make test-b1                         # component / proto / opfs / cli / async
 ```
@@ -189,17 +189,23 @@ red, nothing downstream is trustworthy.
 Each de-risking spike becomes a **standing test**: a minimal, self-contained proof of one load-bearing
 assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnable as a regression.
 
-### T-B1.1 — Component round-trip (Spike 1)
+### T-B1.1 — Component round-trip (Spike 1) — ✅ GREEN
 - **Goal:** the same engine builds to a WASM component and runs under jco.
 - **Builds on:** T-B0.2.
-- **Steps:**
-  1. Trivial engine: export `execute-cli(args) -> string` returning a constant (e.g. `"ok:"+args[0]`).
-  2. `tinygo build -target=wasip1 -o engine.core.wasm ./spikes/component`
-  3. `wasm-tools component new engine.core.wasm --adapt wasi_snapshot_preview1.wasm -o engine.component.wasm`
-  4. `jco transpile engine.component.wasm -o out/`
-  5. Node harness imports `out/`, calls `executeCli(["hi"])`.
-- **Pass:** returns `"ok:hi"`; no adapter/transpile errors.
-- **Automate as:** `spikes/component/` + a Node test; `make test-b1`.
+- **Steps (as implemented — `make spike-component`):**
+  1. Trivial engine (`spikes/component/main.go`): sets `engine.Exports.ExecuteCli` to return `command-result{success, output:"ok:"+args[0]}`.
+  2. `tinygo build -target=wasip2 --wit-package ./wit --wit-world engine -o engine.component.wasm ./spikes/component` — emits a **component directly**.
+  3. `jco transpile engine.component.wasm -o out/` (deps resolve locally via `spikes/component/package.json`).
+  4. Node harness (`harness.mjs`) imports `out/`, calls `executeCli(["hi"])`, asserts `success===true && output==="ok:hi"`.
+- **Pass:** prints `PASS: ok:hi`; no build/transpile/runtime errors. ✅ verified under `devbox run make test-b1`.
+- **Automate as:** `spikes/component/` + `harness.mjs`; `make spike-component` / `make test-b1`.
+
+- **Spike findings (why the recipe differs from the original wasip1 sketch):**
+  - **wasip2, not wasip1+adapter.** The `tinygo -target=wasip1` → `wasm-tools component new --adapt wasi_snapshot_preview1` path needs a guest `cabi_realloc`. The upstream `go.bytecodealliance.org/cm x/cabi` package that supplies it is unimportable at the version our bindings need (its `v0.7.0` module `go.mod` mis-declares its path), and a hand-vendored `cabi_realloc` crashes on init (`wasmExportCheckRun`/`unreachable`) because the adapter calls it before `_initialize`. TinyGo's **`-target=wasip2`** supplies `cabi_realloc` and wires `_initialize` for reactors (TinyGo ≥0.34; we're on 0.41), so we adopt it. This drops the adapter download **and** the two `wasm-tools` steps.
+  - **The world must declare its WASI imports.** `world engine` now `include`s `wasi:cli/imports@0.2.0`; the TinyGo runtime imports stdio/clocks/filesystem/random/environment even for a trivial program, and `component new` fails to encode without them.
+  - **WASI WIT is vendored.** TinyGo does **not** ship the WASI `.wit`. `wit/deps/` is populated with the six `wasi:*@0.2.0` packages via `wkg wit fetch` (from the parent of `wit/`) and **committed** so the build is reproducible without `wkg`. Re-fetch with `wkg wit fetch` if the world's imports change.
+  - **`GOFLAGS=-buildvcs=false`** (set in `devbox.json` init_hook): git is non-functional inside the devbox pure env, so Go's VCS stamping aborts the build without it.
+  - **npm deps are local to the spike.** ESM ignores `NODE_PATH`, so `spikes/component/package.json` pulls `jco` (which brings `@bytecodealliance/preview2-shim` transitively) into a local `node_modules` the transpiled output can resolve.
 
 ### T-B1.2 — protobuf-go-lite under TinyGo, cross-decoded by es-lite (Spike 2)
 - **Goal:** reflection-free protobuf works in the TinyGo engine **and** round-trips to the web host.

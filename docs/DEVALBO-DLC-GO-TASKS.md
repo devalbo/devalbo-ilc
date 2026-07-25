@@ -45,13 +45,18 @@ Reference tiers only for bootstrap: **CLI + Web**. (Desktop, embedded, and the n
 
 Do these *before* committing to the build shape; any red spike reshapes the plan.
 
-- [ ] **Spike 1 — component round-trip:** TinyGo `-target=wasip1` → `wasm-tools` adapter → component; jco transpiles + runs a trivial `execute-cli` returning a value
-- [ ] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip compiles + runs under `tinygo -target=wasip1`; `protobuf-es-lite` decodes the same bytes in JS
+**Standing rule — document findings as part of the spike.** Every spike's findings go in `spikes/README.md`
+(one section per spike), capturing *what worked · what we assumed and didn't · why · implications*. A finding that contradicts the
+plan **updates the plan** (Spike 1 → wasip2-direct is the reference example). The writeup is a deliverable,
+not optional — it's what turns a throwaway spike into durable regression + design knowledge.
+
+- [x] **Spike 1 — component round-trip:** TinyGo **`-target=wasip2`** (native Component Model) → component; jco transpiles + runs a trivial `execute-cli` returning `"ok:hi"`. `spikes/component/`, `make spike-component` / `make test-b1`. **Pivoted off the wasip1+`wasm-tools` adapter path** — the guest `cabi_realloc` it requires is unimportable (`cm x/cabi` module mis-declared) and a hand-vendored one crashes pre-`_initialize`; wasip2 has TinyGo supply `cabi_realloc`+`_initialize`. World now `include`s `wasi:cli/imports@0.2.0`; WASI WIT vendored to `wit/deps/` via `wkg wit fetch` (see [test-steps T-B1.1 findings](./DEVALBO-DLC-TEST-STEPS.md))
+- [ ] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip compiles + runs under `tinygo -target=wasip2`; `protobuf-es-lite` decodes the same bytes in JS; **findings → `spikes/README.md` (Spike 2 section)**
 - [ ] **Spike 3 — OPFS filesystem:** `setPreopens({'/': opfsRoot})` lets the engine's `os.WriteFile` persist to OPFS and survive a page reload
 - [ ] **Spike 4 — kong boundary:** kong (standard Go, native host) parses argv → proto `TInput` → hands bytes to the wasmtime-hosted engine (confirms kong stays host-side, engine reflection-free — Decision 22)
 - [ ] **Spike 5 — async in browser:** an engine capability call that "blocks" works under jco via TinyGo's Asyncify (no event-loop deadlock)
 
-**Exit:** all five green (or the plan is adjusted with findings recorded).
+**Exit:** all five green, **each with a findings section in `spikes/README.md`**; any plan-contradicting finding folded back into the plan (as Spike 1 did).
 
 ---
 
@@ -163,6 +168,7 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] Scaffolder verify in CI: `dlc new … → devbox run verify` (§11 Scaffolder row)
 - [ ] `--tiers` / `--caps` / `--ui` / `--storage` flag expansion + fragment overlays (§16.6)
 - [ ] FSA-granted directory backend for the web host (write to a user-picked local folder — Chromium) — §5.2
+- [ ] **ABI-mode toggle at setup** (§5.6, Decision 25): `dlc new` derives portable byte-ABI vs rich Component-Model ABI from the `tiers` (`--wamr` forces portable); scaffold the matching capability-boundary + build targets (wasip1 core seam only when portable); a lint/check that keeps a portable-mode engine core-wasm-safe
 - [→] `dlc doctor` — **promoted to Phase B2** (CLI host): the command form of preflight, assessing per-tier readiness — [`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md)
 
 ### Dispatch / distributed (Phase 5 territory)

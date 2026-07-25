@@ -11,6 +11,7 @@
   "shell": {
     "init_hook": [
       "export GOBIN=\"$PWD/.devbox/gobin\"",
+      "export GOFLAGS='-buildvcs=false -mod=mod'",
       "export NPM_CONFIG_PREFIX=\"$PWD/.devbox/npm-global\"",
       "export PATH=\"$GOBIN:$NPM_CONFIG_PREFIX/bin:$PWD/node_modules/.bin:$PATH\"",
       "command -v wit-bindgen-go   >/dev/null || go install go.bytecodealliance.org/cmd/wit-bindgen-go@latest",

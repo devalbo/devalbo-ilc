@@ -18,6 +18,12 @@ interface types {
 }
 
 world engine {
+  // The TinyGo wasip2 runtime imports the standard WASI interfaces (stdio,
+  // clocks, filesystem, random, environment). The world must declare them so
+  // `component new` can satisfy the core module's imports; the wit/deps/ WASI
+  // packages are vendored via `wkg wit fetch`.
+  include wasi:cli/imports@0.2.0;
+
   use types.{command-result};
 
   // The custom PERSISTENT entry — callable many times on a live instance (reactive UI).

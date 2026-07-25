@@ -1,0 +1,9 @@
+{
+  "name": "spike-component",
+  "private": true,
+  "type": "module",
+  "description": "Spike 1 (T-B1.1) — component round-trip harness. jco brings @bytecodealliance/preview2-shim transitively so the transpiled WASI imports resolve locally.",
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.25.2"
+  }
+}

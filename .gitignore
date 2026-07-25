@@ -7,6 +7,9 @@
 # WASM build artifacts
 *.wasm
 
+# Spike generated output (jco transpile, etc.)
+spikes/**/out/
+
 # Go
 /bin/
 

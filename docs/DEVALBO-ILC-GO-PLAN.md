@@ -75,7 +75,7 @@ set, or fewer tiers. The rest are platform invariants.
 | --- | --- | --- |
 | 1 | Implementation language | **Go** for all business logic (the engine); host glue may be **TS** (web) or **C** (ESP32-S3) — neither carries business logic |
 | 2 | Runtime substrate | **Component Model** on web/desktop/CLI (jco / wasmtime); **core WASM + WASI Preview 1 + native host functions** on WAMR embedded — WAMR has **no** CM / WASI-0.2 yet (tracked divergence, §5.3) |
-| 3 | Artifact model | Shared unit = **WASI-p1 core module** (`engine.core.wasm`); wasip2 runtimes componentize it via the **preview1 adapter**; WAMR runs the core module directly; RP2040 links native. Per-platform host (the "two bits"). |
+| 3 | Artifact model | **Component tiers (web/desktop/CLI): TinyGo `-target=wasip2` → a WASM component directly** — one shared `engine.component.wasm` (validated by Spike 1; the `wasip1`+adapter path is abandoned — §5.3). **Embedded/WAMR** runs core WASM, not a component — its build is revisited when embedded lands; RP2040 links native. Per-platform host (the "two bits"). |
 | 4 | Capability boundary | **Neutral WIT world** — polyglot-capable; Rust/C-via-WASI can interop |
 | 5 | Embedded floor | **Go/WASM is the floor** (no Rust `no_std` tier); Rust-via-WASI still welcome |
 | 6 | FileSystem | **WASI standard** via Go `os`; host `setPreopens` the root — *not* a custom capability |
@@ -97,6 +97,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 22 | Go CLI framework | **kong** (`alecthomas/kong`) — the Typer analog — **host-side only (standard Go)** for `dlc` + the per-app CLI shim (parse → typed struct → proto `TInput`). **Not compiled into the TinyGo engine** — kong is reflection-heavy and TinyGo's `reflect` is partial (no `encoding/json`). The **engine's `execute-cli` dispatch is reflection-free / TinyGo-safe** (generated route table + protobuf-go-lite, or a minimal `argv→TInput` mapper). Bind-don't-supplant: cobra / urfave / go-arg (all host-side). |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
 | 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
+| 25 | ABI mode (WAMR toggle) | Targeting **WAMR/embedded** is a **setup-time** choice (`dlc new` / manifest `tiers`) that fixes the capability-boundary ABI: **on → portable byte ABI** (protobuf over `(ptr,len)`; also builds the wasip1 core; port-ready rules — §5.6); **off → rich Component-Model ABI** (rich WIT types, wasip2 only). Disk/wire stays protobuf either way. |
 
 ---
 
@@ -189,7 +190,7 @@ hosts/desktop/build/    # wails output
 | Capability bindings | **`wit-bindgen-go`** (WIT → Go), standard component tooling |
 | Proto codegen (Go) | **`buf`** + **`protoc-gen-go-lite`** (Aperture Robotics) — **reflection-free**, TinyGo-safe; one generator emits **binary + canonical JSON + size/clone/equal**. Replaces `protoc-gen-go` entirely (do **not** run the official generator). |
 | Proto codegen (TS) | **`protoc-gen-es-lite`** (`@aptre/protobuf-es-lite`) — matching reflection-free TS/JS, built to pair with `protobuf-go-lite` (same maintainer). Web host only. |
-| Engine → wasm | **TinyGo** — `-target=wasip1` core module (the shared unit); componentize for wasmtime/jco via the **`wasm-tools` preview1 adapter** (or `-target=wasip2` directly). WAMR runs the p1 core module as-is. |
+| Engine → wasm | **TinyGo `-target=wasip2`** → a WASM component in one shot (validated — Spike 1; TinyGo supplies `cabi_realloc` + wires `_initialize`). World `include`s `wasi:cli/imports`; WASI WIT deps vendored under `wit/deps/`. The `wasip1`+`wasm-tools` **adapter path is abandoned** (fragile — §5.3). |
 | Web instantiation | **`@bytecodealliance/jco`** transpile + `preview2-shim` (WASI/OPFS) |
 | Web SQLite | **`@sqlite.org/sqlite-wasm`** (OPFS) |
 | Native/desktop/CLI runtime | **wasmtime** (Go embedding) + `modernc.org/sqlite` + **Wails v2** |
@@ -257,11 +258,11 @@ image; Devbox ships a reproducible recipe that also runs **natively** on the dev
    + TS host  + Go host       + Go host      + C host         + C/Go host       no wasm; engine linked in)
 ```
 
-- **The engine imports only the ILC world + standard WASI, and is built once as a WASI-p1 core module**
-  (`engine.core.wasm`). wasip2 runtimes (jco web, wasmtime desktop/CLI) run it **componentized via the
-  preview1 adapter**; **WAMR** (ESP32-S3 / RP2350) runs the **core module directly** — no Component Model,
-  so capabilities bind as WAMR native functions. What we build per tier and where interfaces differ is
-  tracked in **§5.3**.
+- **The engine imports only the ILC world + standard WASI, and builds to a WASM component directly with
+  TinyGo `-target=wasip2`** (validated — Spike 1). The *same* `engine.component.wasm` runs under jco (web)
+  and wasmtime (desktop/CLI). **WAMR** (ESP32-S3 / RP2350) can't run a component — it runs core WASM, so
+  capabilities bind as WAMR native functions and its build is revisited when embedded lands. What we build
+  per tier and where interfaces differ is tracked in **§5.3**.
 - **RP2040 is the one exception (Decision 18):** 264 KB RAM is too tight for a comfortable WASM runtime,
   so the *same Go engine source* is compiled **natively** with TinyGo and linked directly against a native
   host. One source, per-tier build — L3 everywhere it fits, native fallback where it doesn't.
@@ -284,19 +285,21 @@ provides a bounded, host-selected filesystem root. That is the entire FileSystem
 
 ### 5.3 What we build per tier (tracked)
 
-**WAMR reality (researched 2026-07-24):** WAMR supports **core WASM + WASI Preview 1 only** — no Component
-Model, no WASI 0.2. So "one artifact everywhere" is true at the **core-module** level, not the component
-level. TinyGo builds `engine.core.wasm` (`-target=wasip1`) as the shared unit; wasip2 runtimes get it
-**componentized via the official adapter** (`wasm-tools component new engine.core.wasm --adapt
-wasi_snapshot_preview1.wasm`); WAMR runs the core module directly; RP2040 links the engine natively. The
-component is a *derived wrapper*, not a separate source. **Micro divergence is accepted for now — this
-table is where we track it.**
+**Build model (validated by Spike 1, 2026-07-25 — see `spikes/README.md`).** Component tiers
+build with TinyGo **`-target=wasip2` directly** — TinyGo emits the component in one shot (supplying
+`cabi_realloc`, wiring `_initialize`). The originally-planned `wasip1` core module + `wasm-tools`
+**preview1 adapter** path is **abandoned**: it's fragile with current TinyGo/wasm-tools (missing
+`cabi_realloc`, a `cm` module-path bug, an init-ordering crash — all documented in the spike README).
+**WAMR reality:** WAMR supports **core WASM + WASI Preview 1 only** (no Component Model), so embedded can't
+run the component — it needs a *separate* core-wasm build, and the "one artifact across *every* tier"
+question is **deferred to when embedded lands**. For the bootstrap (web/desktop/CLI) the shared unit is the
+**wasip2 `engine.component.wasm`**.
 
 | Tier | Artifact built | Build pipeline | Capability binding | Divergence from the wasip2 baseline |
 | --- | --- | --- | --- | --- |
-| **Web** | `engine.component.wasm` | TinyGo→wasip1 → adapter → **jco** | WIT imports (Component Model) | baseline |
-| **Desktop** | `engine.component.wasm` | TinyGo→wasip1 → adapter → **wasmtime** | WIT imports (Component Model) | baseline |
-| **CLI** | `engine.component.wasm` | TinyGo→wasip1 → adapter → **wasmtime** | WIT imports; may also expose standard `wasi:cli/command` `run()` | baseline |
+| **Web** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **jco** | WIT imports (Component Model) | baseline |
+| **Desktop** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **wasmtime** | WIT imports (Component Model) | baseline |
+| **CLI** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **wasmtime** | WIT imports; may also expose standard `wasi:cli/command` `run()` | baseline |
 | **ESP32-S3** | `engine.core.wasm` | TinyGo→wasip1 → **WAMR** (no adapter) | **WAMR native-function registration** (C) | **no CM / WASI-0.2**; console = WASI-p1 fds → UART; sqlite = `unavailable`; caps are C native fns |
 | **RP2350** | `engine.core.wasm` *or* native | TinyGo→wasip1 → WAMR **if** it ports, else native TinyGo | WAMR native fns, or direct Go linkage | as ESP32-S3, or as RP2040 |
 | **RP2040** | native firmware | TinyGo→`pico` (**no wasm**) | **direct Go linkage** (no imports, no WASI) | no wasm, no WASI; caps are direct Go calls |
@@ -373,6 +376,51 @@ earns its keep when the phases are separated deliberately:
 
 The boundary is the two-bit split at runtime: **phase 1 = construct the Environment (host); phase 2 =
 `handler(env, input)` (engine).** The engine never participates in phase 1.
+
+---
+
+### 5.6 WAMR / embedded porting practices (and the ABI-mode toggle)
+
+Whether an app targets **WAMR/embedded is a setup-time choice** (`dlc new` / the manifest's `tiers`),
+because it fixes the **capability-boundary ABI** for the whole project:
+
+| Mode | Chosen when | In-process capability boundary | Builds | Constraints |
+| --- | --- | --- | --- | --- |
+| **Portable (byte ABI)** | an **embedded/WAMR** tier is targeted | **protobuf bytes over `(ptr,len)`** — lowers to core wasm | wasip2 component **+ wasip1 core** | the full porting rules below |
+| **Rich (Component-Model ABI)** | **no embedded** tier | rich WIT types (`string`/`list`/`record`/`result`), Canonical-ABI-marshaled | wasip2 only | relaxed — leverage the CM ABI directly |
+
+Disk/wire serialization stays **protobuf either way** (§7.2); the toggle only affects the *in-process
+capability boundary* and which targets build. **Choose portable mode if embedded is even plausible** —
+retrofitting the byte boundary later is invasive; starting rich and staying rich is fine if you never need
+WAMR.
+
+Porting down to WAMR crosses three gaps at once — **ABI** (no Component Model), **resources** (an MCU),
+**execution** (no OS/scheduler). Most of the discipline is the engine rules we *already* have; embedded is
+their stress test.
+
+**Adopt:**
+- **Capability-mediated I/O only** — no direct platform / OS / syscall / cgo calls (the ILC thesis; the
+  thing that makes porting possible at all).
+- **Byte boundary (protobuf over `(ptr,len)`)** in portable mode — identical on the Component Model and
+  core wasm; custom caps bind as **WAMR native functions**, and the host **bounds-checks** guest pointers.
+- **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json` / reflection, kong host-side.
+- **Handle `unavailable` for every capability** — SQLite→file-scan, network/RTC maybe-absent; degrade,
+  never hard-fail.
+- **Short, run-to-completion, non-blocking handlers** — no long-lived goroutines / busy-waits (watchdog +
+  power budget).
+- **Minimize allocations + module size**; assume **bounded data** (small files/datasets, no reliable RTC);
+  **batch flash writes** (endurance). Consider WAMR **AOT** for speed + lower RAM.
+- **CI-build every target (wasip2 + wasip1 core) and test on real hardware early** — the embedded build
+  rots silently, and emulation hides RAM / flash / timing.
+- **Thin build-tagged capability seam** — `caps_wasip1.go` (`//go:wasmimport`) vs `caps_wasip2.go` (WIT);
+  identical handler logic above it (§5.3).
+
+**Avoid:**
+- Rich-typed host boundaries in portable mode (can't lower to core wasm); **reflection / `encoding/json` /
+  `net/http` / large stdlib** (breaks or bloats TinyGo); **assuming a capability exists** (SQLite / network
+  / RTC / a big POSIX FS); **long-running goroutines / busy-waits / preemptive-scheduling assumptions**;
+  allocation-heavy hot paths / deep recursion / large stack frames; **high-frequency small flash writes**;
+  any direct hardware poke "just for embedded" (kills portability the instant it lands).
 
 ---
 
@@ -619,7 +667,7 @@ matrix + the cross-tier identity check.
 
 | Tier | Build | Load | Run | Observe (pass criteria) |
 | --- | --- | --- | --- | --- |
-| **Cross-tier** | `make build-engine` | — | — | **`engine.core.wasm` (the WASI-p1 core module) is byte-identical** across all wasm tiers (sha256); the wasip2 component is a derived adapter wrapper. A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes on every runtime |
+| **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) is byte-identical** across web/desktop/CLI (sha256). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes on every runtime. (Embedded's core-wasm build + its identity check are deferred with the tier.) |
 | **CLI** | `tinygo build` + wasmtime host | load wasm in wasmtime | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it |
 | **Desktop** | `wails build` | Wails boots wasmtime + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
 | **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); SQLite index file in OPFS; event repaints; DevTools shows no host-cap errors |
@@ -628,12 +676,14 @@ matrix + the cross-tier identity check.
 | **RP2040** | `tinygo build` **native** (engine linked) + flash | firmware boot | serial REPL / buttons | same behavior from the **native** build — proves one-source parity where wasm doesn't fit |
 | **Scaffolder** | `dlc new tmp --caps=… --tiers=…` | — | `devbox run verify` on the *generated* project | the scaffold **builds + passes its verify matrix** — templates can't silently rot (§16.6) |
 
-**Phase-0 spikes (do before committing the plan):** (1) TinyGo→component→jco round-trip of a trivial
-`execute-cli`; (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
-`tinygo build -target=wasip1` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR running
-a TinyGo `engine.wasm` on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile` persist
-across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly. Any red spike
-reshapes the plan before the pilot.
+**Phase-0 spikes.** (1) ✅ **DONE (2026-07-25)** — TinyGo **`-target=wasip2`** → component → jco round-trip
+of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wasip2-direct** (the
+wasip1+adapter path was abandoned). (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
+`tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR
+running a TinyGo core module on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile`
+persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly. **Each spike
+records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
+(as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
 ---
 
@@ -683,11 +733,12 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
    the Phase-5 portable answer if host-side input proves limiting.
 6. **Component Model async maturity** — WASI Preview 2 async is in flux; the engine stays on the
    Asyncify-backed blocking model to avoid depending on it.
-7. **Dual-build maintenance (CM vs core-wasm).** WAMR has **no Component Model / WASI 0.2**, so the engine
-   ships as a wasip2 component (web/desktop/CLI) *and* a wasip1 core module (WAMR), plus native (RP2040) —
-   a build seam behind build tags (§5.3). Accepted for now; the risk is drift between the binding layers.
-   Mitigation: capability *shapes* are identical across tiers and covered by the §11 per-tier behavior
-   tests. Revisit if/when WAMR gains component support.
+7. **Two build targets (component vs core-wasm); the adapter path is abandoned.** Component tiers build
+   `-target=wasip2` directly (Spike 1). **WAMR** has no Component Model, so embedded needs a *separate*
+   core-wasm build — a build seam behind build tags (§5.3), reconciled when embedded lands. The originally
+   planned `wasip1`+`wasm-tools` **adapter** bridge is **abandoned** (fragile; see
+   `spikes/README.md`). Risk: drift between the component and (future) core-wasm binding layers;
+   mitigated by identical capability *shapes* + §11 behavior tests.
 
 ---
 
@@ -716,7 +767,9 @@ in §0.1.
   filesystem + network + display. Unused caps are simply not imported; a tier that lacks a *used* cap
   returns `unavailable` and the engine degrades (§6.2).
 - **Tiers targeted (opt-in).** CLI-only, CLI+web, CLI+embedded, or all six (§10). Each tier is a host you
-  enable in the build/verify matrix; the engine source is unchanged.
+  enable in the build/verify matrix; the engine source is unchanged. **Including an embedded/WAMR tier
+  flips the project to the *portable byte ABI* (§5.6, Decision 25); a CLI+web+desktop-only app can leverage
+  the richer Component-Model ABI.**
 
 ### 16.2 The progression (CLI-first, then add tiers)
 
@@ -840,7 +893,7 @@ module   = "github.com/me/notes"
 platform = "ilc-platform@0.3.1"        # the versioned framework dependency (§16.6)
 
 capabilities = ["console", "filesystem", "sqlite-index", "events", "display"]
-tiers        = ["cli", "web", "desktop", "esp32-s3"]
+tiers        = ["cli", "web", "desktop", "esp32-s3"]   # an embedded tier ⇒ portable byte ABI (§5.6)
 storage      = "split"                 # or "none" (§7.1)
 ui           = "react"                 # or "tft" / "none"
 
@@ -854,6 +907,10 @@ seed         = "fixtures/demo.bft"     # optional phase-1 import-fs (§7.3)
   appends to `tiers`; `dlc run` reads `[launch]` for the phase-1 setup + mode (§5.5).
 - **The two knobs, made durable.** §16.1's *capabilities* + *tiers* opt-ins live here as one declarative
   record — edited as the app evolves — instead of scattered across build tags / Makefile.
+- **ABI mode follows the tiers.** Any **embedded/WAMR** tier ⇒ **portable byte ABI** (protobuf over
+  `(ptr,len)`, wasip1 core built, port-ready rules); otherwise the **rich Component-Model ABI** (wasip2
+  only). `dlc new --wamr` forces portable mode even without an embedded tier (future-proofing). See §5.6 /
+  Decision 25.
 - **Regenerate / upgrade.** Because it pins `platform` + records the config, `dlc` can re-apply templates
   against a newer platform version (a scaffold *upgrade*), not just first-time generation.
 - **Dogfood option:** define the manifest as a proto `Project` message → canonical-JSON `dlc.json`
