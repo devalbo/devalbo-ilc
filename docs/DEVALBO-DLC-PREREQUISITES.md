@@ -55,7 +55,7 @@ shows it as `○` (optional), not `✗`.
 | **wasm-tools** | preview1 → component adapter | recent |
 | **buf** + **protoc-gen-go-lite** + **protoc-gen-es-lite** | proto codegen (reflection-free) | recent |
 | **wasmtime** | native/CLI runtime (Go embedding) | 25+ |
-| **Node.js** + **jco** (`@bytecodealliance/jco`) | web instantiation + Vite/React | Node 20+ |
+| **Node.js** + **jco** (`@bytecodealliance/jco`) | web instantiation + Vite/React; Spike 5 JSPI | **Node 24+** (`nodejs@24`; JSPI via `--experimental-wasm-jspi`) |
 
 Pin every version in `devbox.json` (+ its lockfile). The **versions matter to whoever authors
 `devbox.json`**, not to the end user — the user just runs `devbox shell`.

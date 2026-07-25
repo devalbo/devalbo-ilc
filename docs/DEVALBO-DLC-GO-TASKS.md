@@ -53,10 +53,10 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [x] **Spike 1 — component round-trip:** TinyGo **`-target=wasip2`** (native Component Model) → component; jco transpiles + runs a trivial `execute-cli` returning `"ok:hi"`. `spikes/component/`, `make spike-component` / `make test-b1`. **Pivoted off the wasip1+`wasm-tools` adapter path** — the guest `cabi_realloc` it requires is unimportable (`cm x/cabi` module mis-declared) and a hand-vendored one crashes pre-`_initialize`; wasip2 has TinyGo supply `cabi_realloc`+`_initialize`. World now `include`s `wasi:cli/imports@0.2.0`; WASI WIT vendored to `wit/deps/` via `wkg wit fetch` (see [test-steps T-B1.1 findings](./DEVALBO-DLC-TEST-STEPS.md))
 - [x] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip under `tinygo -target=wasip2`; `protobuf-es-lite` decodes the same bytes/JSON in JS. `proto/devalbo/spike/v1/spike.proto`, `spikes/proto/`, `make spike-proto` / `make test-b1`. Findings → [`spikes/README.md`](../spikes/README.md) (Spike 2): copy generated `.pb.ts` into the spike for Node resolution; `encoding/json` in the full spike deps comes from `cm`, not go-lite.
 - [x] **Spike 3 — OPFS filesystem:** engine `os.WriteFile` persists via WASI preopen → OPFS and survives reload. `spikes/opfs/`, `make spike-opfs` / `make spike-opfs-watch` (headed). Findings → [`spikes/README.md`](../spikes/README.md): preview2-shim browser wants FileData not DirectoryHandle; stock shim breaks TinyGo writes on bigint offsets (vendored `shim/filesystem.js`)
-- [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli** (hand / go-arg remain measured fall-backs if we split later). `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 + 25.
-- [x] **Spike 5 — dual-track async probe:** **Rich 🟡** (jco Promise import gap / no JSPI runtime) · **Portable ✅** (TinyGo wasip1 + blocking `env.host_delay`; wazero stand-in for WAMR native fns). No ILC async shims. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
+- [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli**; wasip1 sizes show hand (~497 KiB) ≪ ffcli (~1.23 MiB) if portable splits later. `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 + 25.
+- [x] **Spike 5 — dual-track async probe:** **Rich ✅** (jco JSPI on Node ≥24 + `--async-exports execute-cli`; sync transpile remains negative control) · **Portable ✅** (TinyGo wasip1 + blocking `env.host_delay`; wazero stand-in for WAMR native fns). No ILC async shims. Pin `nodejs@24`. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
 
-**Exit:** Spikes 1–4 green; Spike 5 green **or** documented yellow/red ecosystem gap; **each with a findings section in `spikes/README.md`**; plan-contradicting findings folded back (as Spike 1 did).
+**Exit:** Spikes 1–5 green; **each with a findings section in `spikes/README.md`**; plan-contradicting findings folded back (as Spike 1 did).
 
 ---
 
@@ -75,15 +75,19 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`
 - [ ] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.AppName}}`)
 
-### Templates (its own area, §16.6)
-- [ ] `templates/` dir with a **minimal self-shaped skeleton** (engine + CLI host stub + go.mod + devbox + wit + proto)
-- [ ] `go:embed` the templates into the `dlc` engine so `dlc new` is self-contained (offline + browser)
+### Templates (its own area, §16.6 — bootstrap sequencing locked)
+- [ ] Author **`templates/component-model/` in-tree** — **full `dlc`-shaped** skeleton (engine + CLI/web host stubs + go.mod + devbox + wit + proto). B2 = terminal path; B3 completes browser. **Do not** create the skeleton git submodule yet (lift later).
+- [ ] **Defer** versioned `ilc-platform` `go.mod` depend until submodule graduation (§16.4 / §16.6 #2)
+- [ ] `templates/fragments/` in-tree for overlay packs (`--caps` / `--tiers` / …) — ABI mode picks the skeleton, not a fragment
+- [ ] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates
+- [ ] **`templates/wamr/`** — Backlog until embedded verify exists; do not add an unverifiable stub in B2
 
 ### Build pipeline
-- [ ] Makefile: `build-engine` (TinyGo → `engine.core.wasm`) + `component` (wasm-tools adapter → `engine.component.wasm`)
+- [ ] Makefile: `build-engine` (TinyGo **`-target=wasip2`** → `engine.component.wasm`; wasip2-direct per Spike 1)
 
 ### CLI host (native Go + wasmtime — standard Go, full reflection)
-- [ ] `hosts/native/` — `main()`: **thin argv forwarder** — `os.Args` → wasmtime instantiates the component → `execute-cli(args)` → `command-result` → exit code (parsing is in-engine, Spike 4)
+- [ ] `hosts/native/` — `main()`: **thin argv forwarder** — `os.Args` → wasmtime instantiates the component → `execute-cli(args)` → `command-result` → exit code (parsing is in-engine, Spike 4). **Note:** `wasmtime-go` has no Component Model API yet — pick C API / interim host before coding.
+- [ ] **`go:embed` `engine.component.wasm` in the host binary** (§5.4) — single `dlc` artifact; keep embed/load in a small lift-ready package under `hosts/native/` (not open-coded in `main`)
 - [ ] Two-phase launch (§5.5): construct the native Environment (FS root = cwd/config dir, stdio) → invoke the engine
 - [ ] Wire `dlc new <app> [--module …]` end-to-end
 - [ ] `dlc doctor` — the **command form** of preflight (§16.7): assess system prereqs + per-tier toolchain/host readiness, exit non-zero if a prereq is missing. Layer 1 (assumes a `dlc` binary); `scripts/preflight.sh` stays as the pre-toolchain **Layer 0** bootstrap gate that gets you a first `dlc` ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
@@ -110,7 +114,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] **Download the result** — `export-fs` the OPFS tree → zip/BFT → browser download
 
 ### Async + build
-- [ ] Asyncify path verified in the real app (from Spike 5)
+- [ ] jco JSPI path for any async custom caps (from Spike 5: Node ≥24 + `--experimental-wasm-jspi` + async import/export — no ILC shim)
 - [ ] Makefile: `build-wasm` (TinyGo → jco transpile → `frontend/src/wasm/`), `dev-web` (Vite)
 
 ### Verify (browser + cross-tier)
@@ -154,6 +158,8 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] **RP2350** — WAMR-via-arduino-pico *or* native TinyGo fallback (§14 risk 2)
 - [ ] **RP2040** — native TinyGo build (no wasm) — §5.3
 - [ ] WAMR embedded spike (the deferred §11 spike 3)
+- [ ] **WAMR skeleton** (`templates/wamr/`) — wasip1 + native-fn caps; only after the WAMR spike can `verify` (§16.6, Decision 25); in-tree first, submodule later
+- [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `ilc-platform` depends (§16.6 sequencing #1–#2)
 
 ### Filesystem export/import (§7.3)
 - [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive)

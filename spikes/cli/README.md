@@ -3,7 +3,8 @@
 Findings (table + Decision 22/25 picks) live in [`../README.md`](../README.md) Spike 4.
 
 **Question answered:** a real subcommand + flag parser runs **inside** the TinyGo engine; the host is
-just an argv forwarder. Defaults are **per ABI mode** (not one global winner).
+just an argv forwarder. Scaffolder default is **ffcli**; measured per-ABI fall-backs are hand-rolled
+(portable size) and go-arg (rich struct tags).
 
 ## Layout
 
@@ -29,7 +30,9 @@ devbox run make spike-cli    # full bake-off table; B1 gate = ≥1 lean green
 
 ## Decision output
 
-- **Default: `ff/v3/ffcli`** — one library for all ABI modes.
-- Measured fall-backs: hand-rolled (smallest / portable), go-arg (struct tags / rich).
+- **Scaffolder default: `ff/v3/ffcli`** — until Decision 25 forces a split.
+- **Portable fall-back:** hand-rolled (~497 KiB wasip1).
+- **Rich fall-back:** go-arg (struct tags, matrix-green).
 
-See parent README for the full bake-off table and gotchas (kong `MethodByName`, cobra `-name`, subcommands `os.Args`).
+See parent README for the full bake-off table (wasip2 + wasip1 sizes) and gotchas (kong `MethodByName`,
+cobra `-name`, subcommands `os.Args`).

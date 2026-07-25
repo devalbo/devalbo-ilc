@@ -1,5 +1,7 @@
 // Spike 5 Rich/CM harness — one logged result per matrix assertion (R1.* / R2.*).
 // See README.md test execution matrix. No ILC async shims.
+//
+// Run under: node --experimental-wasm-jspi harness.mjs  (Node ≥24; see scripts/spike-async.sh)
 import { executeCli as executeCliSync } from "./out-sync/engine.component.js";
 
 const DELAY_MS = 50;
@@ -34,7 +36,7 @@ function skipRest(ids, because) {
   for (const id of ids) record(id, "SKIP", because);
 }
 
-/** F-R-sync → R1.1 … R1.4 */
+/** F-R-sync → R1.1 … R1.4 — negative control: sync jco cannot lower a Promise import. */
 async function runR1() {
   console.log("\n== F-R-sync (jco sync transpile) ==");
   let ticks = 0;
@@ -67,9 +69,9 @@ async function runR1() {
   else record("R1.4", "FAIL", "ticks=0");
 }
 
-/** F-R-jspi → R2.1 … R2.6 */
+/** F-R-jspi → R2.1 … R2.6 — stock path: jco JSPI + async import/export. */
 async function runR2() {
-  console.log("\n== F-R-jspi (jco --async-mode jspi) ==");
+  console.log("\n== F-R-jspi (jco --async-mode jspi + async-exports) ==");
   const hasJspi =
     typeof WebAssembly.Suspending === "function" ||
     typeof WebAssembly.promising === "function";
@@ -77,7 +79,7 @@ async function runR2() {
     record(
       "R2.1",
       "FAIL",
-      `no Suspending/promising (node=${process.version})`,
+      `no Suspending/promising (node=${process.version}; need ≥24 + --experimental-wasm-jspi)`,
     );
     skipRest(
       ["R2.2", "R2.3", "R2.4", "R2.5", "R2.6"],
@@ -85,7 +87,7 @@ async function runR2() {
     );
     return;
   }
-  record("R2.1", "PASS");
+  record("R2.1", "PASS", `node=${process.version}`);
 
   let executeCli;
   try {
@@ -109,10 +111,12 @@ async function runR2() {
   }, 10);
   let res;
   try {
-    const run = Promise.resolve(executeCli(["wait", String(DELAY_MS)])).then((r) =>
-      r && typeof r.then === "function" ? r : r,
+    // With --async-exports execute-cli, jco returns Promise<CommandResult>.
+    res = await withTimeout(
+      Promise.resolve(executeCli(["wait", String(DELAY_MS)])),
+      TIMEOUT_MS,
+      "R2",
     );
-    res = await withTimeout(run, TIMEOUT_MS, "R2");
     clearInterval(iv);
     record("R2.3", "PASS", "call completed");
   } catch (e) {
@@ -136,9 +140,9 @@ async function runR2() {
 await runR1();
 await runR2();
 
-const richIds = results.filter((r) => r.id.startsWith("R"));
-const richPass = richIds.every((r) => r.status === "PASS");
-const richRan = richIds.some((r) => r.status === "FAIL" || r.status === "PASS");
+const r2 = results.filter((r) => r.id.startsWith("R2."));
+const r2Pass = r2.length > 0 && r2.every((r) => r.status === "PASS");
+const richRan = results.some((r) => r.status === "FAIL" || r.status === "PASS");
 
 console.log("\n-------------------------------------------------");
 console.log("matrix:");
@@ -146,14 +150,19 @@ for (const r of results) {
   console.log(`  ${r.id}\t${r.status}${r.detail ? "\t" + r.detail : ""}`);
 }
 
-if (richPass) {
+// RICH greens on the JSPI path (the actual async question). R1 is a negative
+// control: sync transpile cannot await a Promise import — expected FAIL.
+if (r2Pass) {
   console.log("RICH=GREEN");
+  console.log(
+    "JSPI path green (R2.*). R1 sync transpile remains a negative control (Promise→type error).",
+  );
   process.exit(0);
 }
 if (richRan) {
   console.log("RICH=YELLOW");
   console.log(
-    "Ecosystem gap: Promise-returning CM import needs jco JSPI runtime and/or WASI 0.3 guest",
+    "Ecosystem gap: need Node ≥24 + --experimental-wasm-jspi + jco --async-mode jspi with async-imports and async-exports",
   );
   process.exit(0);
 }

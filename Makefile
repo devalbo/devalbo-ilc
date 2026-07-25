@@ -100,8 +100,8 @@ SPIKE_CLI := spikes/cli
 spike-cli: gen ## Spike 4 (T-B1.4): in-engine CLI interpreter bake-off
 	@./scripts/spike-cli.sh
 
-# Spike 5 (T-B1.5): dual-track async probe — Rich/CM (jco; may YELLOW) +
-# Portable/WAMR-shaped (wasip1 + blocking host; expect GREEN). No ILC async shims.
+# Spike 5 (T-B1.5): dual-track async probe — Rich/CM (jco JSPI on Node ≥24) +
+# Portable/WAMR-shaped (wasip1 + blocking host). No ILC async shims.
 SPIKE_ASYNC := spikes/async
 
 .PHONY: spike-async

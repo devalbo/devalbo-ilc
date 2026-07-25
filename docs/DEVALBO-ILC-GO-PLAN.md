@@ -83,7 +83,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 8 | On-disk format | **Proto-schema'd canonical JSON** (protobuf governs shape/evolution; binary proto on the wire) |
 | 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT-SQLite |
 | 10 | Dispatch | **Local-only in V1** (no envelope/routing yet) |
-| 11 | Async bridge (Rich/CM vs WAMR split) | **Rich/CM:** Spike 5 🟡 — stock jco cannot await Promise imports without JSPI/WASI 0.3; **no ILC shims**. **Portable/WAMR:** Spike 5 ✅ — TinyGo wasip1 + blocking `wasmimport` host (WAMR native-fn shape). See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
+| 11 | Async bridge (Rich/CM vs WAMR split) | **Rich/CM:** Spike 5 ✅ — stock jco **JSPI** (Node ≥24 + `--experimental-wasm-jspi` + async import/export) awaits Promise host imports; sync transpile cannot (negative control). **No ILC shims.** **Portable/WAMR:** Spike 5 ✅ — TinyGo wasip1 + blocking `wasmimport` host (WAMR native-fn shape). See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
 | 12 | Capability set | WASI FS · SQLite-index · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5) |
 | 13 | Display | **Discovery (`describe`) + draw-command list + retained widget tree**; output-only |
 | 14 | Input | **Universal `execute-cli`**; host maps native input → command (serial REPL / input-map on MCUs) |
@@ -94,7 +94,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
 | 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export; test host → **WASI Virt**; `sqlite-host` / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
 | 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
-| 22 | CLI interpreter — in-engine, per-ABI-mode default | The CLI interpreter (subcommands + flags) lives **inside the engine**, so one parser serves every tier (CLI, web, embedded serial REPL) — the host just **forwards argv** to `execute-cli`. It must **compile under TinyGo**. **Default: `ff/v3/ffcli`** (Spike 4 matrix-green). Per-ABI split still available later (Decision 25): hand-rolled if portable size bites; go-arg if rich wants struct tags. kong panics (`MethodByName`); cobra fails Go-style `-name`; `google/subcommands` hardcodes `os.Args`. See [`spikes/README.md`](../spikes/README.md) Spike 4. |
+| 22 | CLI interpreter — in-engine, per-ABI-mode default | The CLI interpreter (subcommands + flags) lives **inside the engine**, so one parser serves every tier (CLI, web, embedded serial REPL) — the host just **forwards argv** to `execute-cli`. It must **compile under TinyGo**. **Scaffolder default: `ff/v3/ffcli`** (Spike 4 matrix-green). Per-ABI split later (Decision 25): hand-rolled if portable size bites (**~497 KiB** wasip1 vs ~1.23 MiB ffcli); go-arg if rich wants struct tags. kong panics (`MethodByName`); cobra fails Go-style `-name`; `google/subcommands` hardcodes `os.Args`. See [`spikes/README.md`](../spikes/README.md) Spike 4. |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
 | 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
 | 25 | ABI mode (WAMR toggle) | Targeting **WAMR/embedded** is a **setup-time** choice (`dlc new` / manifest `tiers`) that fixes the capability-boundary ABI: **on → portable byte ABI** (protobuf over `(ptr,len)`; also builds the wasip1 core; port-ready rules — §5.6); **off → rich Component-Model ABI** (rich WIT types, wasip2 only). Disk/wire stays protobuf either way. |
@@ -196,9 +196,9 @@ hosts/desktop/build/    # wails output
 | Native/desktop/CLI runtime | **wasmtime** (Go embedding) + `modernc.org/sqlite` + **Wails v2** |
 | Embedded runtime | **WAMR** on ESP32-S3 / RP2350 (official Espressif WAMR ESP-IDF component); **TinyGo native** (RP2040) |
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
-| Async | Spike 5: Rich/CM 🟡 (jco/JSPI gap); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
+| Async | Spike 5: Rich/CM ✅ (jco JSPI on Node ≥24); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
-| CLI interpreter (in-engine) | Runs *inside* the engine; must compile under TinyGo. **Default: ffcli.** Spike 4 also cleared hand-rolled / flag / go-arg; kong/cobra/`subcommands` red for in-engine — see Decision 22. |
+| CLI interpreter (in-engine) | Runs *inside* the engine; must compile under TinyGo. **Scaffolder default: ffcli.** Spike 4 also cleared hand-rolled / flag / go-arg (wasip1 hand ~497 KiB); kong/cobra/`subcommands` red for in-engine — see Decision 22. |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
 
 **Why the lite generators (resolves the old #1 risk):** the official `google.golang.org/protobuf` is
@@ -338,6 +338,13 @@ are built.
 | **desktop** (Wails) | Wails startup hook → native Environment + webview | building the desktop app |
 | **web** (jco) | `worker.ts` boot → jco instantiate + browser Environment | serving the web app |
 | **embedded** (WAMR / native) | firmware boot → board Environment (peripherals) | flashing the firmware |
+
+**Engine bytes live in the host artifact (bootstrap).** The CLI/`dlc` native binary **`go:embed`s**
+`engine.component.wasm` (built by TinyGo wasip2) so a single host binary is enough to run — no sidecar
+wasm on `PATH`. Keep load/embed behind a small package boundary under `hosts/native/` (e.g. `enginewasm`
+or similar) so the bytes can later be **lifted out** (shared module, desktop host reuse, or optional
+sidecar) without rewriting argv → Environment → `execute-cli`. Web still gets the component via the
+jco/Vite pipeline (B3); same engine bytes, different host packaging.
 
 **2. Launch time (secondary) — mode *within* a multi-mode host.** Some hosts serve more than one mode (the
 native host can run headless-CLI *or* launch a GUI). Decide explicitly, sensible default, always
@@ -626,10 +633,11 @@ Reflection-free is the **default preference** (smaller binaries + TinyGo's `refl
 `flag` (+ `FlagSet`s), `ff`/`ffcli`, `google/subcommands`, or hand-rolled — but "reflection breaks TinyGo"
 is an assumption, so **Spike 4 bakes off the reflection-based ones too** (`kong`/`cobra`/`go-arg`), measuring
 rather than presuming.
-**Default is ffcli** (one parser everywhere). Decision 25 still allows a later per-ABI split —
-Spike 4 measured hand-rolled (smallest) and go-arg (struct tags) as the profile winners if we split.
-kong panics; cobra fails Go-style `-name`; `subcommands` can't take injected argv. (A host *may* still add
-its own flags — e.g. an engine path — but the **app command surface is the engine's**.)
+**Scaffolder default is ffcli** (one parser until an ABI split is forced). Decision 25 still allows a
+later per-ABI split — Spike 4 measured hand-rolled (**~497 KiB** wasip1) and go-arg (struct tags) as the
+profile winners if we split. kong panics; cobra fails Go-style `-name`; `subcommands` can't take injected
+argv. (A host *may* still add its own flags — e.g. an engine path — but the **app command surface is the
+engine's**; do not put app parsing in `hosts/native`.)
 
 **Reactivity loop:** UI issues `execute-cli(["list-records"])` to read; a write emits `data-changed`; the
 host's subscription (React `useEngineEvent` hook / Wails `EventsOn`) invalidates and re-fetches.
@@ -682,7 +690,7 @@ of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wa
 wasip1+adapter path was abandoned). (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
 `tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR
 running a TinyGo core module on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile`
-persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8); (7) **Spike 5 (2026-07-25)** — Rich 🟡 / Portable ✅ (`spikes/async/`); jco Promise gap vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
+persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8); (7) ✅ **DONE (2026-07-25)** — Spike 5 Rich ✅ / Portable ✅ (`spikes/async/`); jco JSPI (Node ≥24) vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
 records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
 (as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
@@ -729,11 +737,11 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
    Phase 4 for CLI+web+desktop+ESP32-S3, with RP2350/RP2040 as fast-follows.
 4. **Desktop/CLI: wasm-under-wasmtime vs native link.** The plan runs the shared wasm for uniformity; if
    wasmtime overhead is unwanted, the same Go source can link natively (build tag) like RP2040 — a
-   documented alternative, defaulting to wasm.
+   documented alternative, defaulting to wasm. Separately: **`wasmtime-go` lacks Component Model
+   bindings** (as of Spike 5 review) — B2 may need the C API or another embedder until Go CM lands.
 5. **Display input on embedded** beyond the input-map (Decision 14) — a symmetric **Input capability** is
    the Phase-5 portable answer if host-side input proves limiting.
-6. **Component Model async maturity** — WASI 0.3 brings native CM async, but guest/host readiness is
-   uneven; bootstrap stays on **wasip2 + Asyncify**. Upgrade gates live in [`WASI-UPGRADES.md`](./WASI-UPGRADES.md).
+6. **Component Model async maturity** — Spike 5 greens Rich async via **jco JSPI** on Node ≥24 (no ILC shim). WASI 0.3 remains the longer-term native CM async destination; gates in [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). Browser JSPI re-check is a follow-up.
 7. **Two build targets (component vs core-wasm); the adapter path is abandoned.** Component tiers build
    `-target=wasip2` directly (Spike 1). **WAMR** has no Component Model, so embedded needs a *separate*
    core-wasm build — a build seam behind build tags (§5.3), reconciled when embedded lands. The originally
@@ -836,37 +844,70 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 ```
 /
 ├── platform/     # the ILC framework (hosts, wit, caps seam, build pipeline, verify harness) → `ilc-platform` (§16.4)
-├── templates/    # DISTINCT: what `dlc new` emits — base skeleton + per-knob fragments (BFT/zip bundles, §7.3)
+├── templates/    # skeletons (+ later: per-skeleton git submodules) + local fragment overlays
+│   ├── component-model/  # full dlc-shaped CM skeleton (CLI + browser); bootstrap — in-tree first
+│   ├── wamr/             # WAMR skeleton; after embedded verify exists
+│   └── fragments/        # in-tree overlay packs (--caps / --tiers / …); not whole-project submodules
 └── apps/
-    ├── dlc/      # App #1 — the scaffolder; go:embed's /templates
+    ├── dlc/      # App #1 — the scaffolder; go:embed's resolved /templates at build
     └── notes/    # App #2 — breadth pilot
 ```
 
-- **Depends-on, never inlines.** A template is an *app-shaped* skeleton whose `go.mod` depends on
-  `ilc-platform` as a **versioned module** + a thin `main`; it never copies framework internals. So a
-  template change (edit `/templates/`) and a framework change (bump the platform version) are separate
-  concerns with a clean boundary — the whole point of the separation.
-- **Anti-drift by validation, not derivation.** Templates are authored by hand in `/templates/` (their own
-  PRs, their own mental model). Drift is caught by CI — the §11 **Scaffolder** row (`dlc new … → devbox run
-  verify`) must pass. Decoupled authorship, coupled validation only.
-- **Embedded, not cloned.** `dlc` `go:embed`s `/templates/`, so `dlc new` is self-contained — offline, and
-  it works on the **browser tier** (templates ride inside `engine.wasm`). Key improvement over runtime-clone.
-- **Composition + parameterization.** `--caps` / `--tiers` / `--ui` / `--storage` select a **base bundle +
-  fragment overlays** (`import-fs`, §7.3); a token pass substitutes `{{.Module}}` / `{{.AppName}}` / the
-  selected capability imports. Bundles are BFT/zip so they stay diffable.
-- **ABI-mode-aware defaults.** Scaffold library profile can follow ABI mode (Decision 25). **CLI default
-  is ffcli** for all modes; Spike 4 keeps hand-rolled / go-arg as measured fall-backs if we split later.
-  The principle generalizes to the whole default dependency set.
-- **Graduates to its own repo.** `/templates/` can later become a standalone repo (submodule optional),
-  keeping template contribution independent of the framework — still `go:embed`'d into `dlc` at build.
+#### Bootstrap sequencing (locked 2026-07-25)
+
+| # | Choice |
+| --- | --- |
+| **1 — Authorship** | **Author skeletons in-tree** under `templates/<name>/`. Lift each to its own git submodule **later** (when contribution/CI isolation pays for itself) — do not block B2 on repo/submodule choreography. |
+| **2 — `ilc-platform` depend** | **Defer** the versioned `ilc-platform` `go.mod` dependency until skeletons graduate to submodules (§16.4 extract). Until then the skeleton is a full tree in this repo; depend-on/never-inline remains the *target* rule, not a B2 prerequisite. |
+| **3 — Skeleton completeness** | Bootstrap `component-model/` is a **full `dlc`-shaped** project (engine + CLI host stubs + web host stubs + go.mod + devbox + wit + proto) — not a thin hello-world. B2 proves terminal; B3 completes browser on the same shape. |
+| **4 — Engine in the host** | Native `dlc` **embeds** `engine.component.wasm` in the host binary (§5.4); keep embed/load **lift-ready** (small package boundary). Templates for `dlc new` are separately `go:embed`’d into the engine so scaffolding works offline + in-browser. |
+
+#### Standing rules
+
+- **Depends-on, never inlines (destination).** After submodule + `ilc-platform` extract, a template’s
+  `go.mod` depends on `ilc-platform` as a **versioned module** + a thin `main`; it never copies framework
+  internals. Bootstrap may ship a fuller in-tree tree until that extract lands (see sequencing #2).
+- **Two skeleton families by ABI mode (Decision 25).** Rich/CM vs Portable/WAMR are different *project*
+  shapes (guest target, host stub, capability ABI, build). Each is its **own skeleton directory** (and
+  later its own submodule), not a fragment toggle:
+
+  | Skeleton | Track | Emits | When |
+  | --- | --- | --- | --- |
+  | `templates/component-model/` | Rich / Component Model | wasip2 component; wasmtime (CLI) + jco (browser); rich WIT | **Bootstrap first** — full terminal + browser `dlc` shape |
+  | `templates/wamr/` | Portable / WAMR | wasip1 core; native-fn caps; byte ABI | **After** embedded/WAMR can `verify` — do not ship an unverifiable stub |
+
+  Directory names follow the **substrate** (`component-model`, `wamr`); track prose stays Rich/CM vs
+  Portable/WAMR (Decision 25, [`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). `dlc new` / manifest `tiers`
+  selects the family. Shared bits may later move into `templates/fragments/` once both skeletons exist.
+- **Submodules are a graduation step, not day-one.** Target: one git submodule per project skeleton under
+  `templates/<name>/` for independent build/verify/PRs. **Bootstrap authors in-tree**; lift when ready.
+  Only add / graduate a skeleton when CI can validate it.
+- **Bootstrap starts with `component-model/`.** Phase B2/B3 ship that skeleton only — one engine for
+  terminal and browser (Decision 3). `wamr/` is Backlog until the WAMR track is real.
+- **Fragments stay local (not submodules).** `--caps` / `--tiers` / `--ui` / `--storage` overlays are
+  small packs under `templates/fragments/` (or equivalent), composed onto a skeleton via `import-fs`
+  (§7.3). ABI-mode is **not** a fragment — it picks the skeleton.
+- **Anti-drift by validation, not derivation.** Drift is caught by CI — the §11 **Scaffolder** row
+  (`dlc new … → devbox run verify`) must pass.
+- **Embedded, not cloned at runtime.** At `dlc` build time the resolved `templates/` tree is
+  **`go:embed`’d** into the engine, so `dlc new` stays self-contained — offline and on the **browser
+  tier**. Never runtime-`git clone` a template into the user’s project. (Submodule checkout, when used,
+  is a *dev* boundary only.)
+- **Composition + parameterization.** `dlc new` selects a **skeleton tree + fragment overlays**; a token
+  pass substitutes `{{.Module}}` / `{{.AppName}}` / selected capability imports. Bundles are BFT/zip so
+  they stay diffable.
+- **ABI-mode-aware defaults.** Skeleton choice follows ABI mode (Decision 25). **CLI scaffolder default is
+  ffcli** in both families; Spike 4 measured hand-rolled (~497 KiB wasip1) / go-arg as fall-backs if we
+  split later.
 
 **Prior art — Qroma** (`qromatech/qroma-project-generator`, `qroma.dev`). The author's earlier
 embedded-Python generator validates this shape: templates lived in a **separate `qroma-project-template`
 repo (submodule)**, `qroma new` substituted project identifiers, targeting firmware + protobuf + site +
-optional app. ILC borrows the **separated-template model** and the **concern-scoped CLI** (§16.7), and
-independently confirms two Qroma choices — **protobuf as the device↔app messaging layer** and **PlatformIO**
-for firmware. ILC's deltas: **one WASM engine across every tier** (vs separate firmware/app/site artifacts),
-**`dlc` is itself an ILC app** (self-hosting), and **`go:embed` not runtime-clone** (offline + browser).
+optional app. ILC borrows the **separated-template model** (destination: **one submodule per skeleton**,
+after in-tree bootstrap) and the **concern-scoped CLI** (§16.7), and independently confirms two Qroma
+choices — **protobuf as the device↔app messaging layer** and **PlatformIO** for firmware. ILC's deltas:
+**one WASM engine across every tier** (vs separate firmware/app/site artifacts), **`dlc` is itself an ILC
+app** (self-hosting), and **`go:embed` not runtime-clone** (offline + browser).
 
 ### 16.7 The `dlc` command surface
 

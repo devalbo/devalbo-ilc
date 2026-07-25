@@ -4,7 +4,7 @@ Each subdir is a minimal, self-contained proof of one load-bearing assumption. *
 they become standing regression tests so the foundation stays proven as code changes.
 
 Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅,
-`cli/` ✅ (ffcli default), `async/` 🟡/✅ (Rich YELLOW · Portable GREEN).
+`cli/` ✅ (ffcli default), `async/` ✅ (Rich JSPI GREEN · Portable GREEN).
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
@@ -268,27 +268,31 @@ bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).
 
 **Run:** `devbox run make spike-cli` (also in `make test-b1`).
 
-### Bake-off (TinyGo `-target=wasip2` → jco → Node harness, 17-case matrix)
+### Bake-off (TinyGo → harness, 17-case matrix)
 
-| Variant | Tag | Compile | Matrix | `engine.component.wasm` |
-| --- | --- | --- | ---: | ---: |
-| stdlib `flag` | (default) | yes | yes | 1 050 185 |
-| `ff/v3/ffcli` | `cliffcli` | yes | yes | 1 362 722 |
-| hand-rolled | `clihand` | yes | yes | **592 883** |
-| `google/subcommands` | `clisub` | yes | no | 1 158 729 |
-| `spf13/cobra` | `clicobra` | yes | no | 2 519 247 |
-| `alecthomas/kong` | `clikong` | yes | no (panic) | 2 597 633 |
-| `alexflint/go-arg` | `cligoarg` | yes | **yes** | 1 512 511 |
+Matrix run is wasip2 → jco → Node. Sizes also measured as wasip1 core (portable-shaped; same
+`spikes/cli` package compiles under both targets).
+
+| Variant | Tag | Compile | Matrix | wasip2 component | wasip1 core |
+| --- | --- | ---: | ---: | ---: | ---: |
+| stdlib `flag` | (default) | yes | yes | 1 050 185 | 837 777 |
+| `ff/v3/ffcli` | `cliffcli` | yes | yes | 1 362 722 | 1 232 811 |
+| hand-rolled | `clihand` | yes | yes | **592 883** | **497 389** |
+| `google/subcommands` | `clisub` | yes | no | 1 158 729 | — |
+| `spf13/cobra` | `clicobra` | yes | no | 2 519 247 | — |
+| `alecthomas/kong` | `clikong` | yes | no (panic) | 2 597 633 | — |
+| `alexflint/go-arg` | `cligoarg` | yes | **yes** | 1 512 511 | 1 404 397 |
 
 ### Decision 22 / 25 picks
 
-**Default: `ff/v3/ffcli`** — matrix-green, real subcommand tree, stdlib `flag` syntax, one library for all ABI modes.
+**Scaffolder default: `ff/v3/ffcli`** — matrix-green, real subcommand tree, stdlib `flag` syntax; one
+library until an ABI-mode split is forced.
 
-Measured alternatives (still valid if we revisit per Decision 25):
+Measured per-ABI winners (Decision 25; use if we split later):
 
 | ABI mode | Measured winner | Why |
 | --- | --- | --- |
-| **Portable / WAMR** | hand-rolled (`clihand`) | Leanest green (~593 KiB). Use if ESP32/WAMR size bites. |
+| **Portable / WAMR** | hand-rolled (`clihand`) | Leanest green — **~497 KiB** wasip1 (~735 KiB smaller than ffcli). |
 | **Rich / non-WAMR** | go-arg (`cligoarg`) | Struct-tag ergonomics, matrix-green under TinyGo. |
 
 ### What we thought — and measured
@@ -309,21 +313,35 @@ cobra is green on 16/17 cases. It fails `greet -name world` because **pflag** tr
 
 ### Implications
 
-- Hosts stay thin argv forwarders; parser code ships in the engine.
-- Scaffolder ships **ffcli**; can later split hand (portable) vs go-arg (rich) if needed (Decision 25).
-- Prefer go-arg over kong if we want struct tags later; don’t assume cobra/`-name` parity with stdlib `flag`.
+- Hosts stay thin argv forwarders; parser code ships in the engine (`hosts/native` must not reintroduce host-side app parsing).
+- Scaffolder ships **ffcli** by default; portable size pressure is real (wasip1 hand ≪ ffcli) — split hand vs go-arg when Decision 25 forces it.
+- Prefer go-arg over kong if we want struct tags later; don’t assume cobra/`-name` parity with stdlib `flag` (case 3 is Go-flag dialect, not a universal CLI law).
 - Untested smaller subcommand mux worth a follow-up: [`cristalhq/acmd`](https://github.com/cristalhq/acmd) (dep-free, nested `Subcommands`, injectable `Config.Args`).
 
 ---
 
-## Spike 5 — `async/` (T-B1.5) — Rich 🟡 · Portable ✅
+## Spike 5 — `async/` (T-B1.5) — Rich ✅ · Portable ✅
 
 **Test execution matrix** (one row = one assertion):  
 [`async/README.md`](./async/README.md) — **R1.\***, **R2.\***, **P1.\***.
 
-**Run:** `devbox run make spike-async`. **No ILC async shims.**
+**Run:** `devbox run make spike-async`. **No ILC async shims.**  
+**Pin:** Node **≥24** (`nodejs@24`) + `--experimental-wasm-jspi`.
+
+### What works
+
+- **Rich / JSPI (R2.\*):** jco `--async-mode jspi` with `--async-imports 'devalbo:ilc/host-delay#delay'` **and** `--async-exports 'execute-cli'` → guest blocking `delay(50)` awaits a real `setTimeout` Promise; event loop keeps ticking.
+- **Portable (P1.\*):** TinyGo wasip1 + wazero `env.host_delay` = `Sleep` (WAMR native-fn shape).
+
+### Negative control + off-matrix checks (expected / measured)
+
+- **Rich / sync transpile (R1.\*):** Promise host under sync jco → `expected a string, received [object]`.
+- **Sync-host control:** same guest + host returning a plain string (no Promise) → **GREEN** under sync jco — gap is Promise-as-sync-result, not WIT wiring.
+- **wasmtime (CLI/desktop shape):** same guest + blocking Rust wasmtime `host-delay` → **GREEN** (wall ≥ 50ms). Rich/CM async pain is **web/jco**, not “all CM hosts.” `wasmtime-go` still lacks a Component Model API for B2.
 
 ### Implications → [`docs/WASI-UPGRADES.md`](../docs/WASI-UPGRADES.md)
 
-- Rich: async custom caps on web wait on JSPI / WASI 0.3 guest.
-- Portable: blocking native-import path is good for TinyGo wasip1 / future WAMR.
+- Rich/web async custom caps: use **stock jco JSPI** (Node ≥24 + `--experimental-wasm-jspi`; async import **and** export). No ILC shims. WASI 0.3 remains the longer-term native CM async destination.
+- Portable: blocking native-import path is good for TinyGo wasip1 / future WAMR (re-host under `iwasm` when embedded lands).
+- Pin **Node 24+** in devbox — Node 22 has no JSPI APIs even with the experimental flag.
+- Browser JSPI (Playwright) is a follow-up; Node is the CI gate.

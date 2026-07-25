@@ -6,7 +6,7 @@
     "wasmtime@latest",
     "wasm-tools@latest",
     "buf@latest",
-    "nodejs@22"
+    "nodejs@24"
   ],
   "shell": {
     "init_hook": [
