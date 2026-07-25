@@ -11,7 +11,13 @@ _Plan date: 2026-07-24._
 > **How this plan is organized:** it **leads with setup & organization** so the repo can be cleaned and
 > streamlined first — §2 repo cleanup → §3 target structure → §4 toolchain & dev-env. Then the
 > **architecture & capability design** (§5–§10), then **verification, phases & pilot** (§11–§13), then
-> **reference** (§14–§15). §0–§1 are orientation (thesis + locked decisions).
+> **reference** (§14–§15). §0–§1 are orientation (thesis + locked decisions). This plan is **both a reusable
+platform and a reference app** (§0.1); **§16** covers spinning up new apps from it.
+
+> **Naming:** the framework/concept is **ILC** (Inverted Line of Command); its devalbo CLI is **`dlc`**
+> (**D**evalbo **L**ine of **C**ommand). The tool binary, its subcommands, and the project manifest
+> (`dlc.toml`) use `dlc`; **framework artifacts keep the `ilc` name** — `ilc.wit`, the `devalbo:ilc` WIT
+> package, and the `ilc-platform` module.
 
 ---
 
@@ -34,9 +40,32 @@ convention), and collapses most of the old cross-language tooling: `wit-bindgen-
 | **Engine** | All business logic; imports the ILC capability world; exports handlers | **Go** (→ TinyGo wasm) | **environment-independent**, one shared `engine.wasm` |
 | **Host / Environment** | Injects the capabilities the engine imports; owns platform specifics | **Go** (native/desktop/CLI/RP2040) · **C** (ESP32-S3, ESP-IDF/WAMR) · **TypeScript** (web glue+UI) | **per-platform** (a Component-Model host is *supposed* to be) |
 
-The engine is byte-identical everywhere a WASM runtime exists; the host is whatever each platform needs.
+The engine **core module** is byte-identical across every WASM tier (the wasip2 component is derived from it
+via the adapter; RP2040 links it natively); the host is whatever each platform needs.
 **The host language is free — Go, TypeScript, or C — because a host only *provides* capabilities; all
 business logic is the Go engine.** Business logic never lives in TS or C.
+
+### 0.1 Platform vs App — this plan is a template
+
+This plan does double duty: a **reusable platform** (spin up many apps) and a **reference app** (the
+notes/list pilot that proves it). The two-bit split *is* the template boundary — the hosts + capability
+contract are the platform; the engine is the app.
+
+| Platform (written once, reused) | App (swapped per instance) |
+| --- | --- |
+| Capability WIT world + `caps_*.go` build seam (§6, §5.3) | Engine handlers — the business logic (§13 is one example) |
+| Host adapters: native / web / desktop / WAMR (§10) | The app's `.proto` messages (§7.2) |
+| Build pipeline: core-module + adapter + native (§5.3) | **Which capabilities** it uses — opt-in |
+| Toolchain / Devbox / buf (§4) | **Which tiers** it targets — opt-in (§10) |
+| Verification harness, per tier (§11) | Its UI (React / TFT / none) |
+| CLI shim + universal `execute-cli` (§8) | *Optionally* a storage pattern (§7.1) |
+
+A new app sets two knobs — **capabilities used** and **tiers targeted** — and inherits everything else;
+start as a CLI, add UI or embedded later without touching the engine (**§16**).
+
+**App-choice decisions (not platform invariants):** in §1, Decisions **7** (split-storage), **16** (the
+pilot), and **17** (tiers) are *app choices* — a different app may use no persistence, a different message
+set, or fewer tiers. The rest are platform invariants.
 
 ---
 
@@ -55,15 +84,19 @@ business logic is the Go engine.** Business logic never lives in TS or C.
 | 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT-SQLite |
 | 10 | Dispatch | **Local-only in V1** (no envelope/routing yet) |
 | 11 | Async bridge | **Asyncify/JSPI in the browser** (TinyGo already uses Asyncify); native/embedded block freely |
-| 12 | Capability set | WASI FS · SQLite-index · Events · Display · ConsoleIo |
+| 12 | Capability set | WASI FS · SQLite-index · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5) |
 | 13 | Display | **Discovery (`describe`) + draw-command list + retained widget tree**; output-only |
 | 14 | Input | **Universal `execute-cli`**; host maps native input → command (serial REPL / input-map on MCUs) |
 | 15 | Reactivity | Engine emits **events**; host subscribes; UI invalidates + re-fetches |
 | 16 | Pilot | **Shared notes/list** local-first app |
-| 17 | Tiers (all V1) | **Web · Desktop · CLI · ESP32-S3 · RP2350 · RP2040** |
+| 17 | Tiers | **All six supported in V1** (Web · Desktop · CLI · ESP32-S3 · RP2350 · RP2040); an *app* picks a subset (§16.1) |
 | 18 | Embedded exec | **Mixed by capacity:** ESP32-S3 / RP2350 → WAMR+wasm; RP2040 → native TinyGo |
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
 | 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export; test host → **WASI Virt**; `sqlite-host` / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
+| 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
+| 22 | Go CLI framework | **kong** (`alecthomas/kong`) — the Typer analog — **host-side only (standard Go)** for `dlc` + the per-app CLI shim (parse → typed struct → proto `TInput`). **Not compiled into the TinyGo engine** — kong is reflection-heavy and TinyGo's `reflect` is partial (no `encoding/json`). The **engine's `execute-cli` dispatch is reflection-free / TinyGo-safe** (generated route table + protobuf-go-lite, or a minimal `argv→TInput` mapper). Bind-don't-supplant: cobra / urfave / go-arg (all host-side). |
+| 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
+| 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
 
 ---
 
@@ -79,11 +112,11 @@ nothing is lost. **This section is plan-only; nothing here is executed yet.**
 
 | Path | Disposition | Why |
 | --- | --- | --- |
-| `compiler/` (Rust `ilc` WIT→3-lang) | **Remove** | Retired (Decision 19); `wit-bindgen-go` + `buf` replace it |
+| `compiler/` (Rust `dlc` WIT→3-lang) | **Remove** | Retired (Decision 19); `wit-bindgen-go` + `buf` replace it |
 | `packages/ilc-ts`, `ilc-py`, `ilc-rs` | **Remove** | Tri-language matrix dropped; the web host is *new* TS under `hosts/web/`, not this SDK. Old `ilc-ts` host shapes stay a **reference** (recoverable via the tag), not reused code. |
 | `Cargo.toml`, `Cargo.lock` (root) | **Remove** | Existed only for `compiler` + `ilc-rs`; the Go plan has no root Rust workspace |
 | `wit/environment.wit` | **Replace** | `world environment` is superseded by the new `world engine` (§6) |
-| `wit/console-io.wit` | **Keep + fold** | The `console-io` interface is reused as-is; bring it under the new `wit/ilc.wit` package/world |
+| `wit/console-io.wit` | **Remove** | Console is now **WASI stdio** (Decision 20), not a custom interface; the new `wit/ilc.wit` imports `wasi:cli` stdio instead |
 | `README.md` | **Rewrite** | Currently describes tri-language ILC; retarget to the Go plan + two-bit architecture, and mark **`DEVALBO-ILC-GO-PLAN.md` authoritative** |
 | `.gitignore` | **Extend** | Add Go/wasm/gen/node/devbox/platformio/Wails artifacts (§2.3) |
 | `docs/*` | **Keep (history)** | `DEVALBO-ILC-GO-PLAN.md` is authoritative; the superseded docs now live under `docs/archives/` |
@@ -142,6 +175,10 @@ hosts/desktop/build/    # wails output
 └── Makefile                        # build + verify targets per environment (§11)
 ```
 
+> **Per-app vs repo-level:** this is the **per-app** layout. Once the platform is extracted (§16.4) the
+> *repo* splits into `platform/` + `templates/` + `apps/` (§16.6), and the tree above lives under each
+> `apps/<name>/`.
+
 ---
 
 ## 4. Toolchain & dev environment
@@ -159,6 +196,7 @@ hosts/desktop/build/    # wails output
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
 | Async in browser | **Asyncify** (TinyGo built-in) / JSPI |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
+| CLI framework (Go) | **kong** (`alecthomas/kong`) — declarative struct→CLI (the Typer substitute); the `dlc` CLI + the per-app CLI shim. cobra / urfave / go-arg are drop-in alternatives (bind-don't-supplant) |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
 
 **Why the lite generators (resolves the old #1 risk):** the official `google.golang.org/protobuf` is
@@ -235,7 +273,7 @@ WASI calls. Each host binds the WASI root:
 
 | Host | WASI root preopen |
 | --- | --- |
-| Web | `navigator.storage.getDirectory()` (OPFS) via `@bytecodealliance/preview2-shim` `setPreopens({'/': opfsRoot})` |
+| Web | **OPFS** (`navigator.storage.getDirectory()`) **or** an **FSA-granted directory** (`showDirectoryPicker`, Chromium) — both are `FileSystemDirectoryHandle`s — via `@bytecodealliance/preview2-shim` `setPreopens` |
 | Desktop / CLI | native user-data dir (`~/.config/<app>`) via wasmtime WASI preopen |
 | ESP32-S3 / RP2350 | on-chip flash / littlefs, preopened by the WAMR host |
 | RP2040 (native) | littlefs mounted directly; `os` shim maps to it |
@@ -279,6 +317,61 @@ payloads used on the Component-Model boundary). The micro boundary is therefore 
 capability-complete, just hand-marshaled**. The only caps that degrade on micro do so for **hardware**
 reasons, not the ABI — `sqlite-host` → `unavailable` (file-scan fallback) and full networking — both
 surfacing as the `unavailable` variant the engine already handles.
+
+### 5.4 Host selection & launch model
+
+**Principle: the host is the entry point *and* the injected Environment; the engine never selects its
+host** (the two-bit invariant). "Which environment to run as" is decided in two places — never in engine
+logic:
+
+**1. Build / deploy time (primary) — one host artifact per target.** No single binary auto-detects its
+world; you build and ship a *specific host* wrapping the shared engine. `dlc --tiers` (§16) selects which
+are built.
+
+| Host artifact | Entry point (constructs the Environment) | Selected by |
+| --- | --- | --- |
+| **native** (wasmtime) | `main()` — argv → native Environment → run engine → exit code | shipping the CLI binary |
+| **desktop** (Wails) | Wails startup hook → native Environment + webview | building the desktop app |
+| **web** (jco) | `worker.ts` boot → jco instantiate + browser Environment | serving the web app |
+| **embedded** (WAMR / native) | firmware boot → board Environment (peripherals) | flashing the firmware |
+
+**2. Launch time (secondary) — mode *within* a multi-mode host.** Some hosts serve more than one mode (the
+native host can run headless-CLI *or* launch a GUI). Decide explicitly, sensible default, always
+overridable — never ambient magic:
+
+- **explicit subcommand/flag** — `myapp <command>` (one-shot CLI) vs `myapp gui` / `myapp serve`;
+- **default by context** — args present → CLI one-shot; none → GUI/REPL (a *default*, overridable);
+- **env/config** — `MYAPP_MODE=cli|gui`.
+
+This is the ILC "detect a default, but always overridable" rule, kept at the **host/entry-point layer
+only**. **Serverless / new hosts** are just more entry points (a Lambda handler builds the Environment,
+`readLine`→`none`) — adding one is writing a host, not touching the engine.
+
+### 5.5 Two-phase launch: environment, then app
+
+Starting an ILC app is two phases — conceptually always, operationally *usually one command*:
+
+1. **Launch the environment.** The host constructs the injected `Environment`: preopen the WASI filesystem
+   root (native dir / OPFS·FSA / littlefs), open the capability providers (sqlite, events, display),
+   assemble the capability set for this tier. May be **seeded** — e.g. `import-fs` a fixture or snapshot
+   (§7.3), which is exactly test/dev setup.
+2. **Launch the app.** Instantiate the engine (component on wasip2, core module on WAMR, native link on
+   RP2040) and run it against the environment — either **one-shot** (`execute-cli` once → exit code) or
+   **persistent** (the environment stays up; `execute-cli` is invoked many times — the reactive UI /
+   server model).
+
+**One command does both** (`myapp <cmd>`, `dlc run`), so the split is invisible in the common case. It
+earns its keep when the phases are separated deliberately:
+
+| Scenario | Phase 1 (environment) | Phase 2 (app) |
+| --- | --- | --- |
+| **One-shot CLI** | up | one invocation → tear down |
+| **Persistent** (GUI / web / embedded / server) | up **once** | **many** invocations against it |
+| **Test** | up with an **imported fixture FS** (§7.3) | run → export → diff golden; teardown = `reset-fs` |
+| **Dev / REPL** | up once | swap / re-run the app without rebuilding the environment |
+
+The boundary is the two-bit split at runtime: **phase 1 = construct the Environment (host); phase 2 =
+`handler(env, input)` (engine).** The engine never participates in phase 1.
 
 ---
 
@@ -393,7 +486,12 @@ the interface *shape* follows the standard so we can adopt or bridge to it later
 
 ## 7. Storage & serialization
 
-### 7.1 Split-storage model
+**Platform vs app (§0.1):** the **serialization** (protobuf boundary/wire, §7.2) is a **platform
+invariant** — every app uses it. The **split-storage model** (§7.1) is an **optional pattern an app opts
+into**: apps needing indexed local persistence use it; a stateless transformer or calculator skips it
+entirely (console + maybe filesystem, no SQLite index).
+
+### 7.1 Split-storage model *(optional, app opt-in)*
 
 - **Source of truth:** proto-schema'd **canonical-JSON** files on the (WASI) filesystem.
 - **Index:** SQLite, purely to avoid full-directory scans; **disposable and rebuildable**.
@@ -411,6 +509,44 @@ the interface *shape* follows the standard so we can adopt or bridge to it later
   display commands, command results).
 - Codegen: `buf` + `protoc-gen-go-lite` (Go engine + native host); `protoc-gen-es-lite` (TS web host). One
   schema, both projections; `buf breaking` guards evolution.
+
+### 7.3 Filesystem export/import (first-class)
+
+Because an app's entire state is a **filesystem tree** (the split-storage source-of-truth JSON docs; the
+SQLite index is disposable), the whole environment is portable as a **filesystem bundle**. Export/import is
+a **platform primitive** — engine-side, using only the filesystem capability, so it behaves identically on
+every tier (native disk, browser OPFS/FSA, in-memory test FS, embedded littlefs).
+
+- **Bundle formats** (choose per use; `--format=bft|zip|proto`):
+
+  | Format | Niche |
+  | --- | --- |
+  | **BFT** — single JSON file ([devalbo/brute-force-transfer](https://github.com/devalbo/brute-force-transfer)) | **human-readable, diffable, git-friendly, text-channel-transmittable, self-bootstrapping, deterministic** — the interchange / inspection / migration format. Especially clean here: our source of truth is *already* canonical JSON, so BFT = JSON-of-JSON (lossless; alphabetical order → byte-stable). A **deflate** variant answers size. |
+  | **zip/tar** | bulk binary transfer, streaming, large / binary-heavy stores |
+  | **protobuf `Snapshot { repeated Entry { path, bytes } }`** | compact wire / embedded (one-serialization-story) |
+
+- **Platform handlers** (via `execute-cli`, every tier): `export-fs [prefix] --format=<fmt> -> bundle`,
+  `import-fs <bundle> [prefix]`, `reset-fs [prefix]`. **Import** writes the tree, then runs `rebuild-index`.
+
+**Why first-class — robustness + testability:**
+
+| Use | How |
+| --- | --- |
+| **Test setup/teardown** | import a fixture bundle → run handler → export result → diff a golden bundle. Deterministic env per test; teardown = `reset-fs`. Pairs with the in-memory test host / WASI Virt (§6.6). |
+| **Golden FS snapshots** | the §11 golden vectors become golden *filesystem snapshots* — byte-diff the exported tree across tiers |
+| **Backup / restore** | export = backup; import = restore |
+| **Bug reproduction** | a user exports the exact FS state that triggers a bug; the dev imports it and reproduces it deterministically |
+| **Cross-tier migration** | export from browser OPFS → import into native; proto schema evolution absorbs doc-format drift |
+| **Two apps / versions, one store** | **BFT** as the neutral interchange: `diff` what each app/version wrote, script migrations on the JSON, git-merge concurrent writes, embed provenance in BFT comments. Text + schema beats a binary blob for shared-store inspection. |
+| **Node bootstrap (sync)** | import a full snapshot to seed a new node, then sync incrementally (Decision 9) |
+| **Scaffolding** | `dlc new` **is** an import of a **template bundle**; browser-`dlc`'s "download project" **is** an export — the scaffolder and this primitive are the same operation |
+
+Export/import is the **unifying primitive** under scaffolding, browser download, backup, testing, and node
+bootstrap — all "move a filesystem tree in or out," backend-agnostic because the FS is a WASI capability.
+
+**BFT's home:** BFT was the original ILC pilot (the duplicated `bft.js` / `bft.py` codec); porting it to the
+single Go engine core is now a real platform feature — *this* format — not a throwaway demo, and it retires
+the duplication the old pilot targeted.
 
 ---
 
@@ -430,6 +566,21 @@ Both embedded mechanisms feed the same `execute-cli` entry, so **there is one di
 tier.** (This is the proposed method for "environments where a CLI isn't obvious.") Multi-handler routing
 and a protobuf **envelope** are **deferred** (Decision 10) — local-only in V1.
 
+**CLI binding (bind, don't supplant).** On the CLI tier the shim is thin: a Go CLI library parses argv → a
+typed args struct → mapped to the proto `TInput` → `execute-cli` → `command-result` mapped to an exit code.
+ILC's default is **kong** (Decision 22) — the Typer analog, where a struct's fields *are* the CLI, so it
+maps almost 1:1 onto the proto input. Any parser works (cobra / urfave / go-arg); ILC only requires the
+shim end at `execute-cli`. `dlc`'s own multi-subcommand CLI (§16.7) uses the same library.
+
+**Where parsing runs (the TinyGo boundary).** The rich CLI parse (kong) runs in the **native host
+(standard Go)**, *not* in the engine — kong is reflection-heavy and TinyGo's `reflect` is partial (no
+`encoding/json`, missing `NumOut`; even stdlib `flag` is only partial). The host produces the proto
+`TInput`; the **engine's dispatch is reflection-free** — a generated route table + protobuf-go-lite decode,
+or a minimal hand-rolled `argv→TInput` mapper for the universal `execute-cli(args)` path. On **embedded**
+there is no kong at all (the C/native host or the serial REPL feeds the engine's minimal parser).
+**Invariant: nothing reflection-heavy compiles into the TinyGo engine** — the same rule that chose
+protobuf-go-lite (§4).
+
 **Reactivity loop:** UI issues `execute-cli(["list-records"])` to read; a write emits `data-changed`; the
 host's subscription (React `useEngineEvent` hook / Wails `EventsOn`) invalidates and re-fetches.
 
@@ -448,9 +599,9 @@ documented upgrade path if concurrent-edit loss becomes real — out of V1 scope
 
 | Environment | Engine exec | Host lang | FS root | SQLite index | Display | Console/Input |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Web** | TinyGo→wasm, **jco** | TypeScript | OPFS | `sqlite-wasm` (worker) | React (canvas / widget-tree) | `console.*` / React events |
+| **Web** | TinyGo→wasm, **jco** | TypeScript | **OPFS** / **FSA-granted dir** | `sqlite-wasm` (worker) | React (canvas / widget-tree) | `console.*` / React events |
 | **Desktop** | TinyGo→wasm, **wasmtime** | Go (Wails) | `~/.config/<app>` | `modernc.org/sqlite` | Wails webview React | stdio / Wails IPC |
-| **CLI** | TinyGo→wasm, **wasmtime** | Go | cwd / config dir | `modernc.org/sqlite` | none (ConsoleIo) | argv / stdin |
+| **CLI** | TinyGo→wasm, **wasmtime** | Go | cwd / config dir | `modernc.org/sqlite` | none (Console) | argv / stdin |
 | **ESP32-S3** | wasm, **WAMR** | **C** (ESP-IDF) | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / touch input-map |
 | **RP2350** | wasm, **WAMR** | **C** (arduino-pico) / Go | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / buttons |
 | **RP2040** | **native TinyGo** (no wasm) | **Go** | littlefs | *unavailable* → file scan | TFT (draw-list, optional) | UART REPL / buttons |
@@ -471,13 +622,14 @@ matrix + the cross-tier identity check.
 | **CLI** | `tinygo build` + wasmtime host | load wasm in wasmtime | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it |
 | **Desktop** | `wails build` | Wails boots wasmtime + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
 | **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); SQLite index file in OPFS; event repaints; DevTools shows no host-cap errors |
-| **ESP32-S3** | `tinygo` builds `engine.wasm`; **`pio run -t upload`** flashes the WAMR host firmware (wasm embedded) | WAMR instantiates on boot | **`pio device monitor`**: `create-record …`; touch a row | JSON on littlefs; TFT renders the list via `draw`; `describe()` reports 320×240/rgb565; `execute-query`→`unavailable` path exercised (file-scan fallback) |
-| **RP2350** | as ESP32-S3 via PlatformIO (`board=rpipico2`) **if** WAMR ports; else native TinyGo fallback | WAMR (or native) on boot | `pio device monitor` / buttons | same behavior from the *same* `engine.wasm` (WAMR) or same source (native); confirms the second embedded target |
+| **ESP32-S3** | `tinygo` builds `engine.core.wasm`; **`pio run -t upload`** flashes the WAMR host firmware (wasm embedded) | WAMR instantiates on boot | **`pio device monitor`**: `create-record …`; touch a row | JSON on littlefs; TFT renders the list via `draw`; `describe()` reports 320×240/rgb565; `execute-query`→`unavailable` path exercised (file-scan fallback) |
+| **RP2350** | as ESP32-S3 via PlatformIO (`board=rpipico2`) **if** WAMR ports; else native TinyGo fallback | WAMR (or native) on boot | `pio device monitor` / buttons | same behavior from the *same* `engine.core.wasm` (WAMR) or same source (native); confirms the second embedded target |
 | **RP2040** | `tinygo build` **native** (engine linked) + flash | firmware boot | serial REPL / buttons | same behavior from the **native** build — proves one-source parity where wasm doesn't fit |
+| **Scaffolder** | `dlc new tmp --caps=… --tiers=…` | — | `devbox run verify` on the *generated* project | the scaffold **builds + passes its verify matrix** — templates can't silently rot (§16.6) |
 
 **Phase-0 spikes (do before committing the plan):** (1) TinyGo→component→jco round-trip of a trivial
 `execute-cli`; (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
-`tinygo build -target=wasi` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR running
+`tinygo build -target=wasip1` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR running
 a TinyGo `engine.wasm` on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile` persist
 across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly. Any red spike
 reshapes the plan before the pilot.
@@ -490,10 +642,10 @@ reshapes the plan before the pilot.
 | --- | --- | --- |
 | **0a — Repo migration** | Tag + remove the retired tri-language Phase-1 code; scaffold the Go layout (**§2**) | working tree matches §3; `compiler`/`packages`/root Cargo removed (tagged); `go.mod` + `devbox.json` in place |
 | **0b — Spikes** | The five §11 spikes | All green (or plan adjusted to the reality) |
-| **1 — Contract + engine skeleton** | `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine exports `execute-cli` with ConsoleIo + WASI FS only; **CLI host** (wasmtime) | `app create-record`/`list-records` write proto-JSON + read back on the CLI tier; golden vector defined |
-| **2 — Index + events + reactivity** | SQLite-index capability (native + web), Events capability, lock-file write flow, `rebuild-index`; **Web + Desktop hosts** | create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
+| **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (wasmtime); `dlc new` emits a minimal self-shaped skeleton; `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; golden **FS snapshot** defined |
+| **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: SQLite-index (native + web), Events, lock-file write flow, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
 | **3 — Display + embedded** | Display capability (describe + draw-list) with React host + **ESP32-S3 WAMR host**; RP2350 + RP2040(native) | shared notes/list renders on browser **and** ESP32-S3 TFT from one engine; `unavailable` file-scan fallback verified; RP2040 native parity |
-| **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine across the five wasm tiers; golden parity on all six; verification matrix green |
+| **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **core module** across the five wasm tiers; golden parity on all six; verification matrix green |
 | **5 — (deferred)** | File LWW sync; protobuf envelope + multi-handler routing; Input capability; Automerge upgrade path | — |
 
 ---
@@ -504,7 +656,7 @@ A local-first notes-or-tasks app. Records are proto-schema'd JSON files; SQLite 
 updated_at}`. Handlers: `create-record`, `list-records`, `open-record <id>`, `update-record <id> …`,
 `delete-record <id>`, `rebuild-index`. UI: React on web/desktop; a scrollable list on the ESP32-S3 TFT via
 the Display draw-list. Input: React events / Wails IPC / serial REPL / touch input-map. Sync: file LWW
-(Phase 5). It exercises **every V1 capability** (WASI FS, SQLite-index, Events, Display, ConsoleIo) across
+(Phase 5). It exercises **every V1 capability** (WASI FS, SQLite-index, Events, Display, Console) across
 **every tier**, and is the concrete substrate for the §11 verification matrix.
 
 ---
@@ -513,7 +665,7 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
 
 1. **TinyGo + protobuf — largely resolved.** The old top risk (reflection-heavy official protobuf) is
    answered by **`protobuf-go-lite`** (reflection-free, TinyGo-built) + **`protobuf-es-lite`** for the web
-   host (§4). Residual: confirm go-lite round-trips under `tinygo build -target=wasi` (Phase-0 spike 2),
+   host (§4). Residual: confirm go-lite round-trips under `tinygo build -target=wasip1` (Phase-0 spike 2),
    and that dropping fieldmasks/extensions stays acceptable. No longer the highest risk.
 2. **WAMR on RP2350 — footprint *and* port maturity.** 520 KB is comfortable-ish but TinyGo-runtime-in-wasm
    + WAMR + linear memory needs measuring; separately, **official WAMR is ESP-centric**, so RP2350 needs
@@ -547,3 +699,161 @@ compiler, hand-written per-language SDK parity, the bespoke FileSystem mount-tab
 (WASI preopens replace it), and — for now — the tri-language matrix and the Rust `no_std`/Embassy tier.
 The neutral WIT boundary keeps the polyglot door open (Rust/C-via-WASI), so the matrix can return later
 without re-architecting.
+
+---
+
+## 16. Spinning up a new app (using this as a template)
+
+The platform (hosts, capability world, build/verify harness, CLI shim) is written once; each app is a new
+engine + its protos + its UI, selecting the capabilities and tiers it needs. See the Platform-vs-App split
+in §0.1.
+
+### 16.1 The two knobs an app sets
+
+- **Capabilities used (opt-in).** The WIT world is a *superset*; an app imports only what it needs — a
+  calculator: console only; notes: filesystem + sqlite-index + display + events; a sensor logger:
+  filesystem + network + display. Unused caps are simply not imported; a tier that lacks a *used* cap
+  returns `unavailable` and the engine degrades (§6.2).
+- **Tiers targeted (opt-in).** CLI-only, CLI+web, CLI+embedded, or all six (§10). Each tier is a host you
+  enable in the build/verify matrix; the engine source is unchanged.
+
+### 16.2 The progression (CLI-first, then add tiers)
+
+| Stage | Do | Result | Engine change |
+| --- | --- | --- | --- |
+| 0 — scaffold | `dlc new myapp` → engine skeleton + CLI host + Devbox + wit/proto | working CLI (`execute-cli`) | — |
+| 1 — logic | write handlers over the capabilities you need | CLI does real work | write |
+| 2 — + UI | enable the web/desktop host; add a UI that calls `execute-cli` | same app in browser/window | **none** |
+| 3 — + embedded | enable the WAMR host + native cap bindings; flash | same app on device | **none** (rebuilt to core-wasm) |
+
+The engine is stable from Stage 1; later stages add **hosts**, not logic. Graceful `unavailable`
+degradation means a cap added for one tier (e.g. Display) never breaks the tiers without it.
+
+### 16.3 What each app writes vs inherits
+
+- **Writes:** `engine/` handlers, `proto/<app>.proto`, the capability + tier selection, the UI (if any),
+  optionally the split-storage pattern (§7.1).
+- **Inherits unchanged:** host adapters, the `caps_*.go` build seam, the core-module + adapter pipeline,
+  the Devbox/buf toolchain, the per-tier verification harness, and the CLI shim + `execute-cli` entry.
+
+### 16.4 Build order — `dlc` is App #1
+
+Two concrete apps come before the platform is abstracted:
+
+1. **App #1 — `dlc` itself** (self-hosting). CLI + web; capabilities = **console + filesystem** only.
+   Building `dlc` *is* establishing the platform skeleton — you can't build any app without `engine/`,
+   `hosts/native`, `wit/`, the `caps_*.go` seam, Devbox, buf, the Makefile. `dlc new` emits `dlc`'s own
+   shape with the app-specific parts blanked, so the template is **self-derived**; scaffolding is an
+   `import-fs` of a template bundle (§7.3). `dlc` proves the two easy tiers (**CLI + web**, via OPFS/FSA)
+   on the two simplest caps.
+2. **App #2 — notes/list** (the breadth pilot, §13). Generated *by* `dlc new`, then filled in. Proves the
+   parts `dlc` doesn't touch: Display, SQLite-index, desktop, embedded, rich protobuf. Its tiers/caps are
+   added to both the platform and `dlc new`'s flags as they land — the scaffolder **co-evolves**.
+3. **Extract `ilc-platform/`** once both apps share it (hosts, WIT, build seam, verify harness,
+   scaffolder). **Concrete-first, extract-after** — two real consumers before the shared module.
+
+Caveat: `dlc` exercises only console + filesystem, so `dlc new`'s flags start minimal (`--tiers=cli,web`)
+and grow as notes drives out Display / SQLite / embedded.
+
+### 16.5 Bootstrapping a new app: interview + scaffolder (two layers)
+
+Two complementary layers, both derived from **this plan file**:
+
+- **Deterministic `dlc new` scaffolder** — emits the invariant ~80% (structure, `go.mod` / `devbox.json` /
+  `buf.*`, host adapters, the `caps_*.go` seam, verify harness, CLI wiring), parameterized by the two knobs
+  (`--caps`, `--tiers`) + `--ui` / `--storage`. Reproducible, no LLM. Scaffolding = an **`import-fs` of a
+  template bundle** (§7.3). Prior art: `cargo component new`, `wash new`.
+- **Plan-guided interview** — an agent reads *this file* as its spec and interviews the developer to resolve
+  the tailored ~20% a flag can't express (which caps/tiers, the domain `.proto`, handler shapes, storage).
+  This is the very format that produced this plan.
+
+**They chain:** interview **decides** the knobs + domain schema → **drives** `dlc new` (deterministic 80%)
+→ the agent **writes** the app-specific stubs (protos, handler skeletons). The plan file is the shared
+source of truth — the interview reads it as rules, the scaffolder encodes its invariants as templates.
+
+**Sequencing:** the interview works **today** (this file exists); extract the deterministic scaffolder from
+`dlc` once App #1 proves the structure (§16.4).
+
+### 16.6 Template code — its own area
+
+Templates are a **distinct top-level concern**, reasoned about separately from how the framework operates:
+
+```
+/
+├── platform/     # the ILC framework (hosts, wit, caps seam, build pipeline, verify harness) → `ilc-platform` (§16.4)
+├── templates/    # DISTINCT: what `dlc new` emits — base skeleton + per-knob fragments (BFT/zip bundles, §7.3)
+└── apps/
+    ├── dlc/      # App #1 — the scaffolder; go:embed's /templates
+    └── notes/    # App #2 — breadth pilot
+```
+
+- **Depends-on, never inlines.** A template is an *app-shaped* skeleton whose `go.mod` depends on
+  `ilc-platform` as a **versioned module** + a thin `main`; it never copies framework internals. So a
+  template change (edit `/templates/`) and a framework change (bump the platform version) are separate
+  concerns with a clean boundary — the whole point of the separation.
+- **Anti-drift by validation, not derivation.** Templates are authored by hand in `/templates/` (their own
+  PRs, their own mental model). Drift is caught by CI — the §11 **Scaffolder** row (`dlc new … → devbox run
+  verify`) must pass. Decoupled authorship, coupled validation only.
+- **Embedded, not cloned.** `dlc` `go:embed`s `/templates/`, so `dlc new` is self-contained — offline, and
+  it works on the **browser tier** (templates ride inside `engine.wasm`). Key improvement over runtime-clone.
+- **Composition + parameterization.** `--caps` / `--tiers` / `--ui` / `--storage` select a **base bundle +
+  fragment overlays** (`import-fs`, §7.3); a token pass substitutes `{{.Module}}` / `{{.AppName}}` / the
+  selected capability imports. Bundles are BFT/zip so they stay diffable.
+- **Graduates to its own repo.** `/templates/` can later become a standalone repo (submodule optional),
+  keeping template contribution independent of the framework — still `go:embed`'d into `dlc` at build.
+
+**Prior art — Qroma** (`qromatech/qroma-project-generator`, `qroma.dev`). The author's earlier
+embedded-Python generator validates this shape: templates lived in a **separate `qroma-project-template`
+repo (submodule)**, `qroma new` substituted project identifiers, targeting firmware + protobuf + site +
+optional app. ILC borrows the **separated-template model** and the **concern-scoped CLI** (§16.7), and
+independently confirms two Qroma choices — **protobuf as the device↔app messaging layer** and **PlatformIO**
+for firmware. ILC's deltas: **one WASM engine across every tier** (vs separate firmware/app/site artifacts),
+**`dlc` is itself an ILC app** (self-hosting), and **`go:embed` not runtime-clone** (offline + browser).
+
+### 16.7 The `dlc` command surface
+
+Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), built on **kong** (Decision 22):
+
+| Command | Does |
+| --- | --- |
+| `dlc new <app> --caps=… --tiers=… --ui=… --storage=…` | scaffold (import base + fragments, §16.6); `--build --git --run` for one-step setup |
+| `dlc build` / `dlc verify` | build the engine (core-module + adapter/native) / run the §11 per-tier matrix |
+| `dlc proto …` | edit / regenerate the app's `.proto` (buf under the hood) |
+| `dlc host add <web\|desktop\|embedded>` | overlay a tier's host into an existing app (import a fragment) |
+| `dlc export-fs` / `dlc import-fs` | the §7.3 filesystem primitive, surfaced as commands |
+
+`dlc` is a CLI+web ILC app (App #1); these are its `execute-cli` handlers — **not bespoke tooling, the
+platform used on itself.**
+
+### 16.8 Project metadata — the manifest
+
+The app's configuration lives in one **project manifest** (`dlc.toml` — or a proto-schema'd `dlc.json`),
+the source of truth for everything an app *chose* (the two knobs of §16.1, plus the rest):
+
+```toml
+# dlc.toml (sketch)
+[app]
+name     = "notes"
+module   = "github.com/me/notes"
+platform = "ilc-platform@0.3.1"        # the versioned framework dependency (§16.6)
+
+capabilities = ["console", "filesystem", "sqlite-index", "events", "display"]
+tiers        = ["cli", "web", "desktop", "esp32-s3"]
+storage      = "split"                 # or "none" (§7.1)
+ui           = "react"                 # or "tft" / "none"
+
+[launch]                               # §5.4 / §5.5
+default-mode = "gui"                   # args → cli one-shot; none → gui
+seed         = "fixtures/demo.bft"     # optional phase-1 import-fs (§7.3)
+```
+
+- **`dlc` reads/writes it (§16.7).** `dlc new` writes it from the interview/flags; `dlc build` / `dlc
+  verify` read `tiers` / `capabilities` to know what to build + which §11 rows to run; `dlc host add web`
+  appends to `tiers`; `dlc run` reads `[launch]` for the phase-1 setup + mode (§5.5).
+- **The two knobs, made durable.** §16.1's *capabilities* + *tiers* opt-ins live here as one declarative
+  record — edited as the app evolves — instead of scattered across build tags / Makefile.
+- **Regenerate / upgrade.** Because it pins `platform` + records the config, `dlc` can re-apply templates
+  against a newer platform version (a scaffold *upgrade*), not just first-time generation.
+- **Dogfood option:** define the manifest as a proto `Project` message → canonical-JSON `dlc.json`
+  (validated + `buf breaking`-evolvable + diffable, §7.2). **TOML** is the hand-edit-friendlier alternative.
+- **Prior art:** Qroma's "one source of truth and bill of materials" — the same idea.
