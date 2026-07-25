@@ -3,8 +3,8 @@
 Each subdir is a minimal, self-contained proof of one load-bearing assumption. **Kept, not thrown away** —
 they become standing regression tests so the foundation stays proven as code changes.
 
-Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅ (OPFS via WASI preopen),
-`cli/` (kong→TInput→engine, reflection-free), async.
+Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅,
+`cli/` ✅ (in-engine CLI bake-off — default: **ffcli**), async.
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
@@ -258,3 +258,58 @@ invisible to a live instance. Hydrate **then** dynamic-import the component.
 - Always coerce WASI u64/bigint to Number at the JS FS boundary.
 - Prefer headed Playwright (`spike-opfs-watch`) when debugging persistence; default CI stays headless.
 - Update plan §5.2 wording: preopen is FileData (browser) / path (Node), not a raw DirectoryHandle.
+
+---
+
+## Spike 4 — `cli/` (T-B1.4) — ✅ GREEN
+
+**Goal:** prove a subcommand + flag parser can live **inside** the TinyGo engine (host = argv forwarder);
+bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).
+
+**Run:** `devbox run make spike-cli` (also in `make test-b1`).
+
+### Bake-off (TinyGo `-target=wasip2` → jco → Node harness, 17-case matrix)
+
+| Variant | Tag | Compile | Matrix | `engine.component.wasm` |
+| --- | --- | --- | ---: | ---: |
+| stdlib `flag` | (default) | yes | yes | 1 050 185 |
+| `ff/v3/ffcli` | `cliffcli` | yes | yes | 1 362 722 |
+| hand-rolled | `clihand` | yes | yes | **592 883** |
+| `google/subcommands` | `clisub` | yes | no | 1 158 729 |
+| `spf13/cobra` | `clicobra` | yes | no | 2 519 247 |
+| `alecthomas/kong` | `clikong` | yes | no (panic) | 2 597 633 |
+| `alexflint/go-arg` | `cligoarg` | yes | **yes** | 1 512 511 |
+
+### Decision 22 / 25 picks
+
+**Default: `ff/v3/ffcli`** — matrix-green, real subcommand tree, stdlib `flag` syntax, one library for all ABI modes.
+
+Measured alternatives (still valid if we revisit per Decision 25):
+
+| ABI mode | Measured winner | Why |
+| --- | --- | --- |
+| **Portable / WAMR** | hand-rolled (`clihand`) | Leanest green (~593 KiB). Use if ESP32/WAMR size bites. |
+| **Rich / non-WAMR** | go-arg (`cligoarg`) | Struct-tag ergonomics, matrix-green under TinyGo. |
+
+### What we thought — and measured
+
+#### 1. “Reflection breaks TinyGo” → not uniformly true
+
+- **kong** compiles but **panics at runtime**: `reflect.Value.MethodByName` unimplemented (TinyGo).
+- **go-arg** uses struct-tag reflection and **passes the full matrix** under the same TinyGo wasip2 target.
+- Pick libraries from data; don’t ban the whole class.
+
+#### 2. cobra almost wins; Go `flag`’s `-name` is the trap
+
+cobra is green on 16/17 cases. It fails `greet -name world` because **pflag** treats single-dash as shorthand clusters (`-n -a -m -e`), while stdlib `flag` accepts `-name` as a long flag. Matrix case 3 is Go-flag-specific; rich apps that standardize on `--name` could still use cobra.
+
+#### 3. `google/subcommands` hardcodes `os.Args`
+
+`Commander.Execute` always parses `os.Args`. Assigning `os.Args = …` before `Execute` under TinyGo wasip2 **does not** feed the commander (every call → usage / fail). Unusable for in-engine `execute-cli(args)` without upstream API change.
+
+### Implications
+
+- Hosts stay thin argv forwarders; parser code ships in the engine.
+- Scaffolder ships **ffcli**; can later split hand (portable) vs go-arg (rich) if needed (Decision 25).
+- Prefer go-arg over kong if we want struct tags later; don’t assume cobra/`-name` parity with stdlib `flag`.
+- Untested smaller subcommand mux worth a follow-up: [`cristalhq/acmd`](https://github.com/cristalhq/acmd) (dep-free, nested `Subcommands`, injectable `Config.Args`).

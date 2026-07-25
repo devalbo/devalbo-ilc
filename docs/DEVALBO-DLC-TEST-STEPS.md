@@ -103,7 +103,7 @@ ls gen/go gen/ts                     # bindings present
 Pass: `gen/` populated, clean lint — validates the `wit/` + `proto/` drafts (shakes out `buf.gen.yaml`
 opts + `go_package`).
 
-**6 — Spikes** · 🟡 T-B1.1–3 ✅, T-B1.4–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
+**6 — Spikes** · 🟡 T-B1.1–4 ✅, T-B1.5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
 ```bash
 make test-b1                         # component / proto / opfs / cli / async
 ```
@@ -231,15 +231,39 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
 - **Automate as:** `spikes/opfs/` + Playwright (Vite serves the page).
 - **Findings:** [`spikes/README.md`](../spikes/README.md) Spike 3 (no DirectoryHandle preopen; browser shim bigint/`write` bug → vendored patch).
 
-### T-B1.4 — kong → TInput → engine boundary, engine stays reflection-free (Spike 4)
-- **Goal:** CLI parsing lives host-side (kong); the engine dispatches structured input without reflection.
-- **Builds on:** T-B1.1, T-B1.2.
+### T-B1.4 — in-engine CLI interpreter (Spike 4) — ✅ GREEN
+- **Goal:** prove a **subcommand + flag parser can live inside** the TinyGo engine so every host is just an argv forwarder. **Bake off** candidates (incl. reflection-based) and pick a **default per ABI mode** (Decision 22 + 25 / plan §8) from measured data — not folklore.
+- **Builds on:** T-B1.1 (wasip2 + jco). T-B1.2 optional (proto not required).
+- **Authoritative spike plan:** [`spikes/cli/README.md`](../spikes/cli/README.md) (command surface, matrix, bake-off tags, decision output).
+
+**B1 gate (must green):** at least one **lean** parser works under TinyGo — stdlib `flag` (default tag) and/or `ff/v3/ffcli` (`-tags cliffcli`); **hand-rolled** (`-tags clihand`) if both fail.
+
+**Spike complete (Decision 22):** full bake-off table filled for every candidate tag — `flag` · `cliffcli` · `clisub` · `clicobra` · `clikong` · `cligoarg` · `clihand` — each: compiles under wasip2? matrix green? wasm size? Then record **two defaults**: portable/WAMR → leanest green reflection-free; rich/non-WAMR → most ergonomic that still compiles under TinyGo.
+
 - **Steps:**
-  1. Native host (standard Go): kong parses `--name foo` into a struct → maps to proto `TInput`.
-  2. wasmtime instantiates the engine; passes the `TInput` bytes; engine decodes (go-lite) and returns `"hello foo"`.
-  3. Reflection-free check: `go list -deps ./engine | grep -E 'encoding/json|alecthomas/kong'` returns **nothing**; the engine **builds under TinyGo**.
-- **Pass:** returns `"hello foo"`; engine has no kong/encoding-json in its dependency graph; TinyGo build succeeds.
-- **Automate as:** `spikes/cli/` — a `go test` for the host + the dependency-graph assertion + a TinyGo build step.
+  1. Enrich the scaffold so `execute-cli` dispatches at least:
+     - `greet` — `--name` / positional, `--shout`, `--times`
+     - `count` — required `-n`, defaulted `--step`
+     - `host add <tier>` — **2-level** nesting  
+     Discipline for lean variants: no `fmt` in spike code; `flag.ContinueOnError` + `SetOutput(io.Discard)` (no `os.Exit`).
+  2. `make spike-cli` (or per-tag targets) builds each variant: `tinygo -target=wasip2` → jco → `node harness.mjs`.
+  3. Harness runs the **parsing matrix** with identical expects on every variant (see [`spikes/cli/README.md`](../spikes/cli/README.md)):
+
+     | # | argv | expect |
+     | --- | --- | --- |
+     | 1–3 | `greet --name world` / `--name=world` / `-name world` | `hello world` |
+     | 4 | `greet world` (positional) | `hello world` |
+     | 5 | `greet --name x --shout` | `HELLO X` |
+     | 6–7 | `greet --name x --times 2` (and reordered) | `hello x hello x` |
+     | 8–9 | `count -n 3` / `count -n 3 --step 2` | `count=3 step=1` / `… step=2` |
+     | 10–14 | type error, missing `-n`, unknown flag, unknown/empty command | `success=false` |
+     | 15–17 | `host add web` / `host add` / `host bogus` | `host+web` / error / error |
+
+  4. Per variant, record: **TinyGo compile?** · matrix green? · **`engine.component.wasm` size** (and note if compile failed — that’s a measured row, not a silent skip).
+  5. From the table, write the Decision 22 pick: **portable default** + **rich default** (scaffolder later wires from ABI mode / Decision 25). Findings → [`spikes/README.md`](../spikes/README.md).
+
+- **Pass:** ✅ B1 gate green (flag / ffcli / hand all matrix-green). Bake-off table in [`spikes/README.md`](../spikes/README.md) Spike 4; **default: ffcli** (hand / go-arg measured as per-ABI fall-backs). (kong panics; cobra fails Go-style `-name`; subcommands can't take injected argv; go-arg matrix-green under TinyGo.)
+- **Automate as:** `spikes/cli/` + `make spike-cli` / `scripts/spike-cli.sh` (in `make test-b1`).
 
 ### T-B1.5 — Async in the browser (Spike 5)
 - **Goal:** a "blocking" engine capability call doesn't deadlock the JS event loop (Asyncify).
@@ -252,7 +276,7 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
 - **Automate as:** part of `spikes/opfs/` or a dedicated `spikes/async/` harness.
 
 **B1 exit:** all T-B1.* green ⇒ every load-bearing assumption (component model, reflection-free protobuf,
-OPFS, host-side CLI boundary, async) is proven and *stays* proven as code changes.
+OPFS, **in-engine CLI interpreter**, async) is proven and *stays* proven as code changes.
 
 ---
 

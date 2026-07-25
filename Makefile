@@ -91,6 +91,14 @@ spike-opfs-watch: gen ## Spike 3 headed+slowMo; pauses so you can inspect OPFS i
 	cd $(SPIKE_OPFS) && npx jco transpile engine.component.wasm -o out
 	cd $(SPIKE_OPFS) && npm run test:watch
 
+# Spike 4 (T-B1.4): in-engine CLI bake-off (flag / ffcli / hand / sub / cobra /
+# kong / go-arg). B1 gate = ≥1 lean green; full table printed by the script.
+SPIKE_CLI := spikes/cli
+
+.PHONY: spike-cli
+spike-cli: gen ## Spike 4 (T-B1.4): in-engine CLI interpreter bake-off
+	@./scripts/spike-cli.sh
+
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)
 	@./scripts/test-b1.sh

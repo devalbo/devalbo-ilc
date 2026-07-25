@@ -94,7 +94,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
 | 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export; test host → **WASI Virt**; `sqlite-host` / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
 | 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
-| 22 | Go CLI framework | **kong** (`alecthomas/kong`) — the Typer analog — **host-side only (standard Go)** for `dlc` + the per-app CLI shim (parse → typed struct → proto `TInput`). **Not compiled into the TinyGo engine** — kong is reflection-heavy and TinyGo's `reflect` is partial (no `encoding/json`). The **engine's `execute-cli` dispatch is reflection-free / TinyGo-safe** (generated route table + protobuf-go-lite, or a minimal `argv→TInput` mapper). Bind-don't-supplant: cobra / urfave / go-arg (all host-side). |
+| 22 | CLI interpreter — in-engine, per-ABI-mode default | The CLI interpreter (subcommands + flags) lives **inside the engine**, so one parser serves every tier (CLI, web, embedded serial REPL) — the host just **forwards argv** to `execute-cli`. It must **compile under TinyGo**. **Default: `ff/v3/ffcli`** (Spike 4 matrix-green). Per-ABI split still available later (Decision 25): hand-rolled if portable size bites; go-arg if rich wants struct tags. kong panics (`MethodByName`); cobra fails Go-style `-name`; `google/subcommands` hardcodes `os.Args`. See [`spikes/README.md`](../spikes/README.md) Spike 4. |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
 | 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
 | 25 | ABI mode (WAMR toggle) | Targeting **WAMR/embedded** is a **setup-time** choice (`dlc new` / manifest `tiers`) that fixes the capability-boundary ABI: **on → portable byte ABI** (protobuf over `(ptr,len)`; also builds the wasip1 core; port-ready rules — §5.6); **off → rich Component-Model ABI** (rich WIT types, wasip2 only). Disk/wire stays protobuf either way. |
@@ -198,7 +198,7 @@ hosts/desktop/build/    # wails output
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
 | Async in browser | **Asyncify** (TinyGo built-in) / JSPI |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
-| CLI framework (Go) | **kong** (`alecthomas/kong`) — declarative struct→CLI (the Typer substitute); the `dlc` CLI + the per-app CLI shim. cobra / urfave / go-arg are drop-in alternatives (bind-don't-supplant) |
+| CLI interpreter (in-engine) | Runs *inside* the engine; must compile under TinyGo. **Default: ffcli.** Spike 4 also cleared hand-rolled / flag / go-arg; kong/cobra/`subcommands` red for in-engine — see Decision 22. |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
 
 **Why the lite generators (resolves the old #1 risk):** the official `google.golang.org/protobuf` is
@@ -403,7 +403,7 @@ their stress test.
   thing that makes porting possible at all).
 - **Byte boundary (protobuf over `(ptr,len)`)** in portable mode — identical on the Component Model and
   core wasm; custom caps bind as **WAMR native functions**, and the host **bounds-checks** guest pointers.
-- **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json` / reflection, kong host-side.
+- **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json`; the in-engine CLI parser defaults to reflection-free (`flag`/`ffcli`/hand-rolled) in portable mode. (Spike 4 also bakes off the reflection-based ones for the rich-mode default.)
 - **Handle `unavailable` for every capability** — SQLite→file-scan, network/RTC maybe-absent; degrade,
   never hard-fail.
 - **Short, run-to-completion, non-blocking handlers** — no long-lived goroutines / busy-waits (watchdog +
@@ -615,20 +615,21 @@ Both embedded mechanisms feed the same `execute-cli` entry, so **there is one di
 tier.** (This is the proposed method for "environments where a CLI isn't obvious.") Multi-handler routing
 and a protobuf **envelope** are **deferred** (Decision 10) — local-only in V1.
 
-**CLI binding (bind, don't supplant).** On the CLI tier the shim is thin: a Go CLI library parses argv → a
-typed args struct → mapped to the proto `TInput` → `execute-cli` → `command-result` mapped to an exit code.
-ILC's default is **kong** (Decision 22) — the Typer analog, where a struct's fields *are* the CLI, so it
-maps almost 1:1 onto the proto input. Any parser works (cobra / urfave / go-arg); ILC only requires the
-shim end at `execute-cli`. `dlc`'s own multi-subcommand CLI (§16.7) uses the same library.
+**CLI parsing is in the engine (one parser, every tier).** The engine's `execute-cli(args)` **is** the CLI
+interpreter — it parses subcommands + flags and dispatches. Every host is a thin **argv forwarder**: the
+native binary passes `os.Args`; the web UI builds an argv and calls `executeCli(args)`; the embedded serial
+REPL splits a line into argv. Same parser, same command set, everywhere — no host↔engine drift, and the
+embedded REPL gets the full command surface for free.
 
-**Where parsing runs (the TinyGo boundary).** The rich CLI parse (kong) runs in the **native host
-(standard Go)**, *not* in the engine — kong is reflection-heavy and TinyGo's `reflect` is partial (no
-`encoding/json`, missing `NumOut`; even stdlib `flag` is only partial). The host produces the proto
-`TInput`; the **engine's dispatch is reflection-free** — a generated route table + protobuf-go-lite decode,
-or a minimal hand-rolled `argv→TInput` mapper for the universal `execute-cli(args)` path. On **embedded**
-there is no kong at all (the C/native host or the serial REPL feeds the engine's minimal parser).
-**Invariant: nothing reflection-heavy compiles into the TinyGo engine** — the same rule that chose
-protobuf-go-lite (§4).
+**It must compile under TinyGo (the real hard boundary).** The interpreter compiles into the TinyGo engine.
+Reflection-free is the **default preference** (smaller binaries + TinyGo's `reflect` is fragile) — stdlib
+`flag` (+ `FlagSet`s), `ff`/`ffcli`, `google/subcommands`, or hand-rolled — but "reflection breaks TinyGo"
+is an assumption, so **Spike 4 bakes off the reflection-based ones too** (`kong`/`cobra`/`go-arg`), measuring
+rather than presuming.
+**Default is ffcli** (one parser everywhere). Decision 25 still allows a later per-ABI split —
+Spike 4 measured hand-rolled (smallest) and go-arg (struct tags) as the profile winners if we split.
+kong panics; cobra fails Go-style `-name`; `subcommands` can't take injected argv. (A host *may* still add
+its own flags — e.g. an engine path — but the **app command surface is the engine's**.)
 
 **Reactivity loop:** UI issues `execute-cli(["list-records"])` to read; a write emits `data-changed`; the
 host's subscription (React `useEngineEvent` hook / Wails `EventsOn`) invalidates and re-fetches.
@@ -681,7 +682,7 @@ of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wa
 wasip1+adapter path was abandoned). (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
 `tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR
 running a TinyGo core module on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile`
-persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly. **Each spike
+persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8). **Each spike
 records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
 (as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
@@ -853,6 +854,9 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 - **Composition + parameterization.** `--caps` / `--tiers` / `--ui` / `--storage` select a **base bundle +
   fragment overlays** (`import-fs`, §7.3); a token pass substitutes `{{.Module}}` / `{{.AppName}}` / the
   selected capability imports. Bundles are BFT/zip so they stay diffable.
+- **ABI-mode-aware defaults.** Scaffold library profile can follow ABI mode (Decision 25). **CLI default
+  is ffcli** for all modes; Spike 4 keeps hand-rolled / go-arg as measured fall-backs if we split later.
+  The principle generalizes to the whole default dependency set.
 - **Graduates to its own repo.** `/templates/` can later become a standalone repo (submodule optional),
   keeping template contribution independent of the framework — still `go:embed`'d into `dlc` at build.
 
@@ -866,7 +870,7 @@ for firmware. ILC's deltas: **one WASM engine across every tier** (vs separate f
 
 ### 16.7 The `dlc` command surface
 
-Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), built on **kong** (Decision 22):
+Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), parsed by the **in-engine CLI interpreter** (Decision 22 — one parser across CLI / web / embedded; default library profile follows ABI mode, Decision 25):
 
 | Command | Does |
 | --- | --- |
