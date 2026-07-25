@@ -7,8 +7,9 @@
 # WASM build artifacts
 *.wasm
 
-# Spike generated output (jco transpile, etc.)
+# Spike generated output (jco transpile, copied bindings, etc.)
 spikes/**/out/
+spikes/proto/spike.pb.ts
 
 # Go
 /bin/

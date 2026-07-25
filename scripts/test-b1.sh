@@ -20,6 +20,7 @@ run_spike() { # id  label  make-target
 }
 
 run_spike "T-B1.1" "component round-trip (TinyGo → wasip2 → component → jco)" spike-component
+run_spike "T-B1.2" "protobuf-go-lite ↔ es-lite under wasip2" spike-proto
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then

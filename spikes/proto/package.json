@@ -1,0 +1,11 @@
+{
+  "name": "spike-proto",
+  "private": true,
+  "type": "module",
+  "description": "Spike 2 (T-B1.2) — protobuf-go-lite ↔ protobuf-es-lite cross-decode harness",
+  "devDependencies": {
+    "@aptre/protobuf-es-lite": "^1.1.1",
+    "@bytecodealliance/jco": "^1.25.2",
+    "tsx": "^4.20.3"
+  }
+}

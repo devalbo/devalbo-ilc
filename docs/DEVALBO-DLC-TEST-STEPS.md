@@ -103,7 +103,7 @@ ls gen/go gen/ts                     # bindings present
 Pass: `gen/` populated, clean lint — validates the `wit/` + `proto/` drafts (shakes out `buf.gen.yaml`
 opts + `go_package`).
 
-**6 — Spikes** · 🟡 T-B1.1 ✅, T-B1.2–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
+**6 — Spikes** · 🟡 T-B1.1–2 ✅, T-B1.3–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
 ```bash
 make test-b1                         # component / proto / opfs / cli / async
 ```
@@ -207,16 +207,17 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
   - **`GOFLAGS=-buildvcs=false`** (set in `devbox.json` init_hook): git is non-functional inside the devbox pure env, so Go's VCS stamping aborts the build without it.
   - **npm deps are local to the spike.** ESM ignores `NODE_PATH`, so `spikes/component/package.json` pulls `jco` (which brings `@bytecodealliance/preview2-shim` transitively) into a local `node_modules` the transpiled output can resolve.
 
-### T-B1.2 — protobuf-go-lite under TinyGo, cross-decoded by es-lite (Spike 2)
+### T-B1.2 — protobuf-go-lite under TinyGo, cross-decoded by es-lite (Spike 2) — ✅ GREEN
 - **Goal:** reflection-free protobuf works in the TinyGo engine **and** round-trips to the web host.
-- **Builds on:** T-B0.2.
-- **Steps:**
-  1. `proto/spike.proto` with a small message; `buf generate` (go-lite + es-lite).
-  2. TinyGo program (`-target=wasip1`) encodes a message → **binary** and → **canonical JSON**; print both (hex + json).
-  3. Assert the **binary bytes** and the **JSON** match a checked-in golden.
-  4. Node: `protobuf-es-lite` decodes the same binary bytes → assert field-equality; `fromJSON` of the canonical JSON → same message.
-- **Pass:** engine compiles under TinyGo (no `reflect`/`encoding/json` pulled in); bytes match golden; es-lite decodes identically.
-- **Automate as:** `spikes/proto/` — a `go test` (native sanity) + a TinyGo build + a Node cross-decode test.
+- **Builds on:** T-B0.2, T-B1.1 (wasip2 + jco baseline).
+- **Steps (as implemented — `make spike-proto`):**
+  1. `proto/devalbo/spike/v1/spike.proto` (`SpikeMessage`); `make gen` (go-lite + es-lite).
+  2. TinyGo wasip2 engine: `executeCli(["binary"])` → `MarshalVT`, `["json"]` → `MarshalJSON`.
+  3. Native `go test` + Node harness assert both match `golden.hex` / `golden.json`.
+  4. Node (`tsx harness.ts`): `SpikeMessage.fromBinary` + `fromJsonString` → field-equal (`name=spike`, `count=42`, `ok=true`).
+- **Pass:** TinyGo wasip2 build succeeds; goldens match; es-lite cross-decode OK. ✅ `make test-b1`.
+- **Automate as:** `spikes/proto/` — native `go test` + wasip2 component + jco + `tsx` harness.
+- **Findings:** see [`spikes/README.md`](../spikes/README.md) Spike 2 (gen/ts import resolution; `encoding/json` comes from `cm`, not go-lite).
 
 ### T-B1.3 — OPFS filesystem persistence (Spike 3)
 - **Goal:** the engine's `os.WriteFile` reaches OPFS via WASI preopen and survives reload.

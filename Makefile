@@ -50,6 +50,25 @@ spike-component: gen ## Spike 1 (T-B1.1): component round-trip → prints ok:hi
 	cd $(SPIKE_COMPONENT) && npx jco transpile engine.component.wasm -o out
 	cd $(SPIKE_COMPONENT) && node harness.mjs
 
+# Spike 2 (T-B1.2): protobuf-go-lite under TinyGo + es-lite cross-decode.
+SPIKE_PROTO := spikes/proto
+
+.PHONY: spike-proto-goldens
+spike-proto-goldens: gen ## regenerate Spike 2 golden.hex / golden.json from the fixture
+	@go run ./spikes/proto/cmd/goldens
+
+.PHONY: spike-proto
+spike-proto: gen ## Spike 2 (T-B1.2): go-lite ↔ es-lite round-trip under wasip2
+	go test ./$(SPIKE_PROTO)/
+	cd $(SPIKE_PROTO) && npm install --silent --no-audit --no-fund
+	# Node resolves @aptre/* from the importing file's directory tree; copy the
+	# generated binding into the spike so spikes/proto/node_modules is found.
+	cp gen/ts/devalbo/spike/v1/spike.pb.ts $(SPIKE_PROTO)/spike.pb.ts
+	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+		-o $(SPIKE_PROTO)/engine.component.wasm ./$(SPIKE_PROTO)
+	cd $(SPIKE_PROTO) && npx jco transpile engine.component.wasm -o out
+	cd $(SPIKE_PROTO) && npx tsx harness.ts
+
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)
 	@./scripts/test-b1.sh

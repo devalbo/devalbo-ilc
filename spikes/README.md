@@ -3,7 +3,7 @@
 Each subdir is a minimal, self-contained proof of one load-bearing assumption. **Kept, not thrown away** —
 they become standing regression tests so the foundation stays proven as code changes.
 
-Bootstrap spikes (B1): `component/` (TinyGo→wasip2→jco), `proto/` (protobuf-go-lite ↔ es-lite),
+Bootstrap spikes (B1): `component/` ✅ (TinyGo→wasip2→jco), `proto/` ✅ (protobuf-go-lite ↔ es-lite),
 `opfs/` (filesystem persistence), `cli/` (kong→TInput→engine, reflection-free), async.
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
@@ -126,3 +126,66 @@ a lockfile-driven `wkg wit fetch` earns the extra moving parts.
 - Keep `wit/deps/` in sync with whatever the world `include`s; re-run `wkg wit fetch` when imports change.
 - Spike-local npm deps for anything jco-transpiled (ESM resolution).
 - Spike 2 (`proto/`) and friends can assume this round-trip shape is the baseline.
+
+---
+
+## Spike 2 — `proto/` (T-B1.2) — ✅ GREEN
+
+**Goal:** prove reflection-free protobuf works in a TinyGo wasip2 engine **and** round-trips to JS via
+`protobuf-es-lite` (binary + canonical JSON).
+
+**Run:** `devbox run make spike-proto` (also in `make test-b1`).
+
+### What works
+
+```
+fixture SpikeMessage{name:"spike", count:42, ok:true}
+  → TinyGo wasip2 engine: executeCli(["binary"|"json"])
+  → goldens (golden.hex / golden.json) match
+  → Node: SpikeMessage.fromBinary + fromJsonString → same fields
+```
+
+Key pieces:
+
+- Schema: `proto/devalbo/spike/v1/spike.proto` (idiomatic buf layout, not a flat `proto/spike.proto`).
+- Engine modes: `["binary"]` → `MarshalVT()`, `["json"]` → `MarshalJSON()` (go-lite).
+- Native `go test ./spikes/proto/` checks goldens + that `spikev1` does **not** depend on `encoding/json`.
+- Harness uses `tsx` + a **copied** `spike.pb.ts` (see findings below).
+- Regen goldens: `make spike-proto-goldens`.
+
+### What we thought should work — and didn't
+
+#### 1. Import generated TS straight from `gen/ts/…`
+
+**Assumption:** harness can `import { SpikeMessage } from "../../gen/ts/devalbo/spike/v1/spike.pb.ts"` and
+resolve `@aptre/protobuf-es-lite/*` from `spikes/proto/node_modules`.
+
+**What broke:** Node walks `node_modules` from the **importing file's** directory (`gen/ts/…`), not from
+cwd / the harness package. `gen/` is gitignored and has no deps → `Cannot find module '@aptre/protobuf-es-lite/message'`.
+
+**Fix:** `make spike-proto` copies the binding to `spikes/proto/spike.pb.ts` (gitignored) before `tsx`
+runs. Long-term the web host may want a root/`frontend` package that owns `@aptre/protobuf-es-lite`.
+
+#### 2. Whole spike package is free of `encoding/json`
+
+**Assumption:** `go list -deps ./spikes/proto` would show no `encoding/json` / `reflect`.
+
+**What broke:** `go.bytecodealliance.org/cm` (pulled in by WIT bindings) imports `encoding/json`. That is
+orthogonal to protobuf. go-lite's JSON path uses `json-iterator-lite`, not stdlib `encoding/json`.
+
+**Fix:** assert `encoding/json` is absent from deps of **`gen/go/devalbo/spike/v1` only**. The real
+TinyGo gate remains: the wasip2 build succeeds (as in Spike 1).
+
+#### 3. Flat `proto/spike.proto` + wasip1
+
+**Assumption (original test-steps sketch):** flat proto path and `-target=wasip1`.
+
+**What we did instead:** versioned `devalbo/spike/v1` (buf `STANDARD`) and **wasip2** (Spike 1 baseline).
+
+### Implications
+
+- Engine I/O can use go-lite `MarshalVT` / `MarshalJSON` under wasip2; web host can decode with es-lite
+  `fromBinary` / `fromJsonString` against the same schema.
+- Checked-in goldens lock both encodings; regenerate deliberately via `make spike-proto-goldens`.
+- Don't import `gen/ts` from a spike-local Node package without either copying the binding or installing
+  `@aptre/protobuf-es-lite` where Node's resolver will find it.

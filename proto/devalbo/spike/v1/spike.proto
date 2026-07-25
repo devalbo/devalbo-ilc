@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package devalbo.spike.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/spike/v1;spikev1";
+
+// Minimal message for Spike 2 (T-B1.2): prove protobuf-go-lite encodes under TinyGo
+// and protobuf-es-lite decodes the same bytes / canonical JSON in JS.
+message SpikeMessage {
+  string name = 1;
+  uint32 count = 2;
+  bool ok = 3;
+}
