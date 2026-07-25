@@ -69,6 +69,28 @@ spike-proto: gen ## Spike 2 (T-B1.2): go-lite ↔ es-lite round-trip under wasip
 	cd $(SPIKE_PROTO) && npx jco transpile engine.component.wasm -o out
 	cd $(SPIKE_PROTO) && npx tsx harness.ts
 
+# Spike 3 (T-B1.3): engine os.WriteFile → WASI preopen → OPFS; survives reload.
+# Default headless. Watch the browser: `make spike-opfs-watch` (or SPIKE_OPFS_HEADED=1).
+SPIKE_OPFS := spikes/opfs
+
+.PHONY: spike-opfs
+spike-opfs: gen ## Spike 3 (T-B1.3): OPFS persistence (headless Playwright)
+	cd $(SPIKE_OPFS) && npm install --silent --no-audit --no-fund
+	cd $(SPIKE_OPFS) && npx playwright install chromium
+	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+		-o $(SPIKE_OPFS)/engine.component.wasm ./$(SPIKE_OPFS)
+	cd $(SPIKE_OPFS) && npx jco transpile engine.component.wasm -o out
+	cd $(SPIKE_OPFS) && npm test
+
+.PHONY: spike-opfs-watch
+spike-opfs-watch: gen ## Spike 3 headed+slowMo; pauses so you can inspect OPFS in DevTools
+	cd $(SPIKE_OPFS) && npm install --silent --no-audit --no-fund
+	cd $(SPIKE_OPFS) && npx playwright install chromium
+	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+		-o $(SPIKE_OPFS)/engine.component.wasm ./$(SPIKE_OPFS)
+	cd $(SPIKE_OPFS) && npx jco transpile engine.component.wasm -o out
+	cd $(SPIKE_OPFS) && npm run test:watch
+
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)
 	@./scripts/test-b1.sh

@@ -3,8 +3,8 @@
 Each subdir is a minimal, self-contained proof of one load-bearing assumption. **Kept, not thrown away** —
 they become standing regression tests so the foundation stays proven as code changes.
 
-Bootstrap spikes (B1): `component/` ✅ (TinyGo→wasip2→jco), `proto/` ✅ (protobuf-go-lite ↔ es-lite),
-`opfs/` (filesystem persistence), `cli/` (kong→TInput→engine, reflection-free), async.
+Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅ (OPFS via WASI preopen),
+`cli/` (kong→TInput→engine, reflection-free), async.
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
@@ -189,3 +189,72 @@ TinyGo gate remains: the wasip2 build succeeds (as in Spike 1).
 - Checked-in goldens lock both encodings; regenerate deliberately via `make spike-proto-goldens`.
 - Don't import `gen/ts` from a spike-local Node package without either copying the binding or installing
   `@aptre/protobuf-es-lite` where Node's resolver will find it.
+
+---
+
+## Spike 3 — `opfs/` (T-B1.3) — ✅ GREEN
+
+**Goal:** engine `os.WriteFile` reaches OPFS via WASI preopen and survives a page reload.
+
+**Run:**
+- Headless (CI): `devbox run make spike-opfs`
+- **Watch the browser:** `devbox run make spike-opfs-watch` (headed + slowMo; pauses at the end so you
+  can open DevTools → Application → OPFS). Or `SPIKE_OPFS_HEADED=1` for headed without pause.
+
+### What works
+
+```
+hydrate OPFS → preview2-shim FileData tree → instantiate wasip2 engine
+  → executeCli(["write","/hello.txt","persist-me"])
+  → flush tree → OPFS
+  → page.reload()
+  → hydrate + boot again → executeCli(["read",…]) === "persist-me"
+  → direct OPFS getFileHandle also sees the bytes
+```
+
+Key pieces: `spikes/opfs/{main.go,app.js,opfs-bridge.js,shim/filesystem.js,opfs.spec.js}`, Vite + Playwright.
+
+### What we thought should work — and didn't
+
+#### 1. `setPreopens({'/': await navigator.storage.getDirectory()})`
+
+**Assumption (plan §5.2 / test-steps):** pass an OPFS `FileSystemDirectoryHandle` straight into
+preview2-shim preopens.
+
+**Reality:** browser `_setPreopens` wants a **FileData tree**
+(`{ dir: { name: { source: Uint8Array } } }`), not a DirectoryHandle. Node `_setPreopens` wants host
+path strings. There is no first-class OPFS backend in current preview2-shim (0.17.x; browser FS is
+experimental in-memory).
+
+**Fix:** `opfs-bridge.js` hydrates OPFS → FileData before instantiate, and flushes FileData → OPFS
+after writes. Document this as the web-host pattern until upstream grows a real OPFS backend.
+
+#### 2. Stock browser `filesystem.js` is enough for TinyGo `os.WriteFile`
+
+**Assumption:** once preopens are set, TinyGo WriteFile just works (it does under the **Node** shim).
+
+**What broke:**
+| Symptom | Cause |
+| --- | --- |
+| `write … errno 70` (ESPIPE / illegal seek) | `Descriptor.write` used `offset !== 0`, but WASI `filesize` is a **bigint** (`0n !== 0` is true) |
+| `Cannot convert a BigInt value to a number` on read | `source.slice(offset, …)` passed bigint args |
+| Incomplete APIs | upstream `getFlags` / `setSize` were stubs (we still patched them) |
+
+**Fix:** vendored `spikes/opfs/shim/filesystem.js` on top of **preview2-shim@0.19.0** (upstream now
+has read bigint coercion + `offset !== 0n`; we still patch `getFlags`/`setSize` stubs, `openAt`
+truncate, and write offset coercion for `Number(0)`). Vite aliases
+`@bytecodealliance/preview2-shim/filesystem` to that file. Worth upstreaming the remaining stubs.
+
+#### 3. Hydrate after the engine is already imported
+
+**Assumption:** `_setFileData` anytime before `executeCli` is fine.
+
+**Reality:** guests snapshot the preopen Descriptor at instantiation. Later `_setFileData` swaps are
+invisible to a live instance. Hydrate **then** dynamic-import the component.
+
+### Implications
+
+- Web host needs an **OPFS ↔ preview2-shim FileData bridge** (or a future upstream OPFS backend).
+- Always coerce WASI u64/bigint to Number at the JS FS boundary.
+- Prefer headed Playwright (`spike-opfs-watch`) when debugging persistence; default CI stays headless.
+- Update plan §5.2 wording: preopen is FileData (browser) / path (Node), not a raw DirectoryHandle.

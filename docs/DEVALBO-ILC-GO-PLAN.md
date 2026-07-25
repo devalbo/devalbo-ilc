@@ -275,7 +275,7 @@ WASI calls. Each host binds the WASI root:
 
 | Host | WASI root preopen |
 | --- | --- |
-| Web | **OPFS** (`navigator.storage.getDirectory()`) **or** an **FSA-granted directory** (`showDirectoryPicker`, Chromium) — both are `FileSystemDirectoryHandle`s — via `@bytecodealliance/preview2-shim` `setPreopens` |
+| Web | **OPFS** (`navigator.storage.getDirectory()`) **or** an **FSA-granted directory** (`showDirectoryPicker`, Chromium). Current `@bytecodealliance/preview2-shim` browser FS is an **in-memory FileData tree** (`_setFileData` / `_setPreopens({"/": tree})`), **not** a raw `FileSystemDirectoryHandle` — hydrate/flush OPFS ↔ FileData in the host (Spike 3, `spikes/opfs/opfs-bridge.js`). Patch or replace upstream browser `write`/`read` bigint handling before relying on stock shim. |
 | Desktop / CLI | native user-data dir (`~/.config/<app>`) via wasmtime WASI preopen |
 | ESP32-S3 / RP2350 | on-chip flash / littlefs, preopened by the WAMR host |
 | RP2040 (native) | littlefs mounted directly; `os` shim maps to it |

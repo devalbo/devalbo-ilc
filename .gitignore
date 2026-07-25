@@ -10,6 +10,9 @@
 # Spike generated output (jco transpile, copied bindings, etc.)
 spikes/**/out/
 spikes/proto/spike.pb.ts
+spikes/opfs/test-results/
+spikes/opfs/playwright-report/
+spikes/opfs/blob-report/
 
 # Go
 /bin/

@@ -103,7 +103,7 @@ ls gen/go gen/ts                     # bindings present
 Pass: `gen/` populated, clean lint — validates the `wit/` + `proto/` drafts (shakes out `buf.gen.yaml`
 opts + `go_package`).
 
-**6 — Spikes** · 🟡 T-B1.1–2 ✅, T-B1.3–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
+**6 — Spikes** · 🟡 T-B1.1–3 ✅, T-B1.4–5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
 ```bash
 make test-b1                         # component / proto / opfs / cli / async
 ```
@@ -219,16 +219,17 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
 - **Automate as:** `spikes/proto/` — native `go test` + wasip2 component + jco + `tsx` harness.
 - **Findings:** see [`spikes/README.md`](../spikes/README.md) Spike 2 (gen/ts import resolution; `encoding/json` comes from `cm`, not go-lite).
 
-### T-B1.3 — OPFS filesystem persistence (Spike 3)
+### T-B1.3 — OPFS filesystem persistence (Spike 3) — ✅ GREEN
 - **Goal:** the engine's `os.WriteFile` reaches OPFS via WASI preopen and survives reload.
 - **Builds on:** T-B1.1.
-- **Steps:**
-  1. Engine handler writes `/<name>.txt` with `os.WriteFile`.
-  2. Web worker: `setPreopens({'/': await navigator.storage.getDirectory()})`, boot jco, call the handler.
-  3. **Reload the page**; call a read handler for the same path.
-  4. Confirm the file exists directly in OPFS (DevTools → Application → OPFS).
-- **Pass:** content read back after reload equals what was written; visible in OPFS.
-- **Automate as:** a Playwright/headless-Chromium test in `spikes/opfs/`.
+- **Steps (as implemented — `make spike-opfs`):**
+  1. Engine: `executeCli(["write","/hello.txt","persist-me"])` / `["read",…]` via `os.WriteFile`/`ReadFile`.
+  2. Browser host hydrates OPFS → preview2-shim **FileData** tree (`_setFileData`), then instantiates the component (not a raw `DirectoryHandle` — see findings).
+  3. After write, flush FileData → OPFS; **reload**; hydrate + boot again; read back.
+  4. Assert engine read + direct `getFileHandle` both return `persist-me`.
+- **Pass:** ✅ Playwright green. **Watch:** `make spike-opfs-watch` (headed, pauses for DevTools → OPFS).
+- **Automate as:** `spikes/opfs/` + Playwright (Vite serves the page).
+- **Findings:** [`spikes/README.md`](../spikes/README.md) Spike 3 (no DirectoryHandle preopen; browser shim bigint/`write` bug → vendored patch).
 
 ### T-B1.4 — kong → TInput → engine boundary, engine stays reflection-free (Spike 4)
 - **Goal:** CLI parsing lives host-side (kong); the engine dispatches structured input without reflection.
