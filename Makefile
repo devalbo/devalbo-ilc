@@ -13,6 +13,7 @@ ADAPTER     ?= wasi_snapshot_preview1.wasm
 .PHONY: gen
 gen: ## generate WIT + proto bindings (requires devbox shell)
 	wit-bindgen-go generate --world engine --out gen/go ./wit
+	wit-bindgen-go generate --world async-engine --out gen/go ./wit
 	cd proto && buf lint && buf generate
 
 .PHONY: build-engine
@@ -98,6 +99,14 @@ SPIKE_CLI := spikes/cli
 .PHONY: spike-cli
 spike-cli: gen ## Spike 4 (T-B1.4): in-engine CLI interpreter bake-off
 	@./scripts/spike-cli.sh
+
+# Spike 5 (T-B1.5): dual-track async probe — Rich/CM (jco; may YELLOW) +
+# Portable/WAMR-shaped (wasip1 + blocking host; expect GREEN). No ILC async shims.
+SPIKE_ASYNC := spikes/async
+
+.PHONY: spike-async
+spike-async: gen ## Spike 5 (T-B1.5): async probe Rich/CM + Portable/WAMR-shaped
+	@./scripts/spike-async.sh
 
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)

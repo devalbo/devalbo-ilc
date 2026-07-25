@@ -30,3 +30,17 @@ world engine {
   // A one-shot CLI may additionally use standard wasi:cli/command `run` + get-arguments.
   export execute-cli: func(args: list<string>) -> command-result;
 }
+
+// Spike 5 (T-B1.5) — Rich/CM async ecosystem probe only. Not part of the product
+// bootstrap world. Host implements `delay` (JS may return a Promise); guest calls
+// it synchronously. See docs/WASI-UPGRADES.md (no ILC async shims).
+interface host-delay {
+  delay: func(ms: u32) -> string;
+}
+
+world async-engine {
+  include wasi:cli/imports@0.2.0;
+  import host-delay;
+  use types.{command-result};
+  export execute-cli: func(args: list<string>) -> command-result;
+}

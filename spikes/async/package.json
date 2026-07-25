@@ -1,0 +1,9 @@
+{
+  "name": "spike-async",
+  "private": true,
+  "type": "module",
+  "description": "Spike 5 (T-B1.5) — Rich/CM async ecosystem probe; jco + preview2-shim.",
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.25.2"
+  }
+}

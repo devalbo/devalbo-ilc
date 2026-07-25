@@ -103,7 +103,7 @@ ls gen/go gen/ts                     # bindings present
 Pass: `gen/` populated, clean lint — validates the `wit/` + `proto/` drafts (shakes out `buf.gen.yaml`
 opts + `go_package`).
 
-**6 — Spikes** · 🟡 T-B1.1–4 ✅, T-B1.5 pending · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
+**6 — Spikes** · T-B1.1–4 ✅, T-B1.5 Rich 🟡 / Portable ✅ · ▶ **auto:** `make test-b1` → [`scripts/test-b1.sh`](../scripts/test-b1.sh)
 ```bash
 make test-b1                         # component / proto / opfs / cli / async
 ```
@@ -265,18 +265,37 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
 - **Pass:** ✅ B1 gate green (flag / ffcli / hand all matrix-green). Bake-off table in [`spikes/README.md`](../spikes/README.md) Spike 4; **default: ffcli** (hand / go-arg measured as per-ABI fall-backs). (kong panics; cobra fails Go-style `-name`; subcommands can't take injected argv; go-arg matrix-green under TinyGo.)
 - **Automate as:** `spikes/cli/` + `make spike-cli` / `scripts/spike-cli.sh` (in `make test-b1`).
 
-### T-B1.5 — Async in the browser (Spike 5)
-- **Goal:** a "blocking" engine capability call doesn't deadlock the JS event loop (Asyncify).
+### T-B1.5 — Dual-track async probe (Spike 5) — Rich 🟡 · Portable ✅
+- **Goal:** on each Decision 25 track, can the guest **synchronously** call a host “wait ~50ms” import and get a correct result — **without an ILC async shim**? See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md).
 - **Builds on:** T-B1.1.
-- **Steps:**
-  1. Host provides a capability that resolves after a `setTimeout`/`queueMicrotask` (genuinely async in JS).
-  2. Engine calls it synchronously (from the Go side) and uses the result.
-  3. Run under jco in the browser/Node harness.
-- **Pass:** the call returns the value and the handler completes (no hang); works with TinyGo's Asyncify.
-- **Automate as:** part of `spikes/opfs/` or a dedicated `spikes/async/` harness.
+- **Run:** `make spike-async` → [`scripts/spike-async.sh`](../scripts/spike-async.sh) (in `make test-b1`).
+- **Authoritative matrix:** [`spikes/async/README.md`](../spikes/async/README.md) (keep that table updated when results change).
 
-**B1 exit:** all T-B1.* green ⇒ every load-bearing assumption (component model, reflection-free protobuf,
-OPFS, **in-engine CLI interpreter**, async) is proven and *stays* proven as code changes.
+**Test execution matrix** (one row = one assertion; fixtures in spike README):
+
+| ID | Fixture | Assertion | Result (2026-07-25) |
+| --- | --- | --- | --- |
+| **R1.1** | F-R-sync | Call completes within 5s (no throw / timeout) | 🔴 FAIL — throw: `expected a string, received [object]` |
+| **R1.2** | F-R-sync | `command-result.success === true` | ⬜ SKIP (blocked by R1.1) |
+| **R1.3** | F-R-sync | `output` decodes to `"ok:50"` | ⬜ SKIP (blocked by R1.1) |
+| **R1.4** | F-R-sync | Event-loop tick counter &gt; 0 during the call | ⬜ SKIP (blocked by R1.1) |
+| **R2.1** | F-R-jspi | Runtime has `WebAssembly.Suspending` or `WebAssembly.promising` | 🔴 FAIL — neither present (Node v22.23.1) |
+| **R2.2** | F-R-jspi | Transpiled module exports `executeCli` | ⬜ SKIP (blocked by R2.1) |
+| **R2.3** | F-R-jspi | Call completes within 5s (no throw / timeout) | ⬜ SKIP (blocked by R2.1) |
+| **R2.4** | F-R-jspi | `command-result.success === true` | ⬜ SKIP (blocked by R2.1) |
+| **R2.5** | F-R-jspi | `output` decodes to `"ok:50"` | ⬜ SKIP (blocked by R2.1) |
+| **R2.6** | F-R-jspi | Event-loop tick counter &gt; 0 during the call | ⬜ SKIP (blocked by R2.1) |
+| **P1.1** | F-P | `run_wait` export exists and `Call` returns without error | 🟢 PASS |
+| **P1.2** | F-P | Return value `== 50` | 🟢 PASS |
+| **P1.3** | F-P | Wall elapsed ≥ 50ms (host actually blocked) | 🟢 PASS |
+
+Roll-up: **RICH=YELLOW** · **PORTABLE=GREEN**.
+
+- **Pass:** P1 green; Rich green **or** yellow with findings (no shim to force green).
+- **Automate as:** `spikes/async/` + `make spike-async`.
+
+**B1 exit:** T-B1.1–4 green + T-B1.5 green **or** documented yellow ecosystem gap ⇒ load-bearing
+assumptions proven or explicitly deferred (async custom caps wait on jco JSPI / WASI 0.3 — no ILC shim).
 
 ---
 

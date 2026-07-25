@@ -4,7 +4,7 @@ Each subdir is a minimal, self-contained proof of one load-bearing assumption. *
 they become standing regression tests so the foundation stays proven as code changes.
 
 Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅,
-`cli/` ✅ (in-engine CLI bake-off — default: **ffcli**), async.
+`cli/` ✅ (ffcli default), `async/` 🟡/✅ (Rich YELLOW · Portable GREEN).
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
@@ -313,3 +313,17 @@ cobra is green on 16/17 cases. It fails `greet -name world` because **pflag** tr
 - Scaffolder ships **ffcli**; can later split hand (portable) vs go-arg (rich) if needed (Decision 25).
 - Prefer go-arg over kong if we want struct tags later; don’t assume cobra/`-name` parity with stdlib `flag`.
 - Untested smaller subcommand mux worth a follow-up: [`cristalhq/acmd`](https://github.com/cristalhq/acmd) (dep-free, nested `Subcommands`, injectable `Config.Args`).
+
+---
+
+## Spike 5 — `async/` (T-B1.5) — Rich 🟡 · Portable ✅
+
+**Test execution matrix** (one row = one assertion):  
+[`async/README.md`](./async/README.md) — **R1.\***, **R2.\***, **P1.\***.
+
+**Run:** `devbox run make spike-async`. **No ILC async shims.**
+
+### Implications → [`docs/WASI-UPGRADES.md`](../docs/WASI-UPGRADES.md)
+
+- Rich: async custom caps on web wait on JSPI / WASI 0.3 guest.
+- Portable: blocking native-import path is good for TinyGo wasip1 / future WAMR.

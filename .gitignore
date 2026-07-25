@@ -9,6 +9,8 @@
 
 # Spike generated output (jco transpile, copied bindings, etc.)
 spikes/**/out/
+spikes/**/out-sync/
+spikes/**/out-jspi/
 spikes/proto/spike.pb.ts
 spikes/opfs/test-results/
 spikes/opfs/playwright-report/

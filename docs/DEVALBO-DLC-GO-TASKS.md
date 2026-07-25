@@ -54,9 +54,9 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [x] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip under `tinygo -target=wasip2`; `protobuf-es-lite` decodes the same bytes/JSON in JS. `proto/devalbo/spike/v1/spike.proto`, `spikes/proto/`, `make spike-proto` / `make test-b1`. Findings → [`spikes/README.md`](../spikes/README.md) (Spike 2): copy generated `.pb.ts` into the spike for Node resolution; `encoding/json` in the full spike deps comes from `cm`, not go-lite.
 - [x] **Spike 3 — OPFS filesystem:** engine `os.WriteFile` persists via WASI preopen → OPFS and survives reload. `spikes/opfs/`, `make spike-opfs` / `make spike-opfs-watch` (headed). Findings → [`spikes/README.md`](../spikes/README.md): preview2-shim browser wants FileData not DirectoryHandle; stock shim breaks TinyGo writes on bigint offsets (vendored `shim/filesystem.js`)
 - [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli** (hand / go-arg remain measured fall-backs if we split later). `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 + 25.
-- [ ] **Spike 5 — async in browser:** an engine capability call that "blocks" works under jco via TinyGo's Asyncify (no event-loop deadlock)
+- [x] **Spike 5 — dual-track async probe:** **Rich 🟡** (jco Promise import gap / no JSPI runtime) · **Portable ✅** (TinyGo wasip1 + blocking `env.host_delay`; wazero stand-in for WAMR native fns). No ILC async shims. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
 
-**Exit:** all five green, **each with a findings section in `spikes/README.md`**; any plan-contradicting finding folded back into the plan (as Spike 1 did).
+**Exit:** Spikes 1–4 green; Spike 5 green **or** documented yellow/red ecosystem gap; **each with a findings section in `spikes/README.md`**; plan-contradicting findings folded back (as Spike 1 did).
 
 ---
 

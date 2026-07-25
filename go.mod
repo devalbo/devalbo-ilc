@@ -9,6 +9,7 @@ require (
 	github.com/google/subcommands v1.2.0
 	github.com/peterbourgon/ff/v3 v3.4.0
 	github.com/spf13/cobra v1.9.1
+	github.com/tetratelabs/wazero v1.9.0
 	go.bytecodealliance.org/cm v0.3.0
 )
 

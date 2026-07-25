@@ -83,7 +83,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 8 | On-disk format | **Proto-schema'd canonical JSON** (protobuf governs shape/evolution; binary proto on the wire) |
 | 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT-SQLite |
 | 10 | Dispatch | **Local-only in V1** (no envelope/routing yet) |
-| 11 | Async bridge | **Asyncify/JSPI in the browser** (TinyGo already uses Asyncify); native/embedded block freely |
+| 11 | Async bridge (Rich/CM vs WAMR split) | **Rich/CM:** Spike 5 🟡 — stock jco cannot await Promise imports without JSPI/WASI 0.3; **no ILC shims**. **Portable/WAMR:** Spike 5 ✅ — TinyGo wasip1 + blocking `wasmimport` host (WAMR native-fn shape). See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
 | 12 | Capability set | WASI FS · SQLite-index · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5) |
 | 13 | Display | **Discovery (`describe`) + draw-command list + retained widget tree**; output-only |
 | 14 | Input | **Universal `execute-cli`**; host maps native input → command (serial REPL / input-map on MCUs) |
@@ -196,7 +196,7 @@ hosts/desktop/build/    # wails output
 | Native/desktop/CLI runtime | **wasmtime** (Go embedding) + `modernc.org/sqlite` + **Wails v2** |
 | Embedded runtime | **WAMR** on ESP32-S3 / RP2350 (official Espressif WAMR ESP-IDF component); **TinyGo native** (RP2040) |
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
-| Async in browser | **Asyncify** (TinyGo built-in) / JSPI |
+| Async | Spike 5: Rich/CM 🟡 (jco/JSPI gap); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
 | CLI interpreter (in-engine) | Runs *inside* the engine; must compile under TinyGo. **Default: ffcli.** Spike 4 also cleared hand-rolled / flag / go-arg; kong/cobra/`subcommands` red for in-engine — see Decision 22. |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
@@ -682,7 +682,7 @@ of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wa
 wasip1+adapter path was abandoned). (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
 `tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR
 running a TinyGo core module on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile`
-persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8). **Each spike
+persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8); (7) **Spike 5 (2026-07-25)** — Rich 🟡 / Portable ✅ (`spikes/async/`); jco Promise gap vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
 records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
 (as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
@@ -732,8 +732,8 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
    documented alternative, defaulting to wasm.
 5. **Display input on embedded** beyond the input-map (Decision 14) — a symmetric **Input capability** is
    the Phase-5 portable answer if host-side input proves limiting.
-6. **Component Model async maturity** — WASI Preview 2 async is in flux; the engine stays on the
-   Asyncify-backed blocking model to avoid depending on it.
+6. **Component Model async maturity** — WASI 0.3 brings native CM async, but guest/host readiness is
+   uneven; bootstrap stays on **wasip2 + Asyncify**. Upgrade gates live in [`WASI-UPGRADES.md`](./WASI-UPGRADES.md).
 7. **Two build targets (component vs core-wasm); the adapter path is abandoned.** Component tiers build
    `-target=wasip2` directly (Spike 1). **WAMR** has no Component Model, so embedded needs a *separate*
    core-wasm build — a build seam behind build tags (§5.3), reconciled when embedded lands. The originally
