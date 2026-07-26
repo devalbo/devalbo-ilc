@@ -32,34 +32,11 @@ import (
 	"go.bytecodealliance.org/cm"
 )
 
-func init() {
-	wit.Exports.Execute = execute
-	// The world declares execute-cli, so SOMETHING must satisfy it or the
-	// component will not build. Apps do not have an argv shim — their hosts
-	// parse (Decision 28) — so the default refuses, and `dlc` installs its own
-	// via SetExecuteCli until the shim retires.
-	wit.Exports.ExecuteCli = executeCliUnsupported
-}
+func init() { wit.Exports.Execute = execute }
 
 // execute is the real boundary: method_id + proto-encoded request bytes.
 func execute(method uint32, request cm.List[uint8]) wit.CommandResult {
 	return ToCommandResult(platform.Execute(method, request.Slice()))
-}
-
-var executeCli func(args []string) platform.Result
-
-// SetExecuteCli installs an argv shim for the transitional `execute-cli` export.
-// Only `dlc` itself uses this; a scaffolded app leaves it unset, and calling
-// execute-cli on that app returns a clear error rather than a mystery.
-func SetExecuteCli(fn func(args []string) platform.Result) { executeCli = fn }
-
-func executeCliUnsupported(args cm.List[string]) wit.CommandResult {
-	if executeCli != nil {
-		return ToCommandResult(executeCli(args.Slice()))
-	}
-	return ToCommandResult(platform.Result{
-		Err: "execute-cli is not implemented by this engine; the host builds a request and calls execute (Decision 28)",
-	})
 }
 
 // ToCommandResult maps the host-neutral Result onto the WIT record. Exported

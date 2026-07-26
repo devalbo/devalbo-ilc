@@ -18,7 +18,7 @@ echo "T-B0.4 — structure present:"
 for d in engine hosts/native hosts/web wit proto frontend templates spikes scripts docs; do exists "$d"; done
 
 echo; echo "T-B0.4 — core files present:"
-for f in go.mod devbox.json Makefile .gitignore scripts/preflight.sh \
+for f in go.mod devbox.json Makefile .gitignore AGENTS.md scripts/preflight.sh \
          wit/ilc.wit proto/devalbo/ilc/v1/common.proto proto/devalbo/dlc/v1/commands.proto \
          proto/buf.yaml proto/buf.gen.yaml; do exists "$f"; done
 

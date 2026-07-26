@@ -90,12 +90,10 @@ check() { # label  condition-already-evaluated
 # fine until the suite grows, which is exactly how it got here.
 [ "$status" -ne 0 ]; check "parity check exited non-zero" $?
 grep -q "PARITY MISMATCH" <<<"$out"; check "reported a PARITY MISMATCH" $?
-grep -q "wasm-parity \[argv\]" <<<"$out"; check "ran the argv boundary" $?
 grep -q "wasm-parity \[method\]" <<<"$out"; check "ran the method boundary" $?
-[ "$(grep -c "PARITY MISMATCH" <<<"$out")" -eq 2 ]; check "both response streams caught it" $?
-# The probe empties the template FS, so the written trees must differ too — the
+# The probe empties the template FS, so the written tree must differ too — the
 # FS-snapshot half of the check has to be load-bearing, not decorative.
-[ "$(grep -c "TREE MISMATCH" <<<"$out")" -eq 2 ]; check "both filesystem trees caught it" $?
+grep -q "TREE MISMATCH" <<<"$out"; check "the filesystem tree caught it" $?
 [ ! -e "$PROBE" ]; check "probe removed (tree restored)" $?
 
 echo "-------------------------------------------------"

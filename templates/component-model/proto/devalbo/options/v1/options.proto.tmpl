@@ -16,6 +16,18 @@ extend google.protobuf.MethodOptions {
   uint32 method_id = 50000;
 }
 
+extend google.protobuf.ServiceOptions {
+  // Method ids this service will NOT hand out — the `method_id` analogue of
+  // proto's own `reserved` for field numbers, which does not cover custom-option
+  // values. Use it to hold an id for a command that is designed but unbuilt, so
+  // the number cannot be claimed twice in the meantime.
+  //
+  // protoc-gen-dlc-registry enforces it: an rpc whose method_id is reserved
+  // fails the build, and reservations are recorded in the committed id lock, so
+  // "reserved" is a checkable declaration rather than a comment nobody reads.
+  repeated uint32 reserved_method_id = 50005;
+}
+
 extend google.protobuf.FieldOptions {
   string help = 50001;
   bool required = 50002;

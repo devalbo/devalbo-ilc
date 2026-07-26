@@ -15,8 +15,11 @@ Constructs the native Environment (stdio, FS root = cwd/config dir).
 
 **Rule:** `encoding/json` / reflection are fine here (standard Go); they must never leak into `engine/`.
 
-**Status:** `main.go` is still the transitional argv forwarder over `engine.Execute` (the `execute-cli`
-shim). The host-side parser + request construction is the open B2 task; keep the engine binding behind a
-small lift-ready package so a wasm-runtime host can be swapped in later without rewriting that path.
+**Two kinds of verb** (Decision 30): TOOLCHAIN verbs (`build`) are handled here and never reach the
+engine — they spawn processes and inspect the machine, neither of which a browser tab can do. IN-ENGINE
+verbs are parsed by `commands.go` into a proto request and dispatched by method id.
+
+**Status:** the argv shim is gone; `commands.go` is the parser. It uses stdlib `flag` today — any parser
+would do (cobra, `huh` menus), which is the point of parsing living host-side.
 
 See [plan](../../docs/DEVALBO-ILC-GO-PLAN.md) §5.4, §8, Decisions 26 + 28.

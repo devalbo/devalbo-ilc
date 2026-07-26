@@ -8,25 +8,20 @@
 # means the two builds of the engine have diverged (TinyGo vs native Go) —
 # investigate before trusting the tool.
 #
-# Both boundaries are checked:
-#
-#   argv    execute-cli(args)              the bootstrap shim; native side is the
-#                                          real `dlc` binary, end to end
-#   method  execute(method, request)       the real boundary (Decision 28/31);
-#                                          native side is cmd/parity-runner until
-#                                          hosts/native builds requests host-side
+# ONE boundary: `execute(method, request)` (Decision 28/31). The argv stream
+# retired with the execute-cli shim — hosts parse and build requests now, so
+# there is no second boundary to compare. The native side is cmd/parity-runner,
+# which dispatches the same way `dlc` does.
 #
 # Run inside `devbox shell` (needs go, tinygo, node/jco).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Z=$'\033[0m'; else G=''; R=''; Z=''; fi
 
-ARGV_VEC=verify/parity/argv-vectors.json
 METHOD_VEC=verify/parity/method-vectors.json
 BIN="$(mktemp -d)"
 
 # 1. native builds — engine linked in-process
-go build -buildvcs=false -o "$BIN/dlc" ./hosts/native || { echo "native build failed"; exit 1; }
 go build -buildvcs=false -o "$BIN/parity-runner" ./cmd/parity-runner || { echo "runner build failed"; exit 1; }
 
 # 2. wasip2 component (wasip2-direct) + jco transpile
@@ -47,16 +42,6 @@ tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
 REPO="$PWD"
 fresh_root() { local d="$BIN/root-$1"; rm -rf "$d"; mkdir -p "$d"; printf '%s' "$d"; }
 
-native_argv() {
-	python3 - "$BIN/dlc" "$REPO/$ARGV_VEC" "$(fresh_root native-argv)" <<'PY'
-import base64, json, subprocess, sys
-dlc, vec, root = sys.argv[1], sys.argv[2], sys.argv[3]
-for args in json.load(open(vec)):
-    p = subprocess.run([dlc, *args], capture_output=True, cwd=root)
-    ok = "true" if p.returncode == 0 else "false"
-    print(f"{ok}\t{base64.b64encode(p.stdout).decode()}")
-PY
-}
 native_method() { ( cd "$(fresh_root native-method)" && "$BIN/parity-runner" "$REPO/$METHOD_VEC" ); }
 component_stream() {
 	( cd verify/parity && PARITY_ROOT="$(fresh_root "component-$1")" node harness.mjs "$1" "$REPO/$2" )
@@ -99,11 +84,9 @@ compare_trees() {
 	return 1
 }
 
-compare "argv" "$(native_argv)" "$(component_stream argv "$ARGV_VEC")" "$(count "$ARGV_VEC")" || status=1
 compare "method" "$(native_method)" "$(component_stream method "$METHOD_VEC")" "$(count "$METHOD_VEC")" || status=1
 
 # The streams above ran first, so the roots now hold whatever each engine wrote.
-compare_trees "argv fs" "$BIN/root-native-argv" "$BIN/root-component-argv" || status=1
 compare_trees "method fs" "$BIN/root-native-method" "$BIN/root-component-method" || status=1
 
 if [ "$status" -eq 0 ]; then

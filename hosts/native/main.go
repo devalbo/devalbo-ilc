@@ -7,12 +7,9 @@
 //   - TOOLCHAIN verbs (`build`) spawn processes and inspect the machine, so they
 //     are handled HOST-SIDE and never reach the engine — the engine also runs in
 //     a browser tab, where neither is possible.
-//   - IN-ENGINE verbs (`new`, `version`, `export-fs`, …) are forwarded to the
-//     engine, which is the same code the browser runs.
-//
-// The forwarding still uses the transitional argv shim; Decision 28 replaces it
-// with a host-side parser that builds a request. The toolchain branch below is
-// the first piece of that parser — it has to be host-side by definition.
+//   - IN-ENGINE verbs (`new`, `version`, `export-fs`, …) are parsed here into a
+//     proto request and dispatched by method id (Decision 28). The engine never
+//     sees argv; commands.go is that parser.
 //
 // Build:
 //
@@ -22,7 +19,9 @@ package main
 import (
 	"os"
 
-	"github.com/devalbo/devalbo-ilc/engine"
+	// Importing the engine is what REGISTERS dlc's commands; nothing else here
+	// touches it. The blank-ish import is load-bearing.
+	_ "github.com/devalbo/devalbo-ilc/engine"
 )
 
 // toolchainVerbs never cross into the engine (Decision 30).
@@ -43,14 +42,8 @@ func main() {
 		}
 	}
 
-	r := engine.Execute(args)
-	if len(r.Output) > 0 {
-		os.Stdout.Write(r.Output)
-	}
-	if !r.Success {
-		if r.Err != "" {
-			os.Stderr.WriteString("dlc: " + r.Err + "\n")
-		}
+	if err := runCommand(args); err != nil {
+		os.Stderr.WriteString("dlc: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 }

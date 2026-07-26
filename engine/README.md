@@ -2,10 +2,10 @@
 
 The ONE portable artifact (`engine.core.wasm`). All app logic lives here and **nowhere else**.
 
-**Entry point:** `ExecuteMethod(method, request)` — a permanent `method_id` plus flat proto-encoded
+**One entry point:** `ExecuteMethod(method, request)` — a permanent `method_id` plus flat proto-encoded
 request bytes, dispatched through the registry in [`platform/`](./platform). The engine never sees argv:
-**parsing is host-side** (Decision 28, superseding Decision 22). `Execute(args)` is a transitional argv
-shim that retires when the hosts build requests.
+**parsing is host-side** (Decision 28, superseding Decision 22). There is no argv shim; it retired once
+every host built requests, taking the `execute-cli` export and the ffcli dependency with it.
 
 **This directory is `dlc`'s APP code** — its own verbs (`new`, `echo`) and its templates, in the
 **100+** method id range. The verbs every app inherits (`version`, `export-fs`, `import-fs`, `reset-fs`,

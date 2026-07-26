@@ -7,7 +7,38 @@
 // The assertions deliberately mirror the native `dlc new` test in
 // engine/execute_test.go: same file set, same refusal to overwrite. If these two
 // ever disagree, the cross-tier promise is broken.
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// Everything the page said that a human would want on a failure. A timed-out
+// `toContainText` tells you what the log DIDN'T say; these tell you why.
+// Collected per page and appended to the assertion message, so a CI failure is
+// self-explaining instead of needing an artifact download — which is exactly
+// what a wasm 404 and an engine exception both looked like the last time.
+const diagnostics = new WeakMap<Page, string[]>();
+
+function watch(page: Page) {
+  const lines: string[] = [];
+  diagnostics.set(page, lines);
+  page.on("pageerror", (e) => lines.push(`pageerror: ${e.message}`));
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning") {
+      lines.push(`console.${m.type()}: ${m.text()}`);
+    }
+  });
+  // A failed fetch is how a mislocated engine.component.core.wasm shows up; the
+  // in-page error only says "HTTP status code is not ok".
+  page.on("requestfailed", (r) =>
+    lines.push(`requestfailed: ${r.url()} — ${r.failure()?.errorText ?? "?"}`),
+  );
+  page.on("response", (r) => {
+    if (r.status() >= 400) lines.push(`http ${r.status()}: ${r.url()}`);
+  });
+}
+
+function report(page: Page): string {
+  const lines = diagnostics.get(page) ?? [];
+  return lines.length ? `\n\npage diagnostics:\n  ${lines.join("\n  ")}` : "";
+}
 
 // A representative slice of the scaffold, not the whole list — the full set is
 // asserted natively in engine/execute_test.go, and duplicating it here would
@@ -20,10 +51,21 @@ const EXPECTED = [
   "myapp/proto/myapp/v1/commands.proto",
 ];
 
+/** Wait for `dlc new` (or surface whatever the log actually says on failure). */
+async function expectScaffolded(page: import("@playwright/test").Page, name: string) {
+  const log = page.getByTestId("log");
+  await expect(log).toContainText(new RegExp(`scaffolded ${name}|new failed|ERROR:`), {
+    timeout: 60_000,
+  });
+  const text = await log.innerText();
+  expect(text, `log was:\n${text}${report(page)}`).toContain(`scaffolded ${name}`);
+}
+
 // Each test starts from an empty OPFS: it is origin-scoped and outlives a
 // reload (that being the point), so leftovers from a previous run would make
 // `new` refuse to scaffold and the results order-dependent.
 test.beforeEach(async ({ page }) => {
+  watch(page);
   await page.goto("/");
   await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();
@@ -39,9 +81,7 @@ test("scaffolds into OPFS and survives a reload", async ({ page }) => {
   await page.getByTestId("name").fill("myapp");
   await page.getByTestId("new").click();
 
-  await expect(page.getByTestId("log")).toContainText("scaffolded myapp", {
-    timeout: 30_000,
-  });
+  await expectScaffolded(page, "myapp");
   const files = page.getByTestId("files");
   for (const f of EXPECTED) {
     await expect(files).toContainText(f);
@@ -73,9 +113,7 @@ test("honors --module, like the CLI does", async ({ page }) => {
   await page.getByTestId("name").fill("acmeapp");
   await page.getByTestId("module").fill("github.com/acme/acmeapp");
   await page.getByTestId("new").click();
-  await expect(page.getByTestId("log")).toContainText("scaffolded acmeapp", {
-    timeout: 30_000,
-  });
+  await expectScaffolded(page, "acmeapp");
 
   const goMod = await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();
@@ -89,9 +127,7 @@ test("honors --module, like the CLI does", async ({ page }) => {
 test("refuses to scaffold over an existing tree", async ({ page }) => {
   await page.getByTestId("name").fill("myapp");
   await page.getByTestId("new").click();
-  await expect(page.getByTestId("log")).toContainText("scaffolded myapp", {
-    timeout: 30_000,
-  });
+  await expectScaffolded(page, "myapp");
 
   // Same engine rule as the native run — the error text comes from engine/, not
   // from any JavaScript, which is what makes it identical across tiers.
@@ -110,9 +146,7 @@ test("refuses to scaffold over an existing tree", async ({ page }) => {
 test("exports a BFT bundle and re-imports it", async ({ page }) => {
   await page.getByTestId("name").fill("myapp");
   await page.getByTestId("new").click();
-  await expect(page.getByTestId("log")).toContainText("scaffolded myapp", {
-    timeout: 30_000,
-  });
+  await expectScaffolded(page, "myapp");
 
   const download = await Promise.all([
     page.waitForEvent("download"),
@@ -187,11 +221,8 @@ test("import --replace really deletes what the bundle omits", async ({
 }) => {
   await page.getByTestId("name").fill("myapp");
   await page.getByTestId("new").click();
-  await expect(page.getByTestId("log")).toContainText("scaffolded myapp", {
-    timeout: 30_000,
-  });
+  await expectScaffolded(page, "myapp");
   await expect(page.getByTestId("files")).toContainText("myapp/go.mod");
-
   // A bundle with ONE file where the tree currently has three.
   const bundle = JSON.stringify({
     type: "directory",

@@ -19,6 +19,9 @@ make verify         # build and smoke-test the CLI
 | `proto/` | your command surface — one rpc per command, permanent `method_id` |
 | `gen/` | generated; never edit, never commit |
 
+See [`AGENTS.md`](AGENTS.md) for the rules that are not visible in the code — where logic goes, method-id
+bands, and the portability constraints the engine has to keep.
+
 ## Adding a command
 
 1. Add an `rpc` to `proto/{{.PkgName}}/v1/commands.proto` with the next free

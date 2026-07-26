@@ -50,7 +50,10 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
-const methodIDExt = "devalbo.options.v1.method_id"
+const (
+	methodIDExt       = "devalbo.options.v1.method_id"
+	reservedMethodExt = "devalbo.options.v1.reserved_method_id"
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -113,6 +116,12 @@ func run() error {
 				for _, m := range svc.methods {
 					locked[file.GetPackage()+"."+svc.name+"."+m.name] = m.id
 				}
+				// Reservations are locked as well: an id held for an unbuilt
+				// command is as much a commitment as one in use, and dropping a
+				// reservation should show up in review like any other id change.
+				for _, r := range svc.reserved {
+					locked[fmt.Sprintf("%s.%s.[reserved]", file.GetPackage(), svc.name)+fmt.Sprintf(".%d", r)] = r
+				}
 			}
 		}
 		if !generate[file.GetName()] {
@@ -163,8 +172,9 @@ type method struct {
 }
 
 type service struct {
-	name    string
-	methods []method
+	name     string
+	methods  []method
+	reserved []uint32
 }
 
 // extensionResolver registers every extension declared anywhere in the request,
@@ -192,6 +202,11 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 	var out []service
 	for _, svc := range file.Service {
 		s := service{name: svc.GetName()}
+		sopts, err := resolveServiceOpts(svc.GetOptions(), resolver)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", svc.GetName(), err)
+		}
+		s.reserved = extUint32List(sopts, reservedMethodExt)
 		for _, m := range svc.Method {
 			opts, err := resolveMethodOpts(m.GetOptions(), resolver)
 			if err != nil {
@@ -203,6 +218,12 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 				// the whole file rather than guessing an id for it.
 				return nil, fmt.Errorf("%s.%s: missing (%s); every rpc in a command service needs one",
 					svc.GetName(), m.GetName(), methodIDExt)
+			}
+			for _, r := range s.reserved {
+				if r == id {
+					return nil, fmt.Errorf("%s.%s: method_id %d is RESERVED by this service — pick another, or drop the reservation deliberately",
+						svc.GetName(), m.GetName(), id)
+				}
 			}
 			s.methods = append(s.methods, method{
 				name:       m.GetName(),
@@ -226,6 +247,21 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 	return out, nil
 }
 
+func resolveServiceOpts(src *descriptorpb.ServiceOptions, resolver *protoregistry.Types) (*descriptorpb.ServiceOptions, error) {
+	if src == nil {
+		return &descriptorpb.ServiceOptions{}, nil
+	}
+	b, err := proto.Marshal(src)
+	if err != nil {
+		return nil, err
+	}
+	out := &descriptorpb.ServiceOptions{}
+	if err := (proto.UnmarshalOptions{Resolver: resolver}).Unmarshal(b, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func resolveMethodOpts(src *descriptorpb.MethodOptions, resolver *protoregistry.Types) (*descriptorpb.MethodOptions, error) {
 	if src == nil {
 		return &descriptorpb.MethodOptions{}, nil
@@ -239,6 +275,22 @@ func resolveMethodOpts(src *descriptorpb.MethodOptions, resolver *protoregistry.
 		return nil, err
 	}
 	return out, nil
+}
+
+// extUint32List reads a REPEATED custom option by full name.
+func extUint32List(m proto.Message, name protoreflect.FullName) []uint32 {
+	var out []uint32
+	m.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		if fd.FullName() != name {
+			return true
+		}
+		list := v.List()
+		for i := 0; i < list.Len(); i++ {
+			out = append(out, uint32(list.Get(i).Uint()))
+		}
+		return false
+	})
+	return out
 }
 
 // extUint32 reads a custom option by full name. Range, not HasExtension: the

@@ -34,10 +34,6 @@ world engine {
   // scalar + bytes is WAMR-portable: only rich WIT records/variants would require
   // the Component Model, so the same boundary shape survives on the embedded tier.
   export execute: func(method: u32, request: list<u8>) -> command-result;
-
-  // Bootstrap shim (Decision 29): host-side parsing is what retires this. The
-  // parity harness rides on it today; it goes away once hosts build requests.
-  export execute-cli: func(args: list<string>) -> command-result;
 }
 
 // Spike 5 (T-B1.5) — Rich/CM async ecosystem probe only. Not part of the product

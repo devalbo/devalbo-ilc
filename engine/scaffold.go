@@ -10,16 +10,13 @@ package engine
 // contents, so `proto/{{.PkgName}}/v1/` lands under the app's own package name.
 
 import (
-	"bytes"
 	"errors"
 	"io/fs"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
-	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 	"github.com/devalbo/devalbo-ilc/templates"
 )
 
@@ -167,18 +164,3 @@ func sortFiles(files []platform.File) {
 
 // defaultModule is the module path `dlc new` assumes when --module is omitted.
 func defaultModule(app string) string { return "github.com/you/" + app }
-
-// renderManifest formats the human-readable summary the argv shim prints. It
-// takes the RESPONSE, not the internal file list — the shim sees exactly what a
-// browser or any other host sees.
-func renderManifest(resp *dlcv1.NewResponse) []byte {
-	var b bytes.Buffer
-	b.WriteString("scaffold " + resp.Path + "\n")
-	for _, f := range resp.Files {
-		b.WriteString("  + " + filepath.Join(resp.Path, f) + "\n")
-	}
-	b.WriteString("\nnext:\n")
-	b.WriteString("  cd " + resp.Path + " && devbox shell\n")
-	b.WriteString("  make gen && make verify\n")
-	return b.Bytes()
-}

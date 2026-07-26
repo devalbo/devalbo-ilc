@@ -42,6 +42,14 @@ service PlatformService {
   rpc Version(VersionRequest) returns (VersionResponse) {
     option (devalbo.options.v1.method_id) = 1;
   }
+  // Held for commands that are designed but unbuilt. Declared, not commented —
+  // the generator refuses any rpc that claims one, and the id lock records them.
+  //   2 = SetEnvironment  (Decision 32) host pushes the capability manifest at
+  //                       launch and re-sends it when a fact changes
+  //   3 = SupportedAbis   (Decision 31) the guest advertising ITS boundaries —
+  //                       the opposite direction to the manifest
+  option (devalbo.options.v1.reserved_method_id) = 2;
+  option (devalbo.options.v1.reserved_method_id) = 3;
   // --- filesystem block (100–199) ---
   rpc ExportFs(ExportFsRequest) returns (ExportFsResponse) {
     option (devalbo.options.v1.method_id) = 100;

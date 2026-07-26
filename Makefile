@@ -39,8 +39,17 @@ build-engine: gen ## TinyGo -target=wasip2 -> engine.component.wasm (wasip2-dire
 component: build-engine ## wasip2-direct emits the component in one shot (no wasip1 adapter)
 
 .PHONY: verify-parity
-verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-for-byte (argv + method boundaries)
+verify-parity: ## Decision 26: native and wasip2 engines agree byte-for-byte (results + filesystem)
 	@./scripts/verify-parity.sh
+
+.PHONY: scaffold-golden
+scaffold-golden: ## re-bless the §11 golden FS snapshot after a deliberate template change
+	go run ./cmd/scaffold-golden > verify/scaffold/golden.txt
+	@echo "re-blessed verify/scaffold/golden.txt — review the diff"
+
+.PHONY: verify-scaffold-golden
+verify-scaffold-golden: ## §11: `dlc new` emits exactly the tree we meant
+	@go run ./cmd/scaffold-golden -check
 
 .PHONY: verify-scaffold
 verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs

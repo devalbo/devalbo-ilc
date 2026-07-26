@@ -98,7 +98,7 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 | **Scaffolding** — `dlc new` emits an embedded template; the output generates, tests, builds, and runs **on both tiers** | ✅ |
 | **`dlc build web`** — supplies the WIT world from `dlc` itself, so apps carry none and cannot be stranded on a stale one | ✅ |
 | **Console** — stdio natively; browser stdio → `console.*` | 🚧 native works; the web wiring is not done |
-| **Host-side arg parsing** (Decision 28) | 🚧 the web UI builds requests properly; the CLI still uses a transitional in-engine argv shim |
+| **Host-side arg parsing** (Decision 28) | ✅ every tier builds requests — argv in `hosts/native`, a form on the web. The engine has **one** entry, `execute(method, request)` |
 | SQLite index · Events · Display · Network · sync | 📋 |
 
 ## Repository layout
@@ -132,7 +132,7 @@ Every claim above has a target behind it. `make test` runs all of them.
 | --- | --- |
 | `make test-b0` | repo structure + toolchain integrity |
 | `make test-b1` | the five de-risking spikes still pass |
-| `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs |
+| `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs · the scaffold matches its golden snapshot |
 | `make test-b3` | `dlc` in headless Chromium (scaffold → OPFS → survives reload) · BFT bundle crosses browser → terminal · **a scaffolded app runs in a browser via its own test** |
 | `make ci` | what CI runs, identically — `fast` / `full` / `all` tiers |
 
@@ -144,6 +144,7 @@ is a ~20-line adapter, not the logic.
 
 | Doc | Purpose |
 | --- | --- |
+| [`AGENTS.md`](AGENTS.md) | **Rules for changing this repo** — the constraints that are not visible in the code |
 | [`docs/DEVALBO-ILC-GO-PLAN.md`](docs/DEVALBO-ILC-GO-PLAN.md) | **The authoritative plan** — architecture, decisions, capabilities |
 | [`docs/DEVALBO-DLC-GO-TASKS.md`](docs/DEVALBO-DLC-GO-TASKS.md) | Implementation tasks (bootstrap + backlog) |
 | [`docs/DEVALBO-DLC-PREREQUISITES.md`](docs/DEVALBO-DLC-PREREQUISITES.md) | Prerequisites & getting started |
@@ -161,16 +162,10 @@ identical tree through the CLI.
 
 The honest gaps, in the order they matter:
 
-1. 🚧 **`dlc`'s own CLI still parses argv inside the engine** — a transitional shim that Decision 28
-   retires. Both the web UI and the *generated* native host already do it the right way, so `dlc` is now
-   the only thing doing it the old way. Retiring it deletes the `execute-cli` export, the ffcli
-   dependency, and half the parity vectors.
-2. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
+1. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
-3. 📋 **No golden FS snapshot** (§11). Required scaffold files are asserted, but nothing catches an
-   accidental *addition* to the template.
-4. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
+2. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
    designed and unbuilt — see the tasks doc.
 
 ## License

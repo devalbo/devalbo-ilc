@@ -14,7 +14,7 @@
 // a live engine — which is also why `reboot()` exists rather than a re-hydrate.
 import * as Comlink from "comlink";
 import {
-  _getFileData,
+  _getFileDataTree,
   _setFileData,
 } from "@bytecodealliance/preview2-shim/filesystem";
 import {
@@ -22,7 +22,7 @@ import {
   flushTreeToOPFS,
   listOPFS,
   loadTreeFromOPFS,
-  reviveFileDataJSON,
+  type FileDataEntry,
 } from "./opfs";
 
 /** Mirrors the WIT `command-result` record. */
@@ -54,7 +54,8 @@ async function boot(): Promise<EngineModule> {
 
 /** Persist whatever the engine wrote back into OPFS. */
 async function flush(): Promise<void> {
-  await flushTreeToOPFS(reviveFileDataJSON(_getFileData()));
+  // Live tree, not JSON.stringify — see _getFileDataTree in the vendored shim.
+  await flushTreeToOPFS(_getFileDataTree() as FileDataEntry);
 }
 
 const api = {
@@ -92,9 +93,9 @@ const api = {
    * "dropping" the instance and importing again hands back the *same* module,
    * still holding the preopen descriptor it captured on first instantiation.
    * Meanwhile `_setFileData` swaps the shim's tree underneath it. The engine
-   * then writes into the old tree while `_getFileData()` returns the new one,
-   * and the flush silently persists the wrong thing — which looks exactly like
-   * "clear worked, then my import vanished".
+   * then writes into the old tree while flush reads the new one, and the flush
+   * silently persists the wrong thing — which looks exactly like "clear worked,
+   * then my import vanished".
    *
    * One instance per page load is therefore the contract. Re-instantiation
    * without a reload needs `jco transpile --instantiation`, which exports a

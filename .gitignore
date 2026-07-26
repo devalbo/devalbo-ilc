@@ -10,9 +10,16 @@
 # Built binaries. `go build ./cmd/foo` drops `foo` in whatever directory you are
 # standing in, which is how two 12 MB binaries reached a commit — so the pattern
 # matters more than the individual names.
+# One entry per main package in the tree: `go build ./hosts/native` (or
+# ./cmd/anything) writes the executable into the CURRENT directory, named after
+# its folder — which is how `engine.test`, `protoc-gen-dlc-registry`, and
+# `native` all appeared at the root. Build with `-o` somewhere disposable.
 /dlc
+/native
 /protoc-gen-dlc-registry
 /parity-runner
+/scaffold-golden
+/engine-component
 *.test
 
 # Spike + verify generated output (jco transpile, copied bindings, etc.)

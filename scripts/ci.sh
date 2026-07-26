@@ -39,10 +39,18 @@ else
 fi
 
 failed=()
+LOGS="$(mktemp -d)"
+trap 'rm -rf "$LOGS"' EXIT
+
+# Each step streams as it runs AND is captured, so a failure can be re-printed at
+# the very end. On a CI page the interesting output is thousands of lines up,
+# which is how a B2 failure went unexamined while a B3 failure got all the
+# attention — the summary is the only part anyone reads.
 step() { # <label> <command...>
 	local label="$1"; shift
+	local log="$LOGS/$(printf '%s' "$label" | tr -c 'a-zA-Z0-9' '_')"
 	printf "\n${B}▶ %s${Z}\n" "$label"
-	if "$@"; then
+	if "$@" 2>&1 | tee "$log"; then
 		printf "${G}✓ %s${Z}\n" "$label"
 	else
 		printf "${R}✗ %s${Z}\n" "$label"
@@ -84,4 +92,12 @@ if [ ${#failed[@]} -eq 0 ]; then
 fi
 printf "${R}✗ ci (%s): %d step(s) failed${Z}\n" "$TIER" "${#failed[@]}"
 for f in "${failed[@]}"; do echo "    - $f"; done
+
+# Re-print the tail of every failed step, so the summary at the bottom of the log
+# contains the actual errors rather than pointing at them.
+for f in "${failed[@]}"; do
+	log="$LOGS/$(printf '%s' "$f" | tr -c 'a-zA-Z0-9' '_')"
+	printf "\n${R}--- last 40 lines of: %s ---${Z}\n" "$f"
+	tail -40 "$log" 2>/dev/null || echo "(no output captured)"
+done
 exit 1

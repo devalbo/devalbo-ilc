@@ -15,6 +15,13 @@ export function _setFileData(fileData) {
 export function _getFileData() {
     return JSON.stringify(_fileData);
 }
+// Prefer this for flush: JSON.stringify turns every Uint8Array into
+// `{0:n,1:n,…}`, and reviving a scaffold-sized tree from that form is
+// pathologically slow on CI runners (web tests timed out at 30s waiting for
+// `dlc new` after the template grew). The live tree keeps real Uint8Arrays.
+export function _getFileDataTree() {
+    return _fileData;
+}
 let _fileData = { dir: {} };
 const timeZero = {
     seconds: 0n,

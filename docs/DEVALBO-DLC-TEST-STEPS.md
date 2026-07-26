@@ -313,10 +313,7 @@ golden) land as those commands are built.
   1. `make build-host` → a `dlc` binary (`go build ./hosts/native`); `./dlc version` prints `dlc 0.0.0-bootstrap`.
   2. `make verify-parity` — builds the wasip2 component (`./cmd/engine-component`), transpiles via jco, and
      runs golden vectors through **both** sides on **both boundaries**:
-     - **argv** — [`verify/parity/argv-vectors.json`](../verify/parity/argv-vectors.json) through the native
-       `dlc` binary vs `execute-cli`, diffing `<success>\t<base64(output)>` per vector. This is the
-       bootstrap shim; it retires with host-side parsing.
-     - **method** — [`verify/parity/method-vectors.json`](../verify/parity/method-vectors.json) (method_id +
+     - **method** (the only boundary — the argv stream retired with the `execute-cli` shim) — [`verify/parity/method-vectors.json`](../verify/parity/method-vectors.json) (method_id +
        hex proto request) through `cmd/parity-runner` vs `execute(method, request)`, diffing
        `<success>\t<base64(output)>\t<error>`. The **error string is part of the diff**: on this boundary
        the failure modes (envelope errors, unregistered ids, undecodable requests) are as much of the

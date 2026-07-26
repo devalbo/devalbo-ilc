@@ -27,9 +27,10 @@ run_check() { # id  label  command...
 }
 
 run_check "T-B2.0" "engine command registry + dispatch (unit)" go test ./engine/
-run_check "T-B2.1" "native↔wasm parity (argv + method boundaries)" ./scripts/verify-parity.sh
+run_check "T-B2.1" "native↔wasm parity (results + filesystem)" ./scripts/verify-parity.sh
 run_check "T-B2.2" "parity self-test (the check can detect drift)" ./scripts/verify-parity-selftest.sh
 run_check "T-B2.3" "scaffold builds and runs (dlc new -> gen -> build -> run)" ./scripts/verify-scaffold.sh
+run_check "T-B2.4" "scaffold golden (the tree is exactly what we meant)" make -s verify-scaffold-golden
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then

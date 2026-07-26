@@ -104,6 +104,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 29 | Self-describing command registry — service + `method_id`, direct request/response messages | The **app registers each command once** as a proto **`service` rpc** — `rpc New(NewRequest) returns (NewResponse) { option (method_id) = N; }` — plus a handler `func(*NewRequest) *NewResponse`. **Dispatch keys on the permanent `method_id`** (`map[u32]handler`; rename-safe — the *name* is cosmetic / the CLI verb; `buf breaking` + the plugin's id-lock guard the number). The wire passes the **request/response messages directly** (single-encode, flat — Spike 2-proven); no oneof or envelope for the command surface (the discriminator is a scalar param, Decision 31). **Introspection is host-side, standard protobuf:** the host embeds the `buf build` **FileDescriptorSet** and walks it with **protoreflect** (native Go) / `@bufbuild/protobuf` (web) to discover methods + `method_id` + request fields — field name→flag, type→flag type, **proto `enum`→menu choices**, with help/required/default from custom field options. The engine (TinyGo, no reflection) keeps **only** the `method_id→handler` map; a `describe()` export is **optional** — only for a *generic* host that doesn't embed the schema. **`protoc-gen-dlc-registry`** emits the engine registration + enforces `method_id` stability — reading the **`buf build` image**, since go-lite emits *no service stubs* (spike `options/`). (oneof retained for *response variants*, not command dispatch.) **Spike-confirmed (`spikes/options/`, all criteria green):** go-lite accepts `descriptor.proto` + `extend MethodOptions` and keeps `google.golang.org/protobuf` out of the guest graph; hosts read the options as **unknown fields** via `dynamicpb.NewExtensionType` + `Range` (not `HasExtension`). Options live in `proto/devalbo/options/v1/options.proto` (`method_id` = 50000; `help`/`required`/`default`/`short` = 50001-4). **Layout caveat:** *field* options must sit at the field's definition site, so a file holding request messages always imports the options package — the host-only/engine-only split can isolate the `service`, never the field metadata. |
 | 30 | Command surface splits two ways — in-engine vs host-side | A `dlc` command is an **in-engine `execute` handler** if it only touches the **filesystem / app-data** (portable — runs in terminal *and* browser): `new`, `export-fs`, `import-fs`, app-domain commands. It's **host-side orchestration** if it must **spawn the dev toolchain or inspect the machine** (native-only, can't run in wasm/browser): `build`, `run`, `verify`, `doctor`, `gen`, `host add`, `proto`. The native `dlc` host **routes**: a toolchain verb → handle in-host; anything else → build the request and forward to the engine's `execute` (Decisions 28/29). Not a violation of the old 'host forwards argv' — host verbs are *dlc-the-tool's*, not the *app's* surface. Governs where each handler lives + how the native `main()` dispatches. |
 | 31 | Single proto-bytes command boundary; `supported-abis()` negotiation; rich WIT reserved for CM-only caps | The guest exposes **one command boundary** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` + proto-bytes payload; Decisions 28/29) — universal across wasip2 **and** WAMR (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings/resources need the Component Model WAMR lacks — Decision 25). **Rich typed DX is host-side:** the host's generated binding (es-lite/go-lite) presents typed calls and serializes to the one byte boundary — no second guest ABI. A tiny **`supported-abis() -> list<u8>`** export (byte-ABI, readable even on WAMR) lets the guest advertise its boundaries + versions so a host picks the richest it supports. A **second, rich WIT guest boundary is reserved for Component-Model-only capabilities** (streams, `resource` handles, `wasi:http`, CM async) with no byte equivalent — added *per-capability*, negotiated, degrading to byte/absent on WAMR — never for the general command surface. When both exist they're two bindings over one shared registry (the caps-seam pattern), not duplicated logic. |
+| 32 | Capability introspection: **manifest for static facts, events for changes** — carried as data on the one command boundary | An app asks "what can this host do?" (display resolution, colour format, which render paths, is there an index) **without a new WIT surface**. The host pushes a protobuf **environment manifest** at launch — phase 1 of the two-phase launch (§5.5) — via a platform command in the core-lifecycle block (`SetEnvironment`, id reserved in 1–99), and **re-sends it whenever a fact changes** (window resize, rotation, a display hot-plugged). Static facts are therefore cheap and always present; volatile facts arrive as an update rather than a poll, and the engine may fan that out to the UI through Events (§6.3). **Why data, not new imports:** we just consolidated to a single `execute(method, request)` boundary (Decision 31), and a per-capability `describe()` import would reopen a second one — one that WAMR-portable tiers would have to mirror. A manifest is bytes on the boundary already proven to cross every tier, versioned by `buf breaking` like everything else. **Absence becomes a data question, not a linking one:** WIT has no optional imports, so a component cannot link against a display the host lacks; the world still declares the capability and a tier without a screen supplies a stub, but the engine never calls it because the manifest already said `display: none`. That keeps ONE artifact across tiers (which the Decision 26 parity check depends on) instead of forking the world per tier. **Cost:** the manifest is a second schema to evolve alongside the command surface, and a host that forgets to re-send after a resize leaves the engine on stale facts — so re-sending is the host contract, and `describe()`-style live queries stay available as a per-capability escape hatch for anything genuinely too volatile to push (none identified yet). |
 
 ---
 
@@ -394,6 +395,8 @@ Starting an ILC app is two phases — conceptually always, operationally *usuall
    root (native dir / OPFS·FSA / littlefs), open the capability providers (sqlite, events, display),
    assemble the capability set for this tier. May be **seeded** — e.g. `import-fs` a fixture or snapshot
    (§7.3), which is exactly test/dev setup.
+   Phase 1 ends by telling the engine what it just built: the **environment manifest** (§6.4a,
+   Decision 32) — resolution, colour format, which capabilities exist — pushed as a platform command.
 2. **Launch the app.** Instantiate the engine (component on wasip2, core module on WAMR, native link on
    RP2040) and run it against the environment — either **one-shot** (`execute` once → exit code) or
    **persistent** (the environment stays up; `execute` is invoked many times — the reactive UI /
@@ -544,8 +547,34 @@ The handler calls `describe()` first, then emits whichever mode the host adverti
   ESP32-S3 TFT → TFT driver calls; React → canvas. Compact, resolution-independent.
 - **Retained widget tree** (`render`) — VDOM-like tree as protobuf; host diffs+renders. React → elements;
   a widget-capable MCU host → LVGL-style. App-friendly.
-- `describe()` reports resolution, color format, and which paths the host supports, so **one handler
-  targets a 320×240 TFT and a browser canvas from the same logic** by branching on the reported caps.
+- Resolution, colour format, and which paths the host supports arrive in the **environment manifest**
+  (§6.4a, Decision 32) rather than through a `describe()` import — so **one handler targets a 320×240 TFT
+  and a browser canvas from the same logic** by branching on the reported caps, and a browser resize
+  re-sends the manifest instead of requiring a poll.
+
+### 6.4a Capability introspection — the environment manifest (Decision 32)
+
+How a handler learns what the host can do, **without a second boundary**:
+
+| Kind of fact | Delivery | Example |
+| --- | --- | --- |
+| **Static** | manifest pushed at launch (phase 1, §5.5) | colour format, render paths supported, is there a SQLite index, FS root kind |
+| **Volatile** | the host **re-sends** the manifest on change | display resolution after a resize or rotation |
+| **Absent** | a field in the manifest says so | `display: none` on a headless CLI |
+
+The manifest is a protobuf message delivered as a **platform command** (`SetEnvironment`, core-lifecycle
+block, id reserved in 1–99) — not a new WIT export or import. It rides the same
+`execute(method, request)` boundary as everything else, so it works unchanged on WAMR, needs no
+Component-Model features, and is versioned by `buf breaking` like the rest of the schema.
+
+**Absence is data, not linking.** WIT has no optional imports, so a component cannot simply omit a
+capability the host lacks. The world keeps declaring it and a screenless tier supplies a stub — but the
+stub is never called, because the manifest already told the engine there is no display. One artifact
+across every tier, which is what the Decision 26 parity check rests on.
+
+**Volatile facts are pushed, not polled.** A resize re-sends; the engine can fan that out to its UI via
+Events (§6.3). Re-sending is the *host's* contract — a host that forgets leaves the engine reasoning from
+stale facts, which is the one failure mode this design has and worth stating plainly.
 
 ### 6.5 Console — standard WASI stdio (not a custom interface)
 

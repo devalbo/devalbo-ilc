@@ -83,6 +83,7 @@ func TestNew(t *testing.T) {
 	// version is the golden FS snapshot (§11), which is still an open task and
 	// belongs in verify/ with the other goldens, not here.
 	required := []string{
+		"AGENTS.md", // the rules travel with the project, not just with dlc
 		"go.mod",
 		"engine/commands.go",
 		"hosts/native/main.go",
