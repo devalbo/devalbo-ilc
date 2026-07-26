@@ -182,7 +182,7 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] `dlc` command surface: **tier-scoped** `dlc build <tier>` / `dlc run <tier>` / `dlc verify [<tier>] [--parity]` (Decision 27 — tiers are composition recipes, not forks), plus `dlc proto`, `dlc host add <tier>` (§16.7). Supersedes the bootstrap `make build-host` / `build-engine` / `verify-parity` for scaffolded apps
 - [ ] **Project manifest** `dlc.toml` (§16.8) — capabilities/tiers/storage/ui/launch/platform pin; drives build/verify/host-add/launch
 - [ ] Regenerate / upgrade (re-apply templates against a newer `platform` pin)
-- [ ] Scaffolder verify in CI: `dlc new … → devbox run verify` (§11 Scaffolder row)
+- [x] Scaffolder verify in CI: `dlc new … → devbox run verify` (§11 Scaffolder row) — `make verify-scaffold` (new → gen → test → build → run, hyphenated app name so the derived-identifier path is exercised), inside `test-b2` and therefore inside `./scripts/ci.sh full`
 - [ ] `--tiers` / `--caps` / `--ui` / `--storage` flag expansion + fragment overlays (§16.6)
 - [ ] FSA-granted directory backend for the web host (write to a user-picked local folder — Chromium) — §5.2
 - [ ] **ABI-mode toggle at setup** (§5.6, Decision 25): `dlc new` derives portable byte-ABI vs rich Component-Model ABI from the `tiers` (`--wamr` forces portable); scaffold the matching capability-boundary + build targets (wasip1 core seam only when portable); a lint/check that keeps a portable-mode engine core-wasm-safe

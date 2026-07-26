@@ -196,6 +196,18 @@ verify-bundle-xtier: build-wasm ## §7.3: a BFT bundle exported in the browser i
 .PHONY: test-b3
 test-b3: verify-web verify-bundle-xtier ## Phase B3 web tier: dlc new in the browser, OPFS persistence, BFT interchange
 
+.PHONY: ci
+ci: ## what CI runs — identical locally (fast | full | all via scripts/ci.sh)
+	@./scripts/ci.sh full
+
+.PHONY: ci-fast
+ci-fast: ## structure + unit + fmt/vet, no wasm or browser
+	@./scripts/ci.sh fast
+
+.PHONY: check-fmt
+check-fmt: ## gofmt over the tree (skips templates/, which is not valid Go)
+	@./scripts/check-fmt.sh
+
 .PHONY: test
 test: test-b0 test-b1 test-b2 test-b3 ## run all regression suites from first principles (B0..B3)
 

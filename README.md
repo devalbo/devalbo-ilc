@@ -107,8 +107,9 @@ docs/              plan, tasks, prerequisites, test steps
 ```
 
 `engine/platform/` becomes the **`ilc-platform`** module (📋 not extracted or published yet). Method ids
-are range-reserved today so that extraction is not a breaking change: **1–999 platform** (in
-per-capability blocks), **1000+ the app**.
+are band-reserved today so that extraction is not a breaking change: **1–9999 ILC** (subdivided by
+capability, with 600–9999 held for capabilities not yet shipped), **10000+ the app**. `dlc` claims no
+reserved block — it is an app like any other.
 
 ## Verification
 
@@ -120,8 +121,11 @@ Every claim above has a target behind it. `make test` runs all of them.
 | `make test-b1` | the five de-risking spikes still pass |
 | `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs |
 | `make test-b3` | `dlc` in headless Chromium: scaffold → OPFS → survives reload; BFT bundle crosses browser → terminal |
+| `make ci` | what CI runs, identically — `fast` / `full` / `all` tiers |
 
-📋 **CI does not run these yet** — they are run locally.
+✅ **CI runs them** — `./scripts/ci.sh full` on push, `all` (adding the B1 spikes) nightly. The script is
+provider-agnostic and is the same command locally; [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+is a ~20-line adapter, not the logic.
 
 ## Documentation
 
@@ -147,8 +151,7 @@ The honest gaps, in the order they matter:
 2. 🚧 **`dlc`'s own CLI still parses argv inside the engine** — a transitional shim that Decision 28
    retires. The web UI already does it the right way.
 3. 📋 **`ilc-platform` is not published**, so every scaffold needs `--platform-path`.
-4. 📋 **No CI.** The suites exist and pass locally; nothing runs them on push.
-5. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
+4. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
    designed and unbuilt — see the tasks doc.
 
 ## License

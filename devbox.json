@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/main/.schema/devbox.schema.json",
   "packages": [
+    "git@latest",
     "go@latest",
     "tinygo@latest",
     "wasmtime@latest",
@@ -20,7 +21,9 @@
       "command -v protoc-gen-es-lite >/dev/null || npm i -g @aptre/protobuf-es-lite"
     ],
     "scripts": {
-      "doctor": ["./scripts/preflight.sh"]
+      "doctor": [
+        "./scripts/preflight.sh"
+      ]
     }
   }
 }

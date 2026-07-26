@@ -1,0 +1,45 @@
+# A THIN ADAPTER. All logic lives in ./scripts/ci.sh, which is provider-agnostic
+# and is the same command you run locally. Porting to GitLab/Jenkins/Woodpecker/
+# anything else means rewriting this file only — never the tests.
+#
+# The contract any provider must satisfy:
+#   1. check out the repo WITH TAGS (test-b0 asserts phase1-tri-language exists)
+#   2. make `devbox` available
+#   3. provide the system libraries headless Chromium needs (B3 only)
+#   4. run `./scripts/ci.sh full`   (or `fast`, or `all`)
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # The B1 de-risking spikes are slow and rarely broken by day-to-day work, so
+    # they run nightly rather than per-push (DEVALBO-DLC-TEST-STEPS.md says the
+    # same). Nightly is also what notices if a devbox.lock refresh breaks us.
+    - cron: "0 6 * * *"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # test-b0 asserts the phase1-tri-language tag exists
+
+      - uses: jetify-com/devbox-install-action@v0.15.0
+        with:
+          enable-cache: "true"
+
+      # Playwright downloads Chromium itself, but a bare Linux runner lacks the
+      # shared libraries it needs to launch. `--with-deps` needs root, so it is
+      # the ADAPTER's job (an environment concern), not the test suite's — the
+      # suites assume a machine that can already run a browser.
+      - name: chromium system deps
+        run: npx --yes playwright install --with-deps chromium
+
+      # One devbox invocation for the whole run: ci.sh detects it is already
+      # inside the toolchain and calls commands directly, instead of paying the
+      # environment-evaluation cost per step.
+      - name: ci
+        run: devbox run -- ./scripts/ci.sh ${{ github.event_name == 'schedule' && 'all' || 'full' }}

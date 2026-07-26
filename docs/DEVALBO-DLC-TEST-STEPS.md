@@ -380,6 +380,45 @@ golden) land as those commands are built.
 
 ---
 
+## Continuous integration (provider-agnostic)
+
+**One entry point, and it is the same command you run locally:**
+
+```bash
+./scripts/ci.sh fast     # structure + unit + fmt/vet — no wasm, no browser
+./scripts/ci.sh full     # + engine boundary (B2) + web tier (B3)   ← per push
+./scripts/ci.sh all      # + the B1 de-risking spikes               ← nightly
+```
+
+`make ci` / `make ci-fast` are aliases. Toolchain comes from devbox; the script wraps each step in
+`devbox run` unless you are already inside `devbox shell`.
+
+**Nothing in the suites knows about a CI provider** — no provider env vars, no caching hooks, no
+annotations. A CI config is a thin adapter satisfying four requirements:
+
+1. check out **with tags** — `test-b0` asserts `phase1-tri-language` exists
+2. make `devbox` available
+3. provide the system libraries headless Chromium needs (B3 only) — Playwright fetches the browser
+   itself, but installing its shared libraries needs root, so it is an *environment* concern the suites
+   deliberately do not handle
+4. run `devbox run -- ./scripts/ci.sh full`
+
+Porting to another provider means rewriting the adapter, never the tests.
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) is one such adapter, ~20 lines; a GitLab or
+Jenkins equivalent is the same four steps.
+
+**Reproducibility comes from `devbox.lock`**, which is committed and pins each package to an exact
+nixpkgs commit — so `go@latest` in `devbox.json` is resolved-and-frozen, not floating. A toolchain change
+is a lock diff you can review, not a surprise on a Tuesday.
+
+The property this buys is that **"passes locally, fails in CI" is a devbox problem, not a mystery** —
+both are running the identical command in the identical toolchain.
+
+**Why nightly for B1:** the spikes are slow and rarely broken by day-to-day work, but the toolchain is
+pinned to `@latest`, so a nightly run is what catches upstream drift nobody in this repo caused.
+
+---
+
 ## Harness (how these become automated regression)
 
 - **`spikes/`** dir holds each B1 proof as a runnable artifact (kept, not thrown away).
@@ -390,8 +429,7 @@ golden) land as those commands are built.
 - **`make test-b2`** — the engine command boundary in three layers: `go test ./engine/` (correctness) →
   `verify-parity.sh` (native == wasm) → `verify-parity-selftest.sh` (the parity check can fail).
 - **`make test`** — runs all four (B0→B3), from first principles, in order.
-- **CI:** `devbox run test` on push. The **cross-tier byte-identity** and **golden FS snapshot** checks
-  (from §11 of the plan) join at Phase B2/B3.
+- **CI:** `./scripts/ci.sh full` on push, `all` nightly — see [Continuous integration](#continuous-integration-provider-agnostic).
 - **Golden files:** protobuf bytes/JSON (T-B1.2) and, later, FS snapshots are checked in; a diff = a
   regression to explain or re-bless.
 
