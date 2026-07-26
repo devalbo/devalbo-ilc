@@ -13,27 +13,17 @@ import type { CommandResult, WorkerApi } from "./worker";
 
 export type { CommandResult };
 
-/**
- * Permanent method ids. Dispatch keys on these numbers, so an rpc rename is
- * wire-safe. Mirrored by hand today; `protoc-gen-dlc-registry` will generate
- * them.
- *
- * Two permanent bands (devalbo/ilc/v1/platform.proto):
- *   1–9999    ILC itself, subdivided by capability
- *               1–99 core · 100–199 filesystem · 200–599 index/events/display/network
- *   10000+    the app (devalbo/dlc/v1) — dlc claims no id below the line
- */
-export const PlatformMethod = {
-  Version: 1,
-  ExportFs: 100,
-  ImportFs: 101,
-  ResetFs: 102,
-} as const;
-
-export const Method = {
-  New: 10000,
-  Echo: 10001,
-} as const;
+// NO METHOD IDS LIVE HERE. They are generated per-proto by
+// protoc-gen-dlc-registry (`*.registry.pb.ts`) and imported by the app:
+//
+//	import { MethodGreet } from "@gen/myapp/v1/commands.registry.pb";
+//	import { MethodExportFs } from "@gen/devalbo/ilc/v1/platform.registry.pb";
+//
+// Two reasons. An app's ids are the app's, so a shared host package holding them
+// would be a layering inversion — this package would need to know every app that
+// ever exists. And hand-mirroring numbers into TypeScript is precisely the hole
+// the generator closed for Go; reopening it here would mean an id lives in two
+// places again, with nothing checking they agree.
 
 let worker: Worker | null = null;
 let remote: Comlink.Remote<WorkerApi> | null = null;

@@ -5,13 +5,13 @@
 // No business logic lives here. What `new` *means* is in engine/, shared with
 // the CLI; this only collects fields and renders what came back.
 import { useCallback, useEffect, useState } from "react";
+import { execute, listFiles, reset } from "@devalbo/ilc-web/api";
+// Ids are generated, never typed by hand — see the note in the host's api.ts.
+import { MethodNew } from "@gen/devalbo/dlc/v1/commands.registry.pb";
 import {
-  execute,
-  listFiles,
-  Method,
-  PlatformMethod,
-  reset,
-} from "../../hosts/web/api";
+  MethodExportFs,
+  MethodImportFs,
+} from "@gen/devalbo/ilc/v1/platform.registry.pb";
 import { NewRequest, NewResponse } from "@gen/devalbo/dlc/v1/commands.pb";
 // The filesystem/bundle verbs are the PLATFORM's, not dlc's — every app gets
 // this same download/import UI for free.
@@ -52,7 +52,7 @@ export function App() {
       // something else, so sending aspirational values here would just fail —
       // correctly. They come back as the template grows.
       const request = NewRequest.toBinary({ name, module });
-      const r = await execute(Method.New, request);
+      const r = await execute(MethodNew, request);
       if (!r.success) {
         say(`new failed: ${r.error ?? "(no message)"}`);
         return;
@@ -81,7 +81,7 @@ export function App() {
     setBusy(true);
     try {
       const request = ExportFsRequest.toBinary({ prefix: "" });
-      const r = await execute(PlatformMethod.ExportFs, request);
+      const r = await execute(MethodExportFs, request);
       if (!r.success) {
         say(`export-fs failed: ${r.error ?? "(no message)"}`);
         return;
@@ -118,7 +118,7 @@ export function App() {
         prefix: "",
         mode: ImportMode.REPLACE,
       });
-      const r = await execute(PlatformMethod.ImportFs, request);
+      const r = await execute(MethodImportFs, request);
       if (!r.success) {
         say(`import-fs failed: ${r.error ?? "(no message)"}`);
         return;

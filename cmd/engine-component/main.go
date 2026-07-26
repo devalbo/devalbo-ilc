@@ -1,9 +1,17 @@
 //go:build tinygo
 
 // Wasip2 component entrypoint for the dlc engine (Decision 26: this is the
-// parity/portability artifact — web loads it via jco, and a CI/`dlc verify` step
-// diffs its output against the native host). It only adapts the WIT export to
-// engine.Execute; it holds NO business logic.
+// parity/portability artifact — web loads it via jco, and the CI parity check
+// diffs its output against the native host).
+//
+// Almost nothing lives here. The WIT glue is app-agnostic and belongs to the
+// platform (engine/platform/wasm); this file is the shape every scaffolded app's
+// component main has — import the engine to register its commands, import the
+// platform's wasm package to wire the exports, and stop.
+//
+// The one extra line is dlc's own: it still has an in-engine argv shim, which a
+// scaffolded app does not (its host builds requests — Decision 28). That line
+// disappears when the shim retires.
 //
 // Build (never natively — the //go:build tinygo tag keeps `go build ./...` off it):
 //
@@ -13,37 +21,9 @@ package main
 
 import (
 	"github.com/devalbo/devalbo-ilc/engine"
-	wit "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/engine"
-	"github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/types"
-	"go.bytecodealliance.org/cm"
+	"github.com/devalbo/devalbo-ilc/engine/platform/wasm"
 )
 
-func init() {
-	wit.Exports.Execute = execute
-	wit.Exports.ExecuteCli = executeCli
-}
-
-// execute is the real boundary: method_id + proto-encoded request bytes.
-func execute(method uint32, request cm.List[uint8]) wit.CommandResult {
-	return toCommandResult(engine.ExecuteMethod(method, request.Slice()))
-}
-
-// executeCli is the bootstrap argv shim (retires with host-side parsing).
-func executeCli(args cm.List[string]) wit.CommandResult {
-	return toCommandResult(engine.Execute(args.Slice()))
-}
-
-func toCommandResult(r engine.Result) wit.CommandResult {
-	res := types.CommandResult{
-		Success: r.Success,
-		Output:  cm.ToList(r.Output),
-	}
-	if r.Err != "" {
-		res.Error = cm.Some(r.Err)
-	} else {
-		res.Error = cm.None[string]()
-	}
-	return res
-}
+func init() { wasm.SetExecuteCli(engine.Execute) }
 
 func main() {}

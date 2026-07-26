@@ -55,9 +55,15 @@ cd myapp && make gen && make verify        # ✅ it generates, builds, and runs
 make dev-web                               # ✅ dlc itself in the browser (React UI, OPFS)
 ```
 
-> **`--platform-path` is temporary.** A scaffolded app depends on the ILC platform as a Go module, but
-> `ilc-platform` is not published yet — so `dlc new` writes a `replace` directive pointing at your local
-> checkout. It is clearly marked in the generated `go.mod` and goes away when the module is tagged.
+> **`--platform-path` is temporary.** A scaffolded app depends on the ILC platform as a Go module (and an
+> npm package), but neither is published yet — so `dlc new` writes a `replace` directive and a `file:`
+> dependency pointing at your local checkout. Both are clearly marked in the generated project and go away
+> when the packages are released.
+
+> **Scaffolding is offline; building the result is not.** `dlc new` needs no network — the templates are
+> compiled into the binary, and nothing is ever cloned at runtime (§16.6). But the *generated project* is a
+> fresh module: its first `make gen && make build` resolves Go dependencies through `GOPROXY` and npm
+> packages from the registry. With warm caches it works offline; from scratch it does not.
 
 ## Runs everywhere the same engine fits
 

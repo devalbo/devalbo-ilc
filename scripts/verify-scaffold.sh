@@ -39,6 +39,7 @@ step "dlc new $APP"
 	|| fail "dlc new"
 
 PROJ="$WORK/$APP"
+PKG="$(printf '%s' "$APP" | tr -c 'a-zA-Z0-9' '_')" # identifier-safe, as the renderer derives it
 [ -f "$PROJ/go.mod" ] || fail "no go.mod in the scaffold"
 
 step "buf generate"
@@ -67,5 +68,28 @@ case "$greet" in *ILC*) ;; *) fail "greet did not echo the name: $greet" ;; esac
 bundle="$( cd "$PROJ" && "./$APP" export-fs )" || fail "inherited export-fs"
 case "$bundle" in '{'*'"type": "directory"'*) ;; *) fail "export-fs did not emit BFT" ;; esac
 
+# ---- the web tier: the same engine, built to wasm --------------------------
+#
+# `dlc build web` supplies the WIT world from dlc's own embedded copy, so the
+# scaffold carries none and cannot be stranded on a stale world. This is the
+# claim that makes "write once, run everywhere" true for GENERATED apps and not
+# just for dlc itself.
+#
+# The browser RUN of a scaffolded app is checked separately (test-b3): it needs
+# npm install + Playwright, which is minutes, not seconds.
+step "dlc build web"
+( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) >/dev/null 2>&1 \
+	|| fail "dlc build web on the scaffolded app"
+
+[ -f "$PROJ/build/engine.component.wasm" ] || fail "no wasm component was produced"
+# The web assets go INSIDE the Vite root (jco fetches the core .wasm at
+# runtime, so a dev server has to be able to serve it); the component stays in
+# build/, where nothing serves it.
+[ -f "$PROJ/frontend/src/wasm/engine.component.js" ] || fail "jco transpile produced no JS in the web root"
+# The app's own generated ids must reach the web tier — hand-mirroring them into
+# TypeScript is the hole protoc-gen-dlc-registry exists to close.
+grep -q "MethodGreet" "$PROJ/gen/ts/$PKG/v1/commands.registry.pb.ts" 2>/dev/null \
+	|| fail "no generated TypeScript method ids for the web tier"
+
 echo "-------------------------------------------------"
-printf "${G}✓${Z} the scaffold builds and runs — %s / %s\n" "$version" "$greet"
+printf "${G}✓${Z} the scaffold builds and runs (native + wasm) — %s / %s\n" "$version" "$greet"

@@ -152,7 +152,10 @@ test("exports a BFT bundle and re-imports it", async ({ page }) => {
     mimeType: "application/json",
     buffer: Buffer.from(bundle),
   });
-  await expect(page.getByTestId("log")).toContainText("imported 13 files");
+  // Count, not a fixed number: the template grows, and pinning the total makes
+  // every template addition look like a web-tier regression. The file
+  // assertions below are what actually check the import.
+  await expect(page.getByTestId("log")).toContainText(/imported \d+ files/);
   for (const f of EXPECTED) {
     await expect(page.getByTestId("files")).toContainText(f);
   }

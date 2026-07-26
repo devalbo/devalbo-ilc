@@ -109,9 +109,15 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 		module = defaultModule(req.Name)
 	}
 	return map[string]string{
-		"AppName":         req.Name,
-		"Module":          module,
-		"PkgName":         identifier(req.Name),
+		"AppName": req.Name,
+		"Module":  module,
+		"PkgName": identifier(req.Name),
+		// The raw path AND the composed go.mod line. The web tier needs the bare
+		// path for an npm `file:` dependency, which is the TypeScript half of the
+		// same bootstrap: depend on the local checkout until the packages are
+		// published. Empty is legal — the templates then emit instructions
+		// instead of a silently broken dependency.
+		"PlatformPath":    req.PlatformPath,
 		"PlatformReplace": platformReplace(req.PlatformPath),
 	}
 }

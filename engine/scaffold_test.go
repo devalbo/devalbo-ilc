@@ -98,7 +98,7 @@ func TestShippedTemplatesRender(t *testing.T) {
 // the set, so adding a request field without wiring it (or vice versa) is loud.
 func TestScaffoldVarsDictionary(t *testing.T) {
 	vars := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Module: "example.com/my-app"})
-	want := []string{"AppName", "Module", "PkgName", "PlatformReplace"}
+	want := []string{"AppName", "Module", "PkgName", "PlatformPath", "PlatformReplace"}
 	if len(vars) != len(want) {
 		t.Errorf("dictionary has %d keys, want %d: %v", len(vars), len(want), vars)
 	}

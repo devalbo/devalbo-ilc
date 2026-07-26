@@ -24,3 +24,12 @@ plugins:
     opt:
       - paths=source_relative
       - lock=method-ids.lock
+  # The same ids for the web tier. buf runs a plugin once per output directory,
+  # so this is a second invocation with lang=ts rather than one emitting both.
+  # No lock here — one writer is enough, and two would race on the same file.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/cmd/protoc-gen-dlc-registry"]
+    out: ../gen/ts
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lang=ts

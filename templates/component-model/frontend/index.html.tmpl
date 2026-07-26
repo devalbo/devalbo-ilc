@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.AppName}} — web</title>
+  </head>
+  <body>
+    <main>
+      <h1>{{.AppName}}</h1>
+      <p>
+        The same engine the CLI links, running here as a wasip2 component with
+        its filesystem bound to OPFS.
+      </p>
+      <input id="name" value="ILC" />
+      <button id="greet" data-testid="greet">greet</button>
+      <pre id="out" data-testid="out"></pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

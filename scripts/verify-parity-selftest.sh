@@ -83,14 +83,19 @@ check() { # label  condition-already-evaluated
 # Exit status alone is not enough: a compile error also exits non-zero and would
 # let a broken check masquerade as a working one. Require the actual mismatch
 # report, on each boundary.
+# HERESTRINGS, not pipes. `grep -q` exits on its first match, which closes the
+# pipe under the writer; with `set -o pipefail` that SIGPIPE becomes the
+# pipeline's exit status, so a SUCCESSFUL match reports failure. It only bites
+# once the output is big enough for the writer to still be going — i.e. it looks
+# fine until the suite grows, which is exactly how it got here.
 [ "$status" -ne 0 ]; check "parity check exited non-zero" $?
-printf '%s' "$out" | grep -q "PARITY MISMATCH"; check "reported a PARITY MISMATCH" $?
-printf '%s' "$out" | grep -q "wasm-parity \[argv\]"; check "ran the argv boundary" $?
-printf '%s' "$out" | grep -q "wasm-parity \[method\]"; check "ran the method boundary" $?
-[ "$(printf '%s' "$out" | grep -c "PARITY MISMATCH")" -eq 2 ]; check "both response streams caught it" $?
-# The probe renames a scaffolded file, so the written trees must differ too —
-# the FS-snapshot half of the check has to be load-bearing, not decorative.
-[ "$(printf '%s' "$out" | grep -c "TREE MISMATCH")" -eq 2 ]; check "both filesystem trees caught it" $?
+grep -q "PARITY MISMATCH" <<<"$out"; check "reported a PARITY MISMATCH" $?
+grep -q "wasm-parity \[argv\]" <<<"$out"; check "ran the argv boundary" $?
+grep -q "wasm-parity \[method\]" <<<"$out"; check "ran the method boundary" $?
+[ "$(grep -c "PARITY MISMATCH" <<<"$out")" -eq 2 ]; check "both response streams caught it" $?
+# The probe empties the template FS, so the written trees must differ too — the
+# FS-snapshot half of the check has to be load-bearing, not decorative.
+[ "$(grep -c "TREE MISMATCH" <<<"$out")" -eq 2 ]; check "both filesystem trees caught it" $?
 [ ! -e "$PROBE" ]; check "probe removed (tree restored)" $?
 
 echo "-------------------------------------------------"

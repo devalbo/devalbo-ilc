@@ -1,0 +1,38 @@
+// {{.AppName}}'s web UI.
+//
+// The form IS this tier's command parser (Decision 28): it collects fields,
+// encodes a typed request, and hands the bytes to the engine through the ILC web
+// adapter. What `greet` MEANS lives in engine/ — shared with the CLI — which is
+// why the browser and the terminal cannot disagree.
+//
+// No business logic here. If you find yourself deciding something in this file,
+// it belongs in engine/.
+import { execute } from "@devalbo/ilc-web/api";
+
+// Two generated files, two generators: es-lite emits the MESSAGES, and
+// protoc-gen-dlc-registry emits the permanent method IDS. Neither is hand-written.
+import { GreetRequest, GreetResponse } from "@gen/{{.PkgName}}/v1/commands.pb";
+import { MethodGreet } from "@gen/{{.PkgName}}/v1/commands.registry.pb";
+
+const out = document.getElementById("out") as HTMLPreElement;
+const nameInput = document.getElementById("name") as HTMLInputElement;
+
+function say(line: string) {
+  out.textContent += line + "\n";
+}
+
+document.getElementById("greet")!.addEventListener("click", async () => {
+  try {
+    const request = GreetRequest.toBinary({ name: nameInput.value });
+    const r = await execute(MethodGreet, request);
+    if (!r.success) {
+      say(`greet failed: ${r.error ?? "(no message)"}`);
+      return;
+    }
+    say(GreetResponse.fromBinary(r.output).text ?? "");
+  } catch (e) {
+    say(`ERROR: ${(e as Error).message}`);
+  }
+});
+
+say("ready — the engine boots on the first command");

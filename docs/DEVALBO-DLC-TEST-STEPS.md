@@ -78,12 +78,11 @@ make test-b0
 ```
 Pass: structure / core files / READMEs / gitignore ✓. Migration rows ✗ is **expected** until step 3.
 
-**3 — Tri-language removal** · 🟢 (git — you) · T-B0.3 · ▶ **auto:** none (manual git)
+**3 — Tri-language removal** · 🟢 (done) · T-B0.3 · ▶ **auto:** `make test-b0` (absent-path checks)
 ```bash
-git tag phase1-tri-language          # if not already tagged
-git rm -r compiler packages Cargo.toml Cargo.lock
-git rm wit/environment.wit wit/console-io.wit
-make test-b0                         # → B0 GREEN
+# Historical one-shot (already done): tag then delete the Rust/tri-language tree.
+# Standing gate is only "those paths stay gone" — no tag required in CI.
+make test-b0                         # → B0 GREEN when compiler/Cargo/etc. are absent
 ```
 
 **4 — Toolchain** · 🟡 · T-B0.2 · ▶ **auto:** `make doctor` (inside devbox) → [`scripts/preflight.sh`](../scripts/preflight.sh)
@@ -151,15 +150,15 @@ red, nothing downstream is trustworthy.
 - **Automate as:** `devbox run doctor` in CI.
 
 ### T-B0.3 — Clean migration
-- **Goal:** the retired tri-language machinery is gone and recoverable.
+- **Goal:** the retired tri-language machinery stays gone.
 - **Builds on:** T-B0.1.
 - **Steps:**
   ```bash
   test ! -d compiler && test ! -d packages && test ! -f Cargo.toml && test ! -f Cargo.lock
   test ! -f wit/environment.wit && test ! -f wit/console-io.wit
-  git rev-parse --verify phase1-tri-language        # checkpoint exists
   ```
-- **Pass:** all conditions true (removed files absent; tag resolves).
+- **Pass:** removed paths stay absent. (`phase1-tri-language` was a one-time local checkpoint
+  during the migration — not a standing CI assertion.)
 - **Automate as:** `make test-b0` shell assertions.
 
 ### T-B0.4 — Directory skeleton matches the plan (§3)
@@ -396,7 +395,7 @@ golden) land as those commands are built.
 **Nothing in the suites knows about a CI provider** — no provider env vars, no caching hooks, no
 annotations. A CI config is a thin adapter satisfying four requirements:
 
-1. check out **with tags** — `test-b0` asserts `phase1-tri-language` exists
+1. check out the repo
 2. make `devbox` available
 3. provide the system libraries headless Chromium needs (B3 only) — Playwright fetches the browser
    itself, but installing its shared libraries needs root, so it is an *environment* concern the suites

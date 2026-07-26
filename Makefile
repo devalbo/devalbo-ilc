@@ -46,6 +46,10 @@ verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-fo
 verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs
 	@./scripts/verify-scaffold.sh
 
+.PHONY: verify-scaffold-web
+verify-scaffold-web: build-host ## a scaffolded app runs in a browser, via its own shipped test
+	@./scripts/verify-scaffold-web.sh
+
 .PHONY: parity-vectors
 parity-vectors: ## regenerate verify/parity/method-vectors.json from the typed fixtures
 	go run ./cmd/parity-runner -gen verify/parity/method-vectors.json
@@ -194,7 +198,7 @@ verify-bundle-xtier: build-wasm ## §7.3: a BFT bundle exported in the browser i
 	@./scripts/verify-bundle-xtier.sh
 
 .PHONY: test-b3
-test-b3: verify-web verify-bundle-xtier ## Phase B3 web tier: dlc new in the browser, OPFS persistence, BFT interchange
+test-b3: verify-web verify-bundle-xtier verify-scaffold-web ## Phase B3 web tier: dlc in the browser, OPFS, BFT interchange, and a SCAFFOLDED app in the browser
 
 .PHONY: ci
 ci: ## what CI runs — identical locally (fast | full | all via scripts/ci.sh)
