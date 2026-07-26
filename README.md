@@ -49,10 +49,16 @@ rest (Go, TinyGo, buf, wasmtime, jco…). See [`docs/DEVALBO-DLC-PREREQUISITES.m
 devbox shell                               # provision the pinned toolchain
 
 make build-host                            # ✅ builds ./dlc
-./dlc new myapp --platform-path "$PWD"     # ✅ scaffold a project (see the note below)
-cd myapp && make gen && make verify        # ✅ it generates, builds, and runs
+./dlc new myapp --platform-path "$PWD"     # ✅ scaffold a project (see the notes below)
 
-make dev-web                               # ✅ dlc itself in the browser (React UI, OPFS)
+cd myapp
+make gen && go mod tidy                    # ✅ codegen BEFORE tidy — engine imports generated code
+make verify                                # ✅ it builds and runs in the terminal
+make build-web && make dev-web             # ✅ …and in a browser, on :5173
+cd frontend && npm test                    # ✅ its own shipped browser test
+
+# and dlc itself, which is just another ILC app:
+make dev-web                               # ✅ dlc in the browser (React UI, OPFS)
 ```
 
 > **`--platform-path` is temporary.** A scaffolded app depends on the ILC platform as a Go module (and an
@@ -70,7 +76,7 @@ make dev-web                               # ✅ dlc itself in the browser (Reac
 | Tier | Runtime | Host | State |
 | --- | --- | --- | --- |
 | **CLI** | engine linked in-process | Go | ✅ `dlc` runs; scaffolded apps build + run |
-| **Web** | jco | TypeScript + React | 🚧 `dlc` runs in the browser (scaffold → OPFS → survives reload). Scaffolded apps have **no web host yet** |
+| **Web** | jco | TypeScript | ✅ `dlc` runs in the browser (scaffold → OPFS → survives reload) **and so do scaffolded apps**, each with its own shipped browser test |
 | **Desktop** | — | Go (Wails) | 📋 |
 | **Embedded** (ESP32-S3 / RP2350 / RP2040) | WAMR / native TinyGo | C / Go | 📋 — WAMR spike deferred |
 
@@ -89,7 +95,8 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 | **Codegen** — `protoc-gen-dlc-registry` emits ids + dispatch from the `.proto`; committed id lock fails the build on a renumber | ✅ |
 | **Filesystem** — plain Go `os` over a host-bound root (process cwd natively, WASI preopen in wasm) | ✅ |
 | **BFT bundles** — `export-fs` / `import-fs` / `reset-fs`; one human-readable JSON blob for a whole tree | ✅ browser → terminal interchange is checked in CI |
-| **Scaffolding** — `dlc new` emits an embedded template; the output generates, tests, builds, and runs | ✅ terminal only |
+| **Scaffolding** — `dlc new` emits an embedded template; the output generates, tests, builds, and runs **on both tiers** | ✅ |
+| **`dlc build web`** — supplies the WIT world from `dlc` itself, so apps carry none and cannot be stranded on a stale one | ✅ |
 | **Console** — stdio natively; browser stdio → `console.*` | 🚧 native works; the web wiring is not done |
 | **Host-side arg parsing** (Decision 28) | 🚧 the web UI builds requests properly; the CLI still uses a transitional in-engine argv shim |
 | SQLite index · Events · Display · Network · sync | 📋 |
@@ -101,10 +108,10 @@ engine/            ✅ dlc's own business logic (Go → wasm) — reflection-fre
 engine/platform/   ✅ what every app INHERITS: dispatch, fs root seam, path containment, BFT
 cmd/               ✅ thin entrypoints: wasip2 component shim, codegen plugin, dev tools
 hosts/native/      ✅ CLI host — engine linked in-process
-hosts/web/         ✅ browser host — jco worker, OPFS, Comlink
+hosts/web/         ✅ browser host, published as @devalbo/ilc-web — jco worker, OPFS, Comlink, Vite preset
 wit/               ✅ the ILC capability world (framework)
 proto/             ✅ message types + command services (go-lite + es-lite codegen)
-frontend/          ✅ React + Vite web UI
+frontend/          ✅ dlc's own React + Vite UI (a scaffolded app gets a vanilla-TS one)
 templates/         ✅ what `dlc new` emits (go:embed'd) — depend-on, never inline
 spikes/            ✅ de-risking proofs, kept as regression tests
 verify/            ✅ cross-tier checks — golden vectors proving native == wasm
@@ -126,7 +133,7 @@ Every claim above has a target behind it. `make test` runs all of them.
 | `make test-b0` | repo structure + toolchain integrity |
 | `make test-b1` | the five de-risking spikes still pass |
 | `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs |
-| `make test-b3` | `dlc` in headless Chromium: scaffold → OPFS → survives reload; BFT bundle crosses browser → terminal |
+| `make test-b3` | `dlc` in headless Chromium (scaffold → OPFS → survives reload) · BFT bundle crosses browser → terminal · **a scaffolded app runs in a browser via its own test** |
 | `make ci` | what CI runs, identically — `fast` / `full` / `all` tiers |
 
 ✅ **CI runs them** — `./scripts/ci.sh full` on push, `all` (adding the B1 spikes) nightly. The script is
@@ -146,17 +153,23 @@ is a ~20-line adapter, not the logic.
 
 ## Status
 
-**Bootstrap milestone: mostly met.** `dlc` (App #1) runs in the **terminal and the browser** from one
-shared engine, using Console + Filesystem, with a React UI on the web tier — and `dlc new` now emits a
-project that actually builds and runs.
+**Bootstrap milestone: met.** `dlc` (App #1) runs in the **terminal and the browser** from one shared
+engine using Console + Filesystem — and so do the projects it generates, each shipping its own browser
+test. The cross-tier claim is checked rather than asserted: golden vectors diff the native and wasm
+engines (results *and* the filesystems they write), and a BFT bundle exported in Chromium rebuilds an
+identical tree through the CLI.
 
 The honest gaps, in the order they matter:
 
-1. 🚧 **Scaffolded apps are terminal-only.** The template has no web host, so "write once, run everywhere"
-   is proven for `dlc` itself but not yet for what `dlc` generates.
-2. 🚧 **`dlc`'s own CLI still parses argv inside the engine** — a transitional shim that Decision 28
-   retires. The web UI already does it the right way.
-3. 📋 **`ilc-platform` is not published**, so every scaffold needs `--platform-path`.
+1. 🚧 **`dlc`'s own CLI still parses argv inside the engine** — a transitional shim that Decision 28
+   retires. Both the web UI and the *generated* native host already do it the right way, so `dlc` is now
+   the only thing doing it the old way. Retiring it deletes the `execute-cli` export, the ffcli
+   dependency, and half the parity vectors.
+2. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
+   `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
+   proto code, which `/gen/` currently ignores.
+3. 📋 **No golden FS snapshot** (§11). Required scaffold files are asserted, but nothing catches an
+   accidental *addition* to the template.
 4. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
    designed and unbuilt — see the tasks doc.
 

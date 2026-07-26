@@ -7,8 +7,13 @@
 # WASM build artifacts
 *.wasm
 
-# Built native dlc binary (Decision 26 — hosts/native)
+# Built binaries. `go build ./cmd/foo` drops `foo` in whatever directory you are
+# standing in, which is how two 12 MB binaries reached a commit — so the pattern
+# matters more than the individual names.
 /dlc
+/protoc-gen-dlc-registry
+/parity-runner
+*.test
 
 # Spike + verify generated output (jco transpile, copied bindings, etc.)
 spikes/**/out/
