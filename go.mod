@@ -11,6 +11,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/tetratelabs/wazero v1.9.0
 	go.bytecodealliance.org/cm v0.3.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package devalbo.oneofspike.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/oneofspike/v1;oneofspikev1";
+
+// go-lite oneof spike: prove a protobuf `oneof` command envelope encodes/decodes
+// with protobuf-go-lite AND dispatches via a map keyed on the oneof discriminator
+// (no switch) under `tinygo -target=wasip2`. The command registry (Decision 29)
+// rides on this working reflection-free — Spike 2 only proved a flat message.
+message Command {
+  oneof command {
+    GreetRequest greet = 1;
+    AddRequest add = 2;
+  }
+}
+
+message GreetRequest {
+  string name = 1;
+}
+
+message AddRequest {
+  int32 a = 1;
+  int32 b = 2;
+}
+
+message CommandResult {
+  string text = 1;
+}

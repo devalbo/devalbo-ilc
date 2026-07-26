@@ -5,10 +5,10 @@
 doctor: ## assess prerequisites (system + provisioned toolchain)
 	@./scripts/preflight.sh
 
-ENGINE_WASM := engine.core.wasm
 COMPONENT   := engine.component.wasm
-# WASI preview1 -> component adapter (path resolved from the wasm-tools/wasmtime install).
-ADAPTER     ?= wasi_snapshot_preview1.wasm
+DLC         := dlc
+ENGINE_SRC  := ./cmd/engine-component   # wasip2 component entrypoint (shim over engine.Execute)
+HOST_SRC    := ./hosts/native           # native dlc host: engine linked in-process (Decision 26)
 
 .PHONY: gen
 gen: ## generate WIT + proto bindings (requires devbox shell)
@@ -16,13 +16,21 @@ gen: ## generate WIT + proto bindings (requires devbox shell)
 	wit-bindgen-go generate --world async-engine --out gen/go ./wit
 	cd proto && buf lint && buf generate
 
+.PHONY: build-host
+build-host: ## native dlc binary — engine linked in-process (Decision 26)
+	go build -o $(DLC) $(HOST_SRC)
+
 .PHONY: build-engine
-build-engine: ## TinyGo -> engine.core.wasm (the shared unit)
-	tinygo build -target=wasip1 -o $(ENGINE_WASM) ./engine
+build-engine: gen ## TinyGo -target=wasip2 -> engine.component.wasm (wasip2-direct, Spike 1)
+	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+		-o $(COMPONENT) $(ENGINE_SRC)
 
 .PHONY: component
-component: build-engine ## adapt the core module into a wasip2 component
-	wasm-tools component new $(ENGINE_WASM) --adapt $(ADAPTER) -o $(COMPONENT)
+component: build-engine ## wasip2-direct emits the component in one shot (no wasip1 adapter)
+
+.PHONY: verify-parity
+verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-for-byte
+	@./scripts/verify-parity.sh
 
 .PHONY: build-wasm
 build-wasm: component ## transpile the component for the web (jco)
@@ -107,6 +115,26 @@ SPIKE_ASYNC := spikes/async
 .PHONY: spike-async
 spike-async: gen ## Spike 5 (T-B1.5): async probe Rich/CM + Portable/WAMR-shaped
 	@./scripts/spike-async.sh
+
+# Registry de-risk: go-lite `oneof` command envelope + map dispatch (no switch)
+# under TinyGo wasip2 — the assumption Decision 29 rides on (Spike 2 was flat).
+SPIKE_ONEOF := spikes/oneof
+
+.PHONY: spike-oneof
+spike-oneof: gen ## go-lite oneof under TinyGo (registry de-risk, Decision 29)
+	cd $(SPIKE_ONEOF) && npm install --silent --no-audit --no-fund
+	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+		-o $(SPIKE_ONEOF)/engine.component.wasm ./$(SPIKE_ONEOF)
+	cd $(SPIKE_ONEOF) && npx jco transpile engine.component.wasm -o out
+	cd $(SPIKE_ONEOF) && node harness.mjs
+
+# Registry de-risk: go-lite tolerates descriptor.proto + custom options
+# (method_id / field metadata). Host reads them via FileDescriptorSet.
+SPIKE_OPTIONS := spikes/options
+
+.PHONY: spike-options
+spike-options: gen ## go-lite custom options gate (Decision 29)
+	@./scripts/spike-options.sh
 
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)

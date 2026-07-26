@@ -5,6 +5,7 @@ they become standing regression tests so the foundation stays proven as code cha
 
 Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅,
 `cli/` ✅ (ffcli default), `async/` ✅ (Rich JSPI GREEN · Portable GREEN).
+Registry de-risk (B2): `oneof/` ✅ · `options/` ✅ (go-lite tolerates custom options; host reads FileDescriptorSet).
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
@@ -266,6 +267,8 @@ invisible to a live instance. Hydrate **then** dynamic-import the component.
 **Goal:** prove a subcommand + flag parser can live **inside** the TinyGo engine (host = argv forwarder);
 bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).
 
+> **Re-scoped by Decision 28.** Parsing moved **host-side** (the engine takes a structured proto request, not argv). These findings now inform the **host** parser choice — ffcli stays the reference, and the "must be reflection-free" constraint relaxes off the engine critical path. The bake-off data (kong panics, cobra `-name`, sizes) all still stand.
+
 **Run:** `devbox run make spike-cli` (also in `make test-b1`).
 
 ### Bake-off (TinyGo → harness, 17-case matrix)
@@ -349,3 +352,100 @@ cobra is green on 16/17 cases. It fails `greet -name world` because **pflag** tr
 - Portable: blocking native-import path is good for TinyGo wasip1 / future WAMR (re-host under `iwasm` when embedded lands).
 - Pin **Node 24+** in devbox — Node 22 has no JSPI APIs even with the experimental flag.
 - Browser JSPI (Playwright) is a follow-up; Node is the CI gate.
+
+## Registry de-risk — `oneof/` (Decision 29) — ✅ GREEN
+
+**Goal:** prove a protobuf `oneof` command envelope (protobuf-go-lite) encodes/decodes **and** dispatches
+via a **map keyed on the oneof discriminator (no switch)** under `tinygo -target=wasip2`. The whole command
+registry (Decision 29) rides on this working reflection-free; Spike 2 only proved a *flat* message.
+
+**Run:** `devbox run make spike-oneof`.
+
+### What works
+
+```
+build Command oneof → MarshalVT/UnmarshalVT (binary) + MarshalJSON/UnmarshalJSON (canonical)
+  → dispatch decoded Command via handlers[tagOf(c)]  (O(1) map, switch-free)
+```
+
+All six harness cases pass (greet/empty-name/add/signed-add + unknown-verb/no-command errors). Binary
+**and** canonical-JSON oneof round-trips both survive TinyGo; signed `int32` round-trips.
+
+### What we learned (the go-lite oneof shape)
+
+- go-lite emits the standard protobuf-go oneof: an **unexported interface** `isCommand_Command` + **exported
+  wrapper structs** `*Command_Greet` / `*Command_Add`, with `GetCommand()` and typed getters
+  (`GetGreet()`/`GetAdd()` return the value or nil).
+- **No `WhichX()` discriminator getter.** So the map key comes from a **1-line-per-arm type-switch**
+  (`switch c.GetCommand().(type)`) over the *exported* wrapper types. That's the only switch — and it's
+  exactly what **`protoc-gen-dlc-registry`** will emit; the app never writes it. Dispatch itself is a plain
+  `map[int32]handler` lookup.
+- Reflection-free throughout — no `reflect`, no descriptor walking. TinyGo compiles the generated
+  `MarshalVT`/`UnmarshalVT`/`MarshalJSON`/`UnmarshalJSON` for oneofs without complaint.
+
+### Implications
+
+- **Decision 29 is viable as specified.** `protoc-gen-dlc-registry` must emit, per command proto: the tag
+  constants, the `tagOf` type-switch, and the `Register(tag, handler)` wiring — the app supplies only
+  handlers.
+- Component core ~1.06 MiB (baseline with one 2-arm oneof + go-lite; grows with the real command set).
+- **Not yet tested:** cross-language oneof (es-lite *encodes* → go-lite *decodes*). Wire format is standard
+  TLV and Spike 2 proved flat es-lite↔go-lite, so risk is low; a follow-on can add es-lite encoding to the
+  harness when the web host lands (B3).
+
+---
+
+## Registry de-risk — `options/` (Decision 29) — ✅ GREEN
+
+**Goal:** gate the Decision 29 registry schema — custom options (`method_id`, field help/required/default/short)
+must survive go-lite codegen + TinyGo without pulling reflection-heavy official protobuf into the engine,
+while the host can still read `method_id` from a FileDescriptorSet.
+
+**Run:** `devbox run make spike-options` · criteria check: `devbox run ./scripts/check-options-criteria.sh`
+
+### Pass criteria (measured 2026-07-25)
+
+| # | Criterion | Result |
+| --- | --- | --- |
+| **1** | `.proto` that `import "google/protobuf/descriptor.proto"` and `extend google.protobuf.MethodOptions { uint32 method_id = …; }` passes `buf lint` + `buf generate` through **protoc-gen-go-lite** without erroring on the import | 🟢 PASS |
+| **2** | Generated Go for the **messages** builds under `tinygo build -target=wasip2` — go-lite does **not** pull `google.golang.org/protobuf/types/descriptorpb` into the engine import graph just because the file declares options | 🟢 PASS (`go list -deps ./spikes/options` has no `google.golang.org/protobuf`) |
+| **3** | `buf build -o …` FileDescriptorSet: host-side protoreflect/dynamicpb reads `method_id` off a **service rpc** (and field options off request fields) | 🟢 PASS (`CommandsService.Greet` / `Add`) |
+
+Fallbacks (not needed — all green): (1) keep options in a host-only proto the engine never imports; (2) move `method_id` into the plugin lock / `dlc.toml` keyed by rpc full name.
+
+### What works
+
+```
+proto/devalbo/options/v1/options.proto          # extend MethodOptions / FieldOptions
+proto/devalbo/optionsspike/v1/commands.proto    # service + option-bearing request fields
+  → buf lint + generate (go-lite + es-lite)                    # C1
+  → TinyGo wasip2: MarshalVT/JSON round-trip of messages        # C2
+  → buf build → host-introspect reads method_id + field opts    # C3
+```
+
+### What we learned
+
+- go-lite **does not emit extension types** — `options.pb.go` is only
+  `_ "github.com/aperturerobotics/protobuf-go-lite/types/descriptorpb"` (go-lite's own copy, **not**
+  `google.golang.org/protobuf`). Message codecs for files that *use* the options blank-import the
+  options package → that go-lite `descriptorpb` lands in the guest dep graph. Criterion 2 still
+  passes (no official protobuf). **Note:** go-lite's `descriptorpb` source is large (~500 KiB Go);
+  if wasm size bites, prefer the fallback layout — **messages.proto** (engine/go-lite, no options
+  import) + **commands.proto** (service + options, host/codegen/`buf build` only).
+- **go-lite emits NO service stubs** (no `CommandsService` / rpc methods in generated Go). Therefore
+  **`protoc-gen-dlc-registry` must read the FileDescriptorSet / buf image**, not generated Go, for
+  `method_id` and the service surface. (Either outcome was acceptable; this is which one we got.)
+- Custom options in a `buf build` image are **unknown fields** on `MethodOptions` / `FieldOptions`.
+  Host: register via `dynamicpb.NewExtensionType`, re-unmarshal with `UnmarshalOptions{Resolver}`,
+  read with `ProtoReflect().Range` (`HasExtension` is unreliable across dynamicpb type identities).
+- `buf.yaml` needs `deps: [buf.build/protocolbuffers/wellknowntypes]` for `descriptor.proto`.
+
+### Implications
+
+- **Decision 29 registry schema is unblocked** — author `method_id` + field options in proto; engine
+  stays reflection-free; host + `protoc-gen-dlc-registry` consume the descriptor set.
+- Recommended package split when scaffolding for real: keep option definitions + `service` in a
+  host-facing file; let the engine import only message packages (avoids blank-importing go-lite
+  `descriptorpb` even though C2 is already green).
+- go-lite's "no extensions" still means: no extension *fields on wire messages* the engine marshals.
+  Descriptor custom options are a different category and are fine.

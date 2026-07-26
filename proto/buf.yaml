@@ -1,4 +1,8 @@
 version: v2
+# wellknowntypes supplies google/protobuf/descriptor.proto for custom options
+# (Decision 29 method_id / field metadata). See spikes/options/.
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
 modules:
   - path: .
 lint:

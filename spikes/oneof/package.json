@@ -1,0 +1,9 @@
+{
+  "name": "spike-oneof",
+  "private": true,
+  "type": "module",
+  "description": "go-lite oneof under TinyGo (registry de-risk, Decision 29). jco brings @bytecodealliance/preview2-shim transitively so the transpiled WASI imports resolve locally.",
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.25.2"
+  }
+}

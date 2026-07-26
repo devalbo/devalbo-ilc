@@ -1,0 +1,9 @@
+{
+  "name": "dlc-parity",
+  "private": true,
+  "type": "module",
+  "description": "B2 wasm-parity harness (Decision 26): runs golden argv vectors through the jco-transpiled engine component so scripts/verify-parity.sh can diff it against the native dlc. jco brings @bytecodealliance/preview2-shim transitively.",
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.25.2"
+  }
+}

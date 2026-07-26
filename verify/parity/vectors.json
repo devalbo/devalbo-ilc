@@ -1,0 +1,11 @@
+[
+  ["version"],
+  ["echo", "hello", "world"],
+  ["echo"],
+  ["bogus"],
+  [],
+  ["new", "myapp"],
+  ["new", "--module", "github.com/acme/myapp", "myapp"],
+  ["new"],
+  ["new", "a", "b"]
+]

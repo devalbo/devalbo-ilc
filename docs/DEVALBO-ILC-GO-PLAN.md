@@ -74,7 +74,7 @@ set, or fewer tiers. The rest are platform invariants.
 | # | Decision | Choice |
 | --- | --- | --- |
 | 1 | Implementation language | **Go** for all business logic (the engine); host glue may be **TS** (web) or **C** (ESP32-S3) — neither carries business logic |
-| 2 | Runtime substrate | **Component Model** on web/desktop/CLI (jco / wasmtime); **core WASM + WASI Preview 1 + native host functions** on WAMR embedded — WAMR has **no** CM / WASI-0.2 yet (tracked divergence, §5.3) |
+| 2 | Runtime substrate | **Component Model** on web (jco) and as the parity/portability artifact; **CLI/desktop link the engine natively in-process** for bootstrap (Decision 26, not CM-under-wasmtime); **core WASM + WASI Preview 1 + native host functions** on WAMR embedded — WAMR has **no** CM / WASI-0.2 yet (tracked divergence, §5.3) |
 | 3 | Artifact model | **Component tiers (web/desktop/CLI): TinyGo `-target=wasip2` → a WASM component directly** — one shared `engine.component.wasm` (validated by Spike 1; the `wasip1`+adapter path is abandoned — §5.3). **Embedded/WAMR** runs core WASM, not a component — its build is revisited when embedded lands; RP2040 links native. Per-platform host (the "two bits"). |
 | 4 | Capability boundary | **Neutral WIT world** — polyglot-capable; Rust/C-via-WASI can interop |
 | 5 | Embedded floor | **Go/WASM is the floor** (no Rust `no_std` tier); Rust-via-WASI still welcome |
@@ -94,10 +94,16 @@ set, or fewer tiers. The rest are platform invariants.
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
 | 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export; test host → **WASI Virt**; `sqlite-host` / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
 | 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
-| 22 | CLI interpreter — in-engine, per-ABI-mode default | The CLI interpreter (subcommands + flags) lives **inside the engine**, so one parser serves every tier (CLI, web, embedded serial REPL) — the host just **forwards argv** to `execute-cli`. It must **compile under TinyGo**. **Scaffolder default: `ff/v3/ffcli`** (Spike 4 matrix-green). Per-ABI split later (Decision 25): hand-rolled if portable size bites (**~497 KiB** wasip1 vs ~1.23 MiB ffcli); go-arg if rich wants struct tags. kong panics (`MethodByName`); cobra fails Go-style `-name`; `google/subcommands` hardcodes `os.Args`. See [`spikes/README.md`](../spikes/README.md) Spike 4. |
+| 22 | ~~CLI interpreter — in-engine~~ **⚠ SUPERSEDED by Decision 28** | *Retained for history.* Originally: the CLI parser lived **inside the engine** (host forwards argv to `execute-cli`), TinyGo-safe, ffcli default (Spike 4). **Reversed by Decision 28** — parsing is a host-side front-end; the engine takes a structured request. Spike 4's bake-off is re-scoped to the *host* parser (ffcli still the reference); its findings (kong panics, cobra `-name`, hand-rolled the leanest) stand as data. |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
 | 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
 | 25 | ABI mode (WAMR toggle) | Targeting **WAMR/embedded** is a **setup-time** choice (`dlc new` / manifest `tiers`) that fixes the capability-boundary ABI: **on → portable byte ABI** (protobuf over `(ptr,len)`; also builds the wasip1 core; port-ready rules — §5.6); **off → rich Component-Model ABI** (rich WIT types, wasip2 only). Disk/wire stays protobuf either way. |
+| 26 | Native host runs the engine in-process (Go); wasm is the parity contract | The CLI/desktop host **links the engine as a native Go package** and calls `execute-cli` **in-process** — no wasm runtime in the run path, which sidesteps the `wasmtime-go` Component-Model gap and gives full-Go dev speed. This is a **build seam, not a fork** (§5.3/§5.4): one engine codebase behind the WIT-shaped interface, two host bindings — native in-process caps (`caps_native.go`) · wasm-component caps. The **wasm component stays the source of truth**: web requires it (B3) and it anchors the cross-tier identity guarantee, which moves from runtime to **CI / `dlc verify`** — run the CLI against the *wasm* engine and diff golden `command-result` vectors vs the native run. Scope: `dlc`-the-tool + non-embedded hosts; the capability-sandbox promise still binds the **apps `dlc` scaffolds** (web/embedded are wasm-mandatory). |
+| 27 | Build/run units are **tiers** (`dlc build/run/verify <tier>`) | A project holds **one app** (its engine) built for a set of **tiers** (native/web/desktop/embedded/…). A tier is a **composition recipe** — the *shared* engine × a host/environment binding + ABI mode (Decision 25) + cap set — **not** a per-tier fork of the logic, preserving the two-bit invariant + Decision 26 parity. `dlc build <tier>` (orchestrates the toolchain), `dlc run <tier>` (two-phase launch, Decision 23), and `dlc verify <tier>` (§11 matrix; `--parity` = the Decision 26 native↔wasm check) are **host-side** — tier selection never enters engine logic (§5.4). Registry = `dlc.toml [tiers]` (§16.8); built-ins `native` + `web`. `dlc`-as-orchestrator is Backlog (§16.7): `make` bootstraps the first `dlc`, then these supersede it for scaffolded apps. Since one project = one app, no `(app × tier)` noun is needed — the tier *is* the unit. |
+| 28 | CLI/argv parsing is a platform front-end; the engine takes a structured request (**supersedes Decision 22**) | The CLI is a *mechanism for constructing a request* for the shared business logic — so **parsing lives in the host, not the engine**. Each tier builds the request its own way (native: cobra/ffcli + `huh` menus; web: React form; embedded: REPL/input-map), and the engine exports **operations over a structured request** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` selects the handler, proto-bytes payload; input now symmetric with the already-protobuf output; §8/Decision 10, promoted from backlog to the primary boundary). **Wins:** native front-end off the TinyGo leash (cobra/kong/`huh` all fine, Decision 26); menus/prompts fall out naturally; the boundary is typed + `buf breaking`-evolvable, not stringly-typed argv. **Cost:** each host builds the request (embedded reparses in its host lang, or calls an *optional* in-engine `parse(line)→request` helper) — drift bounded by the **shared proto schema**, not argv. Spike 4 **re-scoped** (informs the *host* parser; ffcli the reference; TinyGo-safety pressure relaxes). Bootstrap keeps `execute-cli(argv)` as a transitional shim until the envelope lands. |
+| 29 | Self-describing command registry — service + `method_id`, direct request/response messages | The **app registers each command once** as a proto **`service` rpc** — `rpc New(NewRequest) returns (NewResponse) { option (method_id) = N; }` — plus a handler `func(*NewRequest) *NewResponse`. **Dispatch keys on the permanent `method_id`** (`map[u32]handler`; rename-safe — the *name* is cosmetic / the CLI verb; `buf breaking` + the plugin's id-lock guard the number). The wire passes the **request/response messages directly** (single-encode, flat — Spike 2-proven); no oneof or envelope for the command surface (the discriminator is a scalar param, Decision 31). **Introspection is host-side, standard protobuf:** the host embeds the `buf build` **FileDescriptorSet** and walks it with **protoreflect** (native Go) / `@bufbuild/protobuf` (web) to discover methods + `method_id` + request fields — field name→flag, type→flag type, **proto `enum`→menu choices**, with help/required/default from custom field options. The engine (TinyGo, no reflection) keeps **only** the `method_id→handler` map; a `describe()` export is **optional** — only for a *generic* host that doesn't embed the schema. **`protoc-gen-dlc-registry`** emits the engine registration + enforces `method_id` stability — reading the **`buf build` image**, since go-lite emits *no service stubs* (spike `options/`). (oneof retained for *response variants*, not command dispatch.) **Spike-confirmed (`spikes/options/`, all criteria green):** go-lite accepts `descriptor.proto` + `extend MethodOptions` and keeps `google.golang.org/protobuf` out of the guest graph; hosts read the options as **unknown fields** via `dynamicpb.NewExtensionType` + `Range` (not `HasExtension`). Options live in `proto/devalbo/options/v1/options.proto` (`method_id` = 50000; `help`/`required`/`default`/`short` = 50001-4). **Layout caveat:** *field* options must sit at the field's definition site, so a file holding request messages always imports the options package — the host-only/engine-only split can isolate the `service`, never the field metadata. |
+| 30 | Command surface splits two ways — in-engine vs host-side | A `dlc` command is an **in-engine `execute` handler** if it only touches the **filesystem / app-data** (portable — runs in terminal *and* browser): `new`, `export-fs`, `import-fs`, app-domain commands. It's **host-side orchestration** if it must **spawn the dev toolchain or inspect the machine** (native-only, can't run in wasm/browser): `build`, `run`, `verify`, `doctor`, `gen`, `host add`, `proto`. The native `dlc` host **routes**: a toolchain verb → handle in-host; anything else → build the request and forward to the engine's `execute` (Decisions 28/29). Not a violation of the old 'host forwards argv' — host verbs are *dlc-the-tool's*, not the *app's* surface. Governs where each handler lives + how the native `main()` dispatches. |
+| 31 | Single proto-bytes command boundary; `supported-abis()` negotiation; rich WIT reserved for CM-only caps | The guest exposes **one command boundary** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` + proto-bytes payload; Decisions 28/29) — universal across wasip2 **and** WAMR (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings/resources need the Component Model WAMR lacks — Decision 25). **Rich typed DX is host-side:** the host's generated binding (es-lite/go-lite) presents typed calls and serializes to the one byte boundary — no second guest ABI. A tiny **`supported-abis() -> list<u8>`** export (byte-ABI, readable even on WAMR) lets the guest advertise its boundaries + versions so a host picks the richest it supports. A **second, rich WIT guest boundary is reserved for Component-Model-only capabilities** (streams, `resource` handles, `wasi:http`, CM async) with no byte equivalent — added *per-capability*, negotiated, degrading to byte/absent on WAMR — never for the general command surface. When both exist they're two bindings over one shared registry (the caps-seam pattern), not duplicated logic. |
 
 ---
 
@@ -158,7 +164,8 @@ hosts/desktop/build/    # wails output
 │   └── ilc.wit                     # the capability world (§6)
 ├── proto/                          # versioned packages in matching dirs (idiomatic buf; STANDARD lint)
 │   ├── devalbo/ilc/v1/common.proto # shared types + errors (IlcError)
-│   ├── devalbo/dlc/v1/dlc.proto    # dlc commands (new / export-fs / import-fs)
+│   ├── devalbo/dlc/v1/commands.proto  # DlcService: in-engine verbs + method_id (Decision 29/30)
+│   ├── devalbo/options/v1/options.proto # method_id + field metadata (host-side only)
 │   ├── devalbo/<app>/v1/…          # per-app domain, e.g. record.proto / display.proto (pilot)
 │   └── buf.yaml / buf.gen.yaml      # local buf (lint + breaking=WIRE_JSON; gen go/ts)
 ├── engine/                         # THE SHARED ENGINE (Go, → wasm)  ── business logic only
@@ -167,7 +174,7 @@ hosts/desktop/build/    # wails output
 │   └── (build: TinyGo → engine.wasm; native TinyGo for RP2040)
 ├── gen/                            # generated: wit-bindgen-go (caps) + buf (proto) for go & ts
 ├── hosts/
-│   ├── native/                     # Go host: wasmtime + os FS + modernc sqlite (desktop/CLI)
+│   ├── native/                     # Go host: engine in-process (Decision 26) + os FS + modernc sqlite (desktop/CLI)
 │   ├── desktop/                    # Wails wrapper over hosts/native + webview
 │   ├── web/                        # TypeScript host: worker.ts (jco + OPFS + sqlite-wasm), api.ts, hooks/
 │   └── embedded/                   # ESP32-S3/RP2350: C host (ESP-IDF/arduino-pico) embedding WAMR + platformio.ini;
@@ -193,12 +200,12 @@ hosts/desktop/build/    # wails output
 | Engine → wasm | **TinyGo `-target=wasip2`** → a WASM component in one shot (validated — Spike 1; TinyGo supplies `cabi_realloc` + wires `_initialize`). World `include`s `wasi:cli/imports`; WASI WIT deps vendored under `wit/deps/`. The `wasip1`+`wasm-tools` **adapter path is abandoned** (fragile — §5.3). |
 | Web instantiation | **`@bytecodealliance/jco`** transpile + `preview2-shim` (WASI/OPFS) |
 | Web SQLite | **`@sqlite.org/sqlite-wasm`** (OPFS) |
-| Native/desktop/CLI runtime | **wasmtime** (Go embedding) + `modernc.org/sqlite` + **Wails v2** |
+| Native/desktop/CLI runtime | **engine linked in-process** (native Go, Decision 26) + `modernc.org/sqlite` + **Wails v2**; wasmtime kept for the wasm parity build |
 | Embedded runtime | **WAMR** on ESP32-S3 / RP2350 (official Espressif WAMR ESP-IDF component); **TinyGo native** (RP2040) |
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
 | Async | Spike 5: Rich/CM ✅ (jco JSPI on Node ≥24); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
-| CLI interpreter (in-engine) | Runs *inside* the engine; must compile under TinyGo. **Scaffolder default: ffcli.** Spike 4 also cleared hand-rolled / flag / go-arg (wasip1 hand ~497 KiB); kong/cobra/`subcommands` red for in-engine — see Decision 22. |
+| CLI parser (host-side, Decision 28) | Parses argv **in the host** into a structured request; native is off the TinyGo leash (cobra/ffcli/`huh`). The engine takes a proto `Command`, not argv. ffcli = reference; Spike 4 informs the host choice. Supersedes in-engine parsing (Decision 22). |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
 
 **Why the lite generators (resolves the old #1 risk):** the official `google.golang.org/protobuf` is
@@ -206,8 +213,13 @@ reflection-heavy and does **not** work under TinyGo (TinyGo implements only a su
 tinygo issues #2667, #3376). `protobuf-go-lite` + `protobuf-es-lite` are reflection-free static codegen
 built for exactly this; go-lite's bundled JSON output *also* satisfies the §7.2
 canonical-JSON-on-disk decision from a single generator. **Constraint to respect:** go-lite drops
-protobuf **fieldmasks and extensions** — V1's message surface (records, display commands, events,
-command results) needs neither; don't introduce a dependency on them.
+protobuf **fieldmasks and wire-message extensions** — V1's message surface needs neither. **Descriptor
+custom options are fine** (Decision 29 `method_id` / field metadata): `spikes/options/` ✅ proved
+(1) go-lite generates through `descriptor.proto`+`extend`, (2) TinyGo guest import graph has no
+`google.golang.org/protobuf`, (3) host reads `method_id` from a FileDescriptorSet on a service rpc.
+go-lite emits **no service stubs** — registry codegen reads the descriptor set. Prefer keeping the
+`service`+options file out of the engine's import graph if go-lite's blank `descriptorpb` import
+ever shows up in size budgets.
 
 **Remaining maturity risk (tracked):** the *component-model* toolchain — TinyGo component output +
 `wit-bindgen-go` + jco + WAMR's component support — is still young (see §14). The protobuf half is now a
@@ -254,13 +266,16 @@ image; Devbox ships a reproducible recipe that also runs **natively** on the dev
                     │  exports: execute-cli(args) -> command-result                                          │
                     └───────────────────────────────────────────────────────────────────────────────────────┘
    web        desktop         cli            esp32-s3         rp2350           rp2040
-   jco        wasmtime        wasmtime       WAMR             WAMR             (native TinyGo — same Go source,
+   jco        native          native         WAMR             WAMR             (native TinyGo — same Go source,
    + TS host  + Go host       + Go host      + C host         + C/Go host       no wasm; engine linked in)
+              (engine linked  (engine linked
+               in-process)     in-process)   ← Decision 26; wasm still built for web + parity
 ```
 
 - **The engine imports only the ILC world + standard WASI, and builds to a WASM component directly with
-  TinyGo `-target=wasip2`** (validated — Spike 1). The *same* `engine.component.wasm` runs under jco (web)
-  and wasmtime (desktop/CLI). **WAMR** (ESP32-S3 / RP2350) can't run a component — it runs core WASM, so
+  TinyGo `-target=wasip2`** (validated — Spike 1). **Web** runs that `engine.component.wasm` under jco;
+  **desktop/CLI link the same engine natively in-process** (Decision 26), keeping the wasm as the
+  parity/portability artifact. **WAMR** (ESP32-S3 / RP2350) can't run a component — it runs core WASM, so
   capabilities bind as WAMR native functions and its build is revisited when embedded lands. What we build
   per tier and where interfaces differ is tracked in **§5.3**.
 - **RP2040 is the one exception (Decision 18):** 264 KB RAM is too tight for a comfortable WASM runtime,
@@ -276,7 +291,7 @@ WASI calls. Each host binds the WASI root:
 | Host | WASI root preopen |
 | --- | --- |
 | Web | **OPFS** (`navigator.storage.getDirectory()`) **or** an **FSA-granted directory** (`showDirectoryPicker`, Chromium). Current `@bytecodealliance/preview2-shim` browser FS is an **in-memory FileData tree** (`_setFileData` / `_setPreopens({"/": tree})`), **not** a raw `FileSystemDirectoryHandle` — hydrate/flush OPFS ↔ FileData in the host (Spike 3, `spikes/opfs/opfs-bridge.js`). Patch or replace upstream browser `write`/`read` bigint handling before relying on stock shim. |
-| Desktop / CLI | native user-data dir (`~/.config/<app>`) via wasmtime WASI preopen |
+| Desktop / CLI | native user-data dir (`~/.config/<app>`) via the host's `os` FS (native seam, Decision 26) |
 | ESP32-S3 / RP2350 | on-chip flash / littlefs, preopened by the WAMR host |
 | RP2040 (native) | littlefs mounted directly; `os` shim maps to it |
 
@@ -292,14 +307,15 @@ build with TinyGo **`-target=wasip2` directly** — TinyGo emits the component i
 `cabi_realloc`, a `cm` module-path bug, an init-ordering crash — all documented in the spike README).
 **WAMR reality:** WAMR supports **core WASM + WASI Preview 1 only** (no Component Model), so embedded can't
 run the component — it needs a *separate* core-wasm build, and the "one artifact across *every* tier"
-question is **deferred to when embedded lands**. For the bootstrap (web/desktop/CLI) the shared unit is the
-**wasip2 `engine.component.wasm`**.
+question is **deferred to when embedded lands**. For the bootstrap the shared unit is the **engine
+codebase**: **web** loads it as the wasip2 `engine.component.wasm`; **CLI/desktop** link it natively
+in-process, with that same wasm built for the parity check (Decision 26).
 
 | Tier | Artifact built | Build pipeline | Capability binding | Divergence from the wasip2 baseline |
 | --- | --- | --- | --- | --- |
 | **Web** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **jco** | WIT imports (Component Model) | baseline |
-| **Desktop** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **wasmtime** | WIT imports (Component Model) | baseline |
-| **CLI** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **wasmtime** | WIT imports; may also expose standard `wasi:cli/command` `run()` | baseline |
+| **Desktop** | native binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity/web reuse) | **direct Go linkage** (`caps_native`); wasm build uses WIT imports | engine runs **in-process** (Decision 26); wasm anchors identity |
+| **CLI** | native `dlc` binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity) | **direct Go linkage** (`caps_native`); wasm may expose `wasi:cli/command` `run()` | engine runs **in-process** (Decision 26); wasm = CI parity |
 | **ESP32-S3** | `engine.core.wasm` | TinyGo→wasip1 → **WAMR** (no adapter) | **WAMR native-function registration** (C) | **no CM / WASI-0.2**; console = WASI-p1 fds → UART; sqlite = `unavailable`; caps are C native fns |
 | **RP2350** | `engine.core.wasm` *or* native | TinyGo→wasip1 → WAMR **if** it ports, else native TinyGo | WAMR native fns, or direct Go linkage | as ESP32-S3, or as RP2040 |
 | **RP2040** | native firmware | TinyGo→`pico` (**no wasm**) | **direct Go linkage** (no imports, no WASI) | no wasm, no WASI; caps are direct Go calls |
@@ -334,17 +350,21 @@ are built.
 
 | Host artifact | Entry point (constructs the Environment) | Selected by |
 | --- | --- | --- |
-| **native** (wasmtime) | `main()` — argv → native Environment → run engine → exit code | shipping the CLI binary |
+| **native** (in-process Go engine) | `main()` — argv → native Environment → `execute-cli` in-process → exit code | shipping the CLI binary |
 | **desktop** (Wails) | Wails startup hook → native Environment + webview | building the desktop app |
 | **web** (jco) | `worker.ts` boot → jco instantiate + browser Environment | serving the web app |
 | **embedded** (WAMR / native) | firmware boot → board Environment (peripherals) | flashing the firmware |
 
-**Engine bytes live in the host artifact (bootstrap).** The CLI/`dlc` native binary **`go:embed`s**
-`engine.component.wasm` (built by TinyGo wasip2) so a single host binary is enough to run — no sidecar
-wasm on `PATH`. Keep load/embed behind a small package boundary under `hosts/native/` (e.g. `enginewasm`
-or similar) so the bytes can later be **lifted out** (shared module, desktop host reuse, or optional
-sidecar) without rewriting argv → Environment → `execute-cli`. Web still gets the component via the
-jco/Vite pipeline (B3); same engine bytes, different host packaging.
+**Native links the engine directly; wasm is the parity contract (Decision 26).** The CLI/`dlc` native
+binary **imports the engine as a Go package** and calls `execute-cli` **in-process** — no wasm runtime in
+the run path, so nothing depends on a Component-Model API for `wasmtime-go`. The engine stays **one
+codebase behind the WIT-shaped interface**: the native host supplies capabilities through a native seam
+(`caps_native.go`), while web supplies them through the wasm/jco boundary. The **wasm component remains the
+source of truth** — web requires it (B3), and a CI / `dlc verify` step runs the CLI *against the wasm
+engine* and diffs golden `command-result` vectors vs the native run, so the cross-tier identity guarantee
+holds (moved from runtime to CI). Keep the native engine binding behind a small package boundary under
+`hosts/native/` so a wasm-runtime host can be swapped in later (when `wasmtime-go` grows a CM API, or via
+the wasmtime C API) without rewriting argv → Environment → `execute-cli`.
 
 **2. Launch time (secondary) — mode *within* a multi-mode host.** Some hosts serve more than one mode (the
 native host can run headless-CLI *or* launch a GUI). Decide explicitly, sensible default, always
@@ -410,7 +430,7 @@ their stress test.
   thing that makes porting possible at all).
 - **Byte boundary (protobuf over `(ptr,len)`)** in portable mode — identical on the Component Model and
   core wasm; custom caps bind as **WAMR native functions**, and the host **bounds-checks** guest pointers.
-- **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json`; the in-engine CLI parser defaults to reflection-free (`flag`/`ffcli`/hand-rolled) in portable mode. (Spike 4 also bakes off the reflection-based ones for the rich-mode default.)
+- **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json`; the engine's *handlers* stay reflection-free. The CLI **parser is host-side** (Decision 28), so on native it may use any lib (cobra/kong/`huh`); TinyGo-safety applies to handlers, not the parser.
 - **Handle `unavailable` for every capability** — SQLite→file-scan, network/RTC maybe-absent; degrade,
   never hard-fail.
 - **Short, run-to-completion, non-blocking handlers** — no long-lived goroutines / busy-waits (watchdog +
@@ -608,39 +628,28 @@ the duplication the old pilot targeted.
 
 ## 8. Invocation & input
 
-**Universal principle (Decision 14): every environment executes handlers CLI-style.** The engine's single
-export is `execute-cli(args) -> command-result`; the host maps its native input into a command invocation.
+**Universal principle (Decision 14, refined by Decision 28): every environment drives the *same handlers* — but each host builds the request its own way.** The engine exports **operations over a structured request** (`execute(method: u32, request: list<u8>) -> command-result`; scalar `method_id` + proto-bytes payload); the **host front-end** turns native input into that request. Parsing, menus, and prompts are **host-side** (Decision 28), never in the engine.
 
-| Tier | How input becomes a command |
+| Tier | How input becomes a request |
 | --- | --- |
-| CLI | argv → `execute-cli(args)` (the reference path) |
-| Desktop | Wails IPC / UI events → `execute-cli(args)` |
-| Web | React events → `executeCli(args)` over Comlink |
-| ESP32-S3 / RP2350 / RP2040 | **(a) UART/USB-serial command REPL** — literal typed commands (dev/debug + scripting); **(b) input-map** — host translates touch/button events into commands (tap list row → `open-record <id>`) |
+| CLI | argv → host parser (cobra / ffcli, `huh` menus for missing values) → `Command` proto → `execute` |
+| Desktop | Wails IPC / UI events → `Command` proto → `execute` |
+| Web | React form / events → `Command` proto → `execute` over Comlink |
+| ESP32-S3 / RP2350 / RP2040 | (a) UART REPL — host (or optional in-engine `parse(line)`) → `Command`; (b) input-map — touch/button → `Command` (tap row → `open-record{id}`) |
 
-Both embedded mechanisms feed the same `execute-cli` entry, so **there is one dispatch path on every
-tier.** (This is the proposed method for "environments where a CLI isn't obvious.") Multi-handler routing
-and a protobuf **envelope** are **deferred** (Decision 10) — local-only in V1.
+Every tier feeds the same `execute` entry, so **there is one dispatch path** — but the request is **structured**, not argv. The protobuf **envelope** + multi-handler routing (Decision 10) is therefore promoted from backlog to the *primary* boundary; local-only in V1.
 
-**CLI parsing is in the engine (one parser, every tier).** The engine's `execute-cli(args)` **is** the CLI
-interpreter — it parses subcommands + flags and dispatches. Every host is a thin **argv forwarder**: the
-native binary passes `os.Args`; the web UI builds an argv and calls `executeCli(args)`; the embedded serial
-REPL splits a line into argv. Same parser, same command set, everywhere — no host↔engine drift, and the
-embedded REPL gets the full command surface for free.
+**CLI parsing is a host front-end (Decision 28, superseding Decision 22).** The CLI is a *mechanism for constructing a request* for the shared business logic, so each host parses in the way that fits it: the native `dlc` uses a full-Go parser + `huh`/`survey` menus (unshackled from TinyGo — Decision 26); web builds the request from form state; the embedded REPL parses a line in its host language, or calls an *optional* in-engine `parse(line)→request` helper to reuse the Go parser where convenient. What keeps tiers aligned is the **shared protobuf request schema**, not a shared argv parser.
 
-**It must compile under TinyGo (the real hard boundary).** The interpreter compiles into the TinyGo engine.
-Reflection-free is the **default preference** (smaller binaries + TinyGo's `reflect` is fragile) — stdlib
-`flag` (+ `FlagSet`s), `ff`/`ffcli`, `google/subcommands`, or hand-rolled — but "reflection breaks TinyGo"
-is an assumption, so **Spike 4 bakes off the reflection-based ones too** (`kong`/`cobra`/`go-arg`), measuring
-rather than presuming.
-**Scaffolder default is ffcli** (one parser until an ABI split is forced). Decision 25 still allows a
-later per-ABI split — Spike 4 measured hand-rolled (**~497 KiB** wasip1) and go-arg (struct tags) as the
-profile winners if we split. kong panics; cobra fails Go-style `-name`; `subcommands` can't take injected
-argv. (A host *may* still add its own flags — e.g. an engine path — but the **app command surface is the
-engine's**; do not put app parsing in `hosts/native`.)
+**What must compile under TinyGo is the engine's *handlers*, not the parser.** Handlers (business logic + go-lite decode) still build under TinyGo, so the reflection-free discipline stands for them. The **parser moved host-side**, so on native it may be cobra / kong / go-arg / `huh` freely. Spike 4's bake-off now informs that **host** parser choice (ffcli remains the reference); its "must be reflection-free" pressure comes off the critical path.
 
-**Reactivity loop:** UI issues `execute-cli(["list-records"])` to read; a write emits `data-changed`; the
-host's subscription (React `useEngineEvent` hook / Wails `EventsOn`) invalidates and re-fetches.
+**The command registry ties it together (Decision 29).** The app registers each command once — a proto `service` rpc (`rpc New(NewRequest) returns (NewResponse)`, permanent `method_id`) + a handler. The engine **routes on `method_id`** (`map[u32]handler`); request/response messages cross **directly** (flat, single-encode). Hosts don't ask the engine what commands exist — they **embed the `buf build` FileDescriptorSet and introspect it with protoreflect** (native) / `@bufbuild/protobuf` (web): field→flag, `enum`→menu, `method_id` for the wire. So host and engine can't drift (one schema), the parser stays host-side, and a `describe()` export is optional (only for a generic host without the embedded schema).
+
+**One byte boundary, negotiated (Decision 31).** The guest exposes a *single* command entry — `execute(method: u32, request: list<u8>) -> command-result` (scalar id + proto-bytes payload) — WAMR-portable (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings need the Component Model WAMR lacks). Rich typed DX is a **host-side** generated wrapper over the same proto, not a second guest ABI; a small `supported-abis()` export lets the guest advertise its boundaries, and a rich WIT boundary is reserved *per-capability* for CM-only features (streams / resources / `wasi:http`).
+
+**Framing — service + `method_id`, messages passed directly.** Commands are authored as proto `service` rpcs with permanent `method_id`s; request/response messages cross the wire **directly** — no oneof or envelope for the command surface (the discriminator is a scalar `method: u32` param, WAMR-fine per Decision 31). RPC-idiomatic (explicit req→resp pairing) with a rename-safe numeric key. `protoc-gen-dlc-registry` emits the engine's `method_id→handler` registration **from the buf image** (go-lite generates no service stubs, so the descriptors are the only source); host introspection uses the standard descriptor set (above). The oneof stays for *response variants*, not command dispatch. The concrete surface is `proto/devalbo/dlc/v1/commands.proto` — `DlcService` with permanent ids for the **in-engine** verbs only (`Version`, `Echo`, `New`, `ExportFs`, `ImportFs`; toolchain verbs stay host-side per Decision 30) — over the shared options package `proto/devalbo/options/v1/options.proto`. Failure rides the `command-result` envelope, so responses carry no error field.
+
+**Reactivity loop:** the UI issues an `execute(list-records)` request to read; a write emits `data-changed`; the host's subscription (React `useEngineEvent` / Wails `EventsOn`) invalidates and re-fetches.
 
 ---
 
@@ -658,8 +667,8 @@ documented upgrade path if concurrent-edit loss becomes real — out of V1 scope
 | Environment | Engine exec | Host lang | FS root | SQLite index | Display | Console/Input |
 | --- | --- | --- | --- | --- | --- | --- |
 | **Web** | TinyGo→wasm, **jco** | TypeScript | **OPFS** / **FSA-granted dir** | `sqlite-wasm` (worker) | React (canvas / widget-tree) | `console.*` / React events |
-| **Desktop** | TinyGo→wasm, **wasmtime** | Go (Wails) | `~/.config/<app>` | `modernc.org/sqlite` | Wails webview React | stdio / Wails IPC |
-| **CLI** | TinyGo→wasm, **wasmtime** | Go | cwd / config dir | `modernc.org/sqlite` | none (Console) | argv / stdin |
+| **Desktop** | **native in-process** (wasm for parity) | Go (Wails) | `~/.config/<app>` | `modernc.org/sqlite` | Wails webview React | stdio / Wails IPC |
+| **CLI** | **native in-process** (wasm for parity) | Go | cwd / config dir | `modernc.org/sqlite` | none (Console) | argv / stdin |
 | **ESP32-S3** | wasm, **WAMR** | **C** (ESP-IDF) | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / touch input-map |
 | **RP2350** | wasm, **WAMR** | **C** (arduino-pico) / Go | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / buttons |
 | **RP2040** | **native TinyGo** (no wasm) | **Go** | littlefs | *unavailable* → file scan | TFT (draw-list, optional) | UART REPL / buttons |
@@ -676,9 +685,9 @@ matrix + the cross-tier identity check.
 
 | Tier | Build | Load | Run | Observe (pass criteria) |
 | --- | --- | --- | --- | --- |
-| **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) is byte-identical** across web/desktop/CLI (sha256). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes on every runtime. (Embedded's core-wasm build + its identity check are deferred with the tier.) |
-| **CLI** | `tinygo build` + wasmtime host | load wasm in wasmtime | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it |
-| **Desktop** | `wails build` | Wails boots wasmtime + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
+| **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) builds byte-identical** (sha256); web runs it, CLI/desktop link the engine natively in-process (Decision 26). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes across the native runs and the wasm parity run. (Embedded's core-wasm build + its identity check are deferred with the tier.) |
+| **CLI** | `go build` (engine linked) + `tinygo`→wasm for parity | engine in-process (wasm loaded only for the parity check) | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it; native and wasm-parity outputs match |
+| **Desktop** | `wails build` (engine linked in-process) | Wails boots the linked engine + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
 | **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); SQLite index file in OPFS; event repaints; DevTools shows no host-cap errors |
 | **ESP32-S3** | `tinygo` builds `engine.core.wasm`; **`pio run -t upload`** flashes the WAMR host firmware (wasm embedded) | WAMR instantiates on boot | **`pio device monitor`**: `create-record …`; touch a row | JSON on littlefs; TFT renders the list via `draw`; `describe()` reports 320×240/rgb565; `execute-query`→`unavailable` path exercised (file-scan fallback) |
 | **RP2350** | as ESP32-S3 via PlatformIO (`board=rpipico2`) **if** WAMR ports; else native TinyGo fallback | WAMR (or native) on boot | `pio device monitor` / buttons | same behavior from the *same* `engine.core.wasm` (WAMR) or same source (native); confirms the second embedded target |
@@ -690,7 +699,7 @@ of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wa
 wasip1+adapter path was abandoned). (2) `protobuf-go-lite` binary **and** canonical-JSON round-trip under
 `tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes in the web host); (3) WAMR
 running a TinyGo core module on ESP32-S3 with one host import; (4) OPFS preopen letting `os.WriteFile`
-persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 + 25, §8); (7) ✅ **DONE (2026-07-25)** — Spike 5 Rich ✅ / Portable ✅ (`spikes/async/`); jco JSPI (Node ≥24) vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
+persist across reload; (5) `devbox` builds the core (non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 → re-scoped by 28 + 25, §8); (7) ✅ **DONE (2026-07-25)** — Spike 5 Rich ✅ / Portable ✅ (`spikes/async/`); jco JSPI (Node ≥24) vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
 records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
 (as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
@@ -702,7 +711,7 @@ records its findings in `spikes/<name>/README.md`; any finding that contradicts 
 | --- | --- | --- |
 | **0a — Repo migration** | Tag + remove the retired tri-language Phase-1 code; scaffold the Go layout (**§2**) | working tree matches §3; `compiler`/`packages`/root Cargo removed (tagged); `go.mod` + `devbox.json` in place |
 | **0b — Spikes** | The five §11 spikes | All green (or plan adjusted to the reality) |
-| **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (wasmtime); `dlc new` emits a minimal self-shaped skeleton; `dlc doctor` (readiness as a command, §16.7); `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; `dlc doctor` reports readiness; golden **FS snapshot** defined |
+| **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (native, engine in-process — Decision 26); `dlc new` emits a minimal self-shaped skeleton; `dlc doctor` (readiness as a command, §16.7); `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; `dlc doctor` reports readiness; golden **FS snapshot** defined |
 | **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: SQLite-index (native + web), Events, lock-file write flow, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
 | **3 — Display + embedded** | Display capability (describe + draw-list) with React host + **ESP32-S3 WAMR host**; RP2350 + RP2040(native) | shared notes/list renders on browser **and** ESP32-S3 TFT from one engine; `unavailable` file-scan fallback verified; RP2040 native parity |
 | **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **core module** across the five wasm tiers; golden parity on all six; verification matrix green |
@@ -725,8 +734,11 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
 
 1. **TinyGo + protobuf — largely resolved.** The old top risk (reflection-heavy official protobuf) is
    answered by **`protobuf-go-lite`** (reflection-free, TinyGo-built) + **`protobuf-es-lite`** for the web
-   host (§4). Residual: confirm go-lite round-trips under `tinygo build -target=wasip1` (Phase-0 spike 2),
-   and that dropping fieldmasks/extensions stays acceptable. No longer the highest risk.
+   host (§4). Round-trips confirmed under `-target=wasip2` (Spike 2; the wasip1 path is abandoned).
+   Residual: dropping fieldmasks/wire-message extensions must stay acceptable — descriptor custom options
+   are a *different* category and are fine (`spikes/options/` ✅). Watch item: option-bearing message
+   packages blank-import go-lite's own `descriptorpb` (~500 KiB of Go source); no `google.golang.org/protobuf`
+   in the guest graph, but measure the wasm-size effect if it bites. No longer the highest risk.
 2. **WAMR on RP2350 — footprint *and* port maturity.** 520 KB is comfortable-ish but TinyGo-runtime-in-wasm
    + WAMR + linear memory needs measuring; separately, **official WAMR is ESP-centric**, so RP2350 needs
    WAMR ported onto `arduino-pico`/Pico SDK (unproven). If either is too costly, RP2350 falls back to a
@@ -735,10 +747,12 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
 3. **"All six tiers in V1" is aggressive.** The phase order builds a reference tier first (CLI → web/desktop
    → embedded) so slippage degrades to "fewer tiers shipped," not "nothing works." Consider gating V1 on
    Phase 4 for CLI+web+desktop+ESP32-S3, with RP2350/RP2040 as fast-follows.
-4. **Desktop/CLI: wasm-under-wasmtime vs native link.** The plan runs the shared wasm for uniformity; if
-   wasmtime overhead is unwanted, the same Go source can link natively (build tag) like RP2040 — a
-   documented alternative, defaulting to wasm. Separately: **`wasmtime-go` lacks Component Model
-   bindings** (as of Spike 5 review) — B2 may need the C API or another embedder until Go CM lands.
+4. **Desktop/CLI: wasm-under-wasmtime vs native link — RESOLVED (Decision 26).** `wasmtime-go` lacks
+   Component Model bindings (Spike 5 review), so rather than take on the C API for bootstrap, the CLI/desktop
+   host **links the engine as a native Go package and runs it in-process** (like RP2040). The wasip2 wasm
+   stays the source of truth for web + the cross-tier identity guarantee, now verified by a CI / `dlc verify`
+   parity check (§5.4). A wasm-runtime host (wasmtime C API, or `wasmtime-go` once it has CM) can be swapped
+   in later behind the same `hosts/native/` package boundary — no longer a blocking risk.
 5. **Display input on embedded** beyond the input-map (Decision 14) — a symmetric **Input capability** is
    the Phase-5 portable answer if host-side input proves limiting.
 6. **Component Model async maturity** — Spike 5 greens Rich async via **jco JSPI** on Node ≥24 (no ILC shim). WASI 0.3 remains the longer-term native CM async destination; gates in [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). Browser JSPI re-check is a follow-up.
@@ -873,7 +887,7 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 
   | Skeleton | Track | Emits | When |
   | --- | --- | --- | --- |
-  | `templates/component-model/` | Rich / Component Model | wasip2 component; wasmtime (CLI) + jco (browser); rich WIT | **Bootstrap first** — full terminal + browser `dlc` shape |
+  | `templates/component-model/` | Rich / Component Model | wasip2 component; native in-process (CLI, Decision 26) + jco (browser); rich WIT | **Bootstrap first** — full terminal + browser `dlc` shape |
   | `templates/wamr/` | Portable / WAMR | wasip1 core; native-fn caps; byte ABI | **After** embedded/WAMR can `verify` — do not ship an unverifiable stub |
 
   Directory names follow the **substrate** (`component-model`, `wamr`); track prose stays Rich/CM vs
@@ -911,15 +925,17 @@ app** (self-hosting), and **`go:embed` not runtime-clone** (offline + browser).
 
 ### 16.7 The `dlc` command surface
 
-Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), parsed by the **in-engine CLI interpreter** (Decision 22 — one parser across CLI / web / embedded; default library profile follows ABI mode, Decision 25):
+Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), parsed by the **host front-end** into a structured request (Decision 28, superseding Decision 22 — parsing is per-tier; native may use cobra/ffcli/`huh`), then dispatched to the engine's operations:
 
 | Command | Does |
 | --- | --- |
 | `dlc new <app> --caps=… --tiers=… --ui=… --storage=…` | scaffold (import base + fragments, §16.6); `--build --git --run` for one-step setup |
 | `dlc doctor` | assess readiness — system prereqs + per-tier toolchain/host; the **command form** of `scripts/preflight.sh` (Layer 1; the pure-bash script stays as the pre-toolchain Layer 0 gate — see prereqs doc) |
-| `dlc build` / `dlc verify` | build the engine (core-module + adapter/native) / run the §11 per-tier matrix |
-| `dlc proto …` | edit / regenerate the app's `.proto` (buf under the hood) |
-| `dlc host add <web\|desktop\|embedded>` | overlay a tier's host into an existing app (import a fragment) |
+| `dlc build <tier>` / `dlc run <tier>` | build a tier (native `go build` · web tinygo→jco · embedded WAMR/PlatformIO) / launch it (two-phase, Decision 23). Tiers are composition recipes (Decision 27), not per-tier forks; `--all` builds the matrix |
+| `dlc verify [<tier>]` | run the §11 per-tier build→load→run matrix; `dlc verify --parity` = the Decision 26 native↔wasm golden-vector check (`scripts/verify-parity.sh`) |
+| `dlc gen` | run `buf generate` over the app's `commands.proto` → go-lite (engine) + es-lite (web) + **`protoc-gen-dlc-registry`** (dispatch map + `describe()` metadata, Decision 29). Host-side; supersedes `make gen` for scaffolded apps |
+| `dlc proto …` | edit the app's `.proto` (add a command/field); `dlc gen` regenerates |
+| `dlc host add <web\|desktop\|embedded>` | overlay a tier's host into an existing app (import a fragment) — adds a tier to `dlc.toml` |
 | `dlc export-fs` / `dlc import-fs` | the §7.3 filesystem primitive, surfaced as commands |
 
 `dlc` is a CLI+web ILC app (App #1); these are its `execute-cli` handlers — **not bespoke tooling, the

@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package devalbo.dlc.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1;dlcv1";
+
+import "devalbo/options/v1/options.proto";
+
+// dlc's command surface (Decision 29). Each command is one rpc carrying a
+// permanent `method_id` — the engine dispatches on that number
+// (`map[u32]handler`), so the rpc *name* is cosmetic (it's the CLI verb) and
+// renaming is wire-safe. `buf breaking` + protoc-gen-dlc-registry's id-lock
+// guard the numbers.
+//
+// Only **in-engine** commands live here (Decision 30): verbs that touch nothing
+// but the filesystem / app-data, so they run in the terminal *and* the browser.
+// Toolchain verbs (build, run, verify, doctor, gen, host add, proto) are
+// host-side orchestration — they spawn processes and inspect the machine, so
+// they never cross into the engine and are absent from this service.
+//
+// Request/response messages cross the boundary **directly** (flat, single
+// encode — Spike 2): `execute(method: u32, request: list<u8>) -> command-result`
+// (Decision 31). There is no oneof envelope; the discriminator is the scalar
+// method_id parameter.
+//
+// go-lite emits no service stubs, so nothing here reaches the engine's Go except
+// the messages; the service + options are read host-side from the `buf build`
+// descriptor set (spikes/options — all three criteria green).
+service DlcService {
+  rpc Version(VersionRequest) returns (VersionResponse) {
+    option (devalbo.options.v1.method_id) = 1;
+  }
+  rpc Echo(EchoRequest) returns (EchoResponse) {
+    option (devalbo.options.v1.method_id) = 2;
+  }
+  rpc New(NewRequest) returns (NewResponse) {
+    option (devalbo.options.v1.method_id) = 3;
+  }
+  rpc ExportFs(ExportFsRequest) returns (ExportFsResponse) {
+    option (devalbo.options.v1.method_id) = 4;
+  }
+  rpc ImportFs(ImportFsRequest) returns (ImportFsResponse) {
+    option (devalbo.options.v1.method_id) = 5;
+  }
+}
+
+// Failure is carried by the `command-result` envelope (success + error), not by
+// response fields — so no response here has an error member. devalbo.ilc.v1's
+// IlcError is the envelope's payload shape, not a per-command one.
+
+message VersionRequest {}
+message VersionResponse {
+  string version = 1;
+}
+
+message EchoRequest {
+  repeated string args = 1 [
+    (devalbo.options.v1.help) = "words to echo back"
+  ];
+}
+message EchoResponse {
+  string text = 1;
+}
+
+// `dlc new <app> [--module …] [--caps …] [--tiers …] [--ui …] [--storage …]`
+message NewRequest {
+  string name = 1 [
+    (devalbo.options.v1.help) = "project/app name",
+    (devalbo.options.v1.required) = true
+  ];
+  string module = 2 [
+    (devalbo.options.v1.help) = "Go module path (default github.com/you/<app>)",
+    (devalbo.options.v1.short) = "m"
+  ];
+  // Capability opt-ins (bootstrap: console, filesystem). Stays `repeated string`
+  // rather than an enum until the cap set stops moving; enums here would become
+  // menu choices host-side, which is the eventual shape.
+  repeated string caps = 3 [
+    (devalbo.options.v1.help) = "capability opt-ins (console, filesystem)"
+  ];
+  repeated string tiers = 4 [
+    (devalbo.options.v1.help) = "tier opt-ins (native, web)"
+  ];
+  UiKind ui = 5 [
+    (devalbo.options.v1.help) = "UI to scaffold",
+    (devalbo.options.v1.default) = "UI_KIND_REACT"
+  ];
+  StorageKind storage = 6 [
+    (devalbo.options.v1.help) = "storage layout",
+    (devalbo.options.v1.default) = "STORAGE_KIND_SPLIT"
+  ];
+}
+message NewResponse {
+  string path = 1;             // where the project was scaffolded
+  repeated string files = 2;   // files written
+}
+
+// Proto enums are the native source of host-side menu choices (Decision 29) —
+// the host turns them into `huh` selects / a <select> without extra metadata.
+enum UiKind {
+  UI_KIND_UNSPECIFIED = 0;
+  UI_KIND_REACT = 1;
+  UI_KIND_NONE = 2;
+}
+
+enum StorageKind {
+  STORAGE_KIND_UNSPECIFIED = 0;
+  STORAGE_KIND_SPLIT = 1;
+  STORAGE_KIND_NONE = 2;
+}
+
+// Filesystem export/import — the first-class platform primitive (§7.3).
+message ExportFsRequest {
+  string prefix = 1 [
+    (devalbo.options.v1.help) = "subtree to export (default: whole root)",
+    (devalbo.options.v1.short) = "p"
+  ];
+  BundleFormat format = 2 [
+    (devalbo.options.v1.help) = "bundle format",
+    (devalbo.options.v1.default) = "BUNDLE_FORMAT_BFT",
+    (devalbo.options.v1.short) = "f"
+  ];
+}
+message ExportFsResponse {
+  bytes bundle = 1;
+}
+
+message ImportFsRequest {
+  bytes bundle = 1 [
+    (devalbo.options.v1.help) = "bundle bytes to import",
+    (devalbo.options.v1.required) = true
+  ];
+  string prefix = 2 [
+    (devalbo.options.v1.help) = "destination subtree",
+    (devalbo.options.v1.short) = "p"
+  ];
+}
+message ImportFsResponse {
+  repeated string files = 1;
+}
+
+enum BundleFormat {
+  BUNDLE_FORMAT_UNSPECIFIED = 0; // treat as BFT (the default)
+  BUNDLE_FORMAT_BFT = 1;         // single human-readable JSON
+  BUNDLE_FORMAT_ZIP = 2;
+  BUNDLE_FORMAT_PROTO = 3;
+}

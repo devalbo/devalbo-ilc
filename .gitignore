@@ -7,10 +7,17 @@
 # WASM build artifacts
 *.wasm
 
-# Spike generated output (jco transpile, copied bindings, etc.)
+# Built native dlc binary (Decision 26 — hosts/native)
+/dlc
+
+# Spike + verify generated output (jco transpile, copied bindings, etc.)
 spikes/**/out/
 spikes/**/out-sync/
 spikes/**/out-jspi/
+spikes/**/image.bin
+spikes/**/engine.component.wasm
+spikes/**/engine.core.wasm
+verify/**/out/
 spikes/proto/spike.pb.ts
 spikes/opfs/test-results/
 spikes/opfs/playwright-report/

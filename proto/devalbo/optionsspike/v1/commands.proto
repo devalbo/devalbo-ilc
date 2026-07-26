@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package devalbo.optionsspike.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/optionsspike/v1;optionsspikev1";
+
+import "devalbo/options/v1/options.proto";
+
+// Minimal command surface for the custom-options spike (Decision 29 shape).
+// Engine uses the request/response messages only; method_id + field options are
+// host-side metadata carried in the descriptor set.
+service CommandsService {
+  rpc Greet(GreetRequest) returns (GreetResponse) {
+    option (devalbo.options.v1.method_id) = 1;
+  }
+  rpc Add(AddRequest) returns (AddResponse) {
+    option (devalbo.options.v1.method_id) = 2;
+  }
+}
+
+message GreetRequest {
+  string name = 1 [
+    (devalbo.options.v1.help) = "name to greet",
+    (devalbo.options.v1.required) = true,
+    (devalbo.options.v1.short) = "n"
+  ];
+  int32 times = 2 [
+    (devalbo.options.v1.help) = "repeat count",
+    (devalbo.options.v1.default) = "1"
+  ];
+}
+
+message GreetResponse {
+  string text = 1;
+}
+
+message AddRequest {
+  int32 a = 1 [
+    (devalbo.options.v1.help) = "left operand",
+    (devalbo.options.v1.required) = true
+  ];
+  int32 b = 2 [
+    (devalbo.options.v1.help) = "right operand",
+    (devalbo.options.v1.required) = true
+  ];
+}
+
+message AddResponse {
+  int32 sum = 1;
+}

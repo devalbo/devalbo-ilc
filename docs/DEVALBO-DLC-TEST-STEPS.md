@@ -109,14 +109,17 @@ make test-b1                         # component / proto / opfs / cli / async
 ```
 Per-spike manual steps: Phase B1 below.
 
-**7 — Engine + CLI (the `dlc` under test appears)** · ⚪ · B2 · ▶ **auto:** `make component` → [`Makefile`](../Makefile)
+**7 — Engine + CLI (the `dlc` under test appears)** · ⚪ · B2 · ▶ **auto:** `make build-host` + `make verify-parity` → [`Makefile`](../Makefile)
 ```bash
-make component                       # build the dlc engine + CLI host → a `dlc` binary
-dlc doctor                           # L1 readiness — the command form of step 1's preflight
-dlc new myapp                        # scaffold from the terminal
+make build-host                      # go build -o dlc ./hosts/native → the `dlc` binary (engine linked in-process, Decision 26)
+make verify-parity                   # native dlc == wasip2 component on the golden vectors (the wasm is the contract)
+./dlc doctor                         # L1 readiness — the command form of step 1's preflight
+./dlc new myapp                      # scaffold from the terminal
 ```
-From here the tests are **black-box against `dlc`**: `dlc doctor` reports per-tier readiness; `dlc new`
-scaffolds. Everything above (steps 1–6) is *setup* that produced this binary.
+`make build-host` produces the reference `dlc` (native, engine in-process); `make build-engine`/`component`
+builds the wasip2 `engine.component.wasm` (web + the parity contract). From here the tests are **black-box
+against `dlc`**: `dlc doctor` reports per-tier readiness; `dlc new` scaffolds. Everything above (steps 1–6)
+is *setup* that produced this binary.
 
 **8 — Browser** · ⚪ · B3 · ▶ **auto:** `make dev-web` → [`Makefile`](../Makefile)
 ```bash
@@ -298,6 +301,26 @@ Roll-up: **RICH=GREEN** (R2.\*; R1 = negative control) · **PORTABLE=GREEN**.
 
 ---
 
+## Phase B2 — engine + native host (the `dlc` binary appears)
+
+The first B2 proof exists (the walking skeleton + wasm-parity); the rest (`dlc doctor`, the `dlc new`
+golden) land as those commands are built.
+
+### T-B2.1 — Native/wasm parity of `engine.Execute` (Decision 26)
+- **Goal:** the one `engine.Execute` produces identical results whether **linked natively in-process** (the
+  `dlc` binary) or compiled to the **wasip2 component** (web + the parity contract) — so native convenience
+  never silently diverges from the wasm contract.
+- **Builds on:** T-B1.1 (component round-trip) + a native `go build`.
+- **Steps:**
+  1. `make build-host` → a `dlc` binary (`go build ./hosts/native`); `./dlc version` prints `dlc 0.0.0-bootstrap`.
+  2. `make verify-parity` — builds the wasip2 component (`./cmd/engine-component`), transpiles via jco, and
+     runs the golden argv vectors ([`verify/parity/vectors.json`](../verify/parity/vectors.json)) through
+     **both** the native `dlc` and the component, diffing `<success>\t<base64(output)>` per vector.
+- **Pass:** every vector matches (script prints `native == component`).
+- **Automate as:** [`scripts/verify-parity.sh`](../scripts/verify-parity.sh) via `make verify-parity`; fold into a `make test-b2` when B2 grows.
+
+---
+
 ## Harness (how these become automated regression)
 
 - **`spikes/`** dir holds each B1 proof as a runnable artifact (kept, not thrown away).
@@ -316,6 +339,6 @@ Roll-up: **RICH=GREEN** (R2.\*; R1 = negative control) · **PORTABLE=GREEN**.
 - **`dlc doctor`** (L1 readiness): black-box assertion that the command reports the same system + per-tier
   readiness as `scripts/preflight.sh` — the product-level successor to step 1.
 - `dlc new myapp` produces a **buildable** project (scaffolder golden).
-- **Cross-tier identity:** `engine.core.wasm` byte-identical across CLI + web (sha256).
+- **Cross-tier identity (fuller):** T-B2.1 already proves native↔component parity on golden vectors (Decision 26); the remaining piece is the **web tier** running the same sha256-pinned `engine.component.wasm` with matching `command-result` bytes (B3).
 - React UI drives the engine; project persists in OPFS + downloads.
 - Per-tier behavior tests (the plan's §11 verification matrix).

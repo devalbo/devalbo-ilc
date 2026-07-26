@@ -18,7 +18,7 @@ Concretely:
 - **Terminal:** `dlc new myapp` scaffolds a working project to disk; `dlc` output goes to stdio.
 - **Browser:** `dlc` runs under jco with a **React UI**, scaffolds into **OPFS**, survives reload, and can
   download the result.
-- **One artifact:** the same `engine.core.wasm` drives both (component under wasmtime for CLI, jco for web).
+- **One engine codebase:** web loads it as the wasip2 component (jco); the CLI links it natively in-process, with the same wasm built for a CI parity check (Decision 26).
 - **Capabilities:** Console (WASI stdio) + Filesystem (WASI) only — no SQLite, Events, Display, or embedded.
 
 Reference tiers only for bootstrap: **CLI + Web**. (Desktop, embedded, and the notes app are Backlog.)
@@ -53,7 +53,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [x] **Spike 1 — component round-trip:** TinyGo **`-target=wasip2`** (native Component Model) → component; jco transpiles + runs a trivial `execute-cli` returning `"ok:hi"`. `spikes/component/`, `make spike-component` / `make test-b1`. **Pivoted off the wasip1+`wasm-tools` adapter path** — the guest `cabi_realloc` it requires is unimportable (`cm x/cabi` module mis-declared) and a hand-vendored one crashes pre-`_initialize`; wasip2 has TinyGo supply `cabi_realloc`+`_initialize`. World now `include`s `wasi:cli/imports@0.2.0`; WASI WIT vendored to `wit/deps/` via `wkg wit fetch` (see [test-steps T-B1.1 findings](./DEVALBO-DLC-TEST-STEPS.md))
 - [x] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip under `tinygo -target=wasip2`; `protobuf-es-lite` decodes the same bytes/JSON in JS. `proto/devalbo/spike/v1/spike.proto`, `spikes/proto/`, `make spike-proto` / `make test-b1`. Findings → [`spikes/README.md`](../spikes/README.md) (Spike 2): copy generated `.pb.ts` into the spike for Node resolution; `encoding/json` in the full spike deps comes from `cm`, not go-lite.
 - [x] **Spike 3 — OPFS filesystem:** engine `os.WriteFile` persists via WASI preopen → OPFS and survives reload. `spikes/opfs/`, `make spike-opfs` / `make spike-opfs-watch` (headed). Findings → [`spikes/README.md`](../spikes/README.md): preview2-shim browser wants FileData not DirectoryHandle; stock shim breaks TinyGo writes on bigint offsets (vendored `shim/filesystem.js`)
-- [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli**; wasip1 sizes show hand (~497 KiB) ≪ ffcli (~1.23 MiB) if portable splits later. `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 + 25.
+- [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli**; wasip1 sizes show hand (~497 KiB) ≪ ffcli (~1.23 MiB) if portable splits later. `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 (→ **re-scoped by Decision 28**: parsing is host-side; this now informs the *host* parser choice) + 25.
 - [x] **Spike 5 — dual-track async probe:** **Rich ✅** (jco JSPI on Node ≥24 + `--async-exports execute-cli`; sync transpile remains negative control) · **Portable ✅** (TinyGo wasip1 + blocking `env.host_delay`; wazero stand-in for WAMR native fns). No ILC async shims. Pin `nodejs@24`. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
 
 **Exit:** Spikes 1–5 green; **each with a findings section in `spikes/README.md`**; plan-contradicting findings folded back (as Spike 1 did).
@@ -64,14 +64,22 @@ not optional — it's what turns a throwaway spike into durable regression + des
 
 ### Contract & codegen
 - [x] `wit/ilc.wit` — bootstrap world (Console via WASI stdio + Filesystem via WASI, provided by the target/host); `export execute-cli(args) -> command-result` (§6)
-- [x] `proto/devalbo/ilc/v1/common.proto` — `IlcError` taxonomy; `proto/devalbo/dlc/v1/dlc.proto` — `new` / `export-fs` / `import-fs` messages (versioned packages, idiomatic buf layout)
+- [x] `proto/devalbo/ilc/v1/common.proto` — `IlcError` taxonomy; `proto/devalbo/dlc/v1/dlc.proto` — `new` / `export-fs` / `import-fs` messages (versioned packages, idiomatic buf layout). **Superseded:** `dlc.proto` is absorbed by `commands.proto` (below) — same package, same message names.
 - [x] `proto/buf.yaml` + `proto/buf.gen.yaml` (go-lite → `gen/go`, es-lite → `gen/ts`); `make gen` wires wit-bindgen-go + buf
 - [x] **Validate under devbox:** `make gen` runs clean (`buf lint` + generate); shakes out `buf.gen.yaml` opts + go_package (Spike 2) — verified: TinyGo 0.41.1, buf `STANDARD` lint green with the versioned layout, go-lite + es-lite output in distinct `devalbo/*/v1` dirs
 - [x] `wit-bindgen-go generate` produces the capability bindings in `gen/go` (Spike 1) — `gen/go/devalbo/ilc/{engine,types}/`
 
 ### Engine (Go → wasm; business logic only)
-- [ ] `engine/main.go` — implements `execute-cli`; reflection-free dispatch (route table + go-lite decode)
-- [ ] `engine/caps_wasip2.go` / `caps_wasip1.go` build seam for capability imports (§5.3)
+- [ ] **Command schema:** `proto/devalbo/dlc/v1/commands.proto` — a proto **`service`** with one **rpc per command** (`rpc New(NewRequest) returns (NewResponse) { option (method_id) = N; }`; framing settled — Decision 29 / §8). Request/response messages cross **directly** (flat; Spike 2-proven) — no oneof/envelope for command dispatch. Arg metadata via custom **field options** (required/default/help/short); enum choices come from proto `enum` fields natively. One `.proto` shared by go-lite (engine) · es-lite (web) · nanopb (embedded). **Dispatch keys on `method_id`** (rename-safe; the rpc *name* is cosmetic). Guard `method_id` + wire compat with `buf breaking`. Options package: `proto/devalbo/options/v1/options.proto` (spike-proven). **Status — authored, not yet lint-verified:** `DlcService` landed with permanent ids `Version`=1, `Echo`=2, `New`=3, `ExportFs`=4, `ImportFs`=5 — **in-engine verbs only** (Decision 30; toolchain verbs absent by design). Enums `UiKind`/`StorageKind`/`BundleFormat` double as host-side menu choices. Errors ride the `command-result` envelope, so **no response carries an error field** (drops the old `NewResult.error`). **Blocked on:** `dlc.proto` still declares `NewRequest`/`ExportFsRequest`/`ImportFsRequest`/`BundleFormat` in the same package — duplicate symbols; absorb/remove it, then `make gen` to confirm.
+- [x] **De-risk spike — go-lite oneof under TinyGo (✅ GREEN):** a 2-arm `Command` oneof → build + `MarshalVT`/`UnmarshalVT` + `MarshalJSON`/`UnmarshalJSON` round-trips + **switch-free `map[tag]handler` dispatch** under `-target=wasip2` — all pass (`make spike-oneof`). go-lite emits **no `WhichX()`**; the discriminator comes from a 1-line-per-arm type-switch (exactly what `protoc-gen-dlc-registry` will emit — the app never writes it). Registry is viable reflection-free. `spikes/oneof/`; findings → [`spikes/README.md`](../spikes/README.md). **Note:** command dispatch re-settled to flat messages + `method_id` (Spike 2 covers flat), so this oneof proof now de-risks *response variants* (e.g. `MathResponse`) — still GREEN, still useful.
+- [x] **De-risk spike — go-lite + custom options (✅ GREEN):** three pass criteria all green — (1) `descriptor.proto` + `extend MethodOptions` → `buf lint`/`generate` via go-lite; (2) TinyGo wasip2 guest has **no** `google.golang.org/protobuf` in import graph; (3) host reads `method_id` off a **service rpc** from `buf build` FileDescriptorSet. go-lite emits **no service stubs** → `protoc-gen-dlc-registry` must consume the descriptor set. `make spike-options` / `./scripts/check-options-criteria.sh`. Findings → [`spikes/README.md`](../spikes/README.md). **Gates the registry schema** (Decision 29).
+- [ ] **Command registry (Decision 29):** `engine/registry.go` — `Register(method_id, handler)` into a **`map[u32]handler`**; the app registers each command once (handler `func(*FooRequest) *FooResponse`). Reflection-free.
+- [ ] `engine/execute.go` — `execute(method: u32, request: list<u8>)` → `map[method]` lookup → handler decodes `request` as its `FooRequest` (flat, single-encode) → returns `FooResponse` bytes in `command-result` (Decision 28). The walking-skeleton `switch args[0]` retires into the registry.
+- [ ] **Host introspection (Decision 29):** the host embeds the `buf build` **FileDescriptorSet** and walks it with **protoreflect** (native Go) / `@bufbuild/protobuf` (web) → methods + `method_id` + request fields (name→flag, type, proto `enum`→menu, option help/required/default). **Custom options arrive as unknown fields** on `MethodOptions`/`FieldOptions`: register via `dynamicpb.NewExtensionType`, re-unmarshal with `UnmarshalOptions{Resolver}`, read with `ProtoReflect().Range` — `HasExtension` is unreliable across dynamicpb type identities (spike-measured). Engine `describe()` is **optional** — only for a *generic* host that doesn't embed the schema. **Bootstrap shim:** keep `execute-cli(argv)` until `execute(method, request)` lands (parity harness rides on it today).
+- [ ] **WIT boundary migration (Decisions 28/31):** `execute-cli(args: list<string>)` → **`execute(method: u32, request: list<u8>) -> command-result`** — scalar id + proto-bytes payload (WAMR-portable; only rich WIT records/variants need the Component Model). Keep the string-args shim until callers move.
+- [ ] `supported-abis() -> list<u8>` export (byte-ABI, Decision 31) — the guest advertises its boundaries + versions (`["bytes/1"]` today) so hosts pick the richest supported. Cheap hook now; enables a per-capability rich WIT boundary later without breaking the byte path.
+- [ ] **`protoc-gen-dlc-registry` plugin** — reads the `service` + `method_id` options **from the `buf build` image / CodeGeneratorRequest descriptors** (go-lite emits no service stubs, so generated Go is not a source — spike-measured) → emits the engine's `method_id → handler` registration (the reflection-free part) and **enforces `method_id` stability** against a committed lock. Host-side introspection uses the standard descriptor set (no custom host config to generate). Runs under `dlc gen` / `buf generate` (Decision 29).
+- [ ] `engine/caps_native.go` / `caps_wasip2.go` / `caps_wasip1.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26)
 - [ ] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`
 - [ ] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.AppName}}`)
 
@@ -85,16 +93,18 @@ not optional — it's what turns a throwaway spike into durable regression + des
 ### Build pipeline
 - [ ] Makefile: `build-engine` (TinyGo **`-target=wasip2`** → `engine.component.wasm`; wasip2-direct per Spike 1)
 
-### CLI host (native Go + wasmtime — standard Go, full reflection)
-- [ ] `hosts/native/` — `main()`: **thin argv forwarder** — `os.Args` → wasmtime instantiates the component → `execute-cli(args)` → `command-result` → exit code (parsing is in-engine, Spike 4). **Note:** `wasmtime-go` has no Component Model API yet — pick C API / interim host before coding.
-- [ ] **`go:embed` `engine.component.wasm` in the host binary** (§5.4) — single `dlc` artifact; keep embed/load in a small lift-ready package under `hosts/native/` (not open-coded in `main`)
+### CLI host (native Go, engine linked in-process — Decision 26)
+- [ ] `hosts/native/` — `main()`: **front-end that builds the request** (Decision 28) — `os.Args` → host parser (populated from the engine's `describe()`, Decision 29; `huh` menus for missing enum args) → (`method_id`, request bytes) → construct native Environment → `execute(method, request)` **in-process** (engine imported via the `caps_native` seam) → `command-result` → exit code. No wasm runtime in the run path (sidesteps the `wasmtime-go` CM gap); parsing is host-side, native may use any parser lib.
+- [ ] Keep the in-process engine binding behind a small **lift-ready package** under `hosts/native/` (not open-coded in `main`) so a wasm-runtime host can be swapped in later (wasmtime C API, or `wasmtime-go` once it has a CM API) without touching argv → Environment → `execute-cli`
 - [ ] Two-phase launch (§5.5): construct the native Environment (FS root = cwd/config dir, stdio) → invoke the engine
 - [ ] Wire `dlc new <app> [--module …]` end-to-end
 - [ ] `dlc doctor` — the **command form** of preflight (§16.7): assess system prereqs + per-tier toolchain/host readiness, exit non-zero if a prereq is missing. Layer 1 (assumes a `dlc` binary); `scripts/preflight.sh` stays as the pre-toolchain **Layer 0** bootstrap gate that gets you a first `dlc` ([`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md))
+- [ ] `dlc gen` (host-side orchestration) — wraps `buf generate` (go-lite + es-lite + `protoc-gen-dlc-registry`) over the app's `commands.proto`; supersedes `make gen` for scaffolded apps (Decision 29 / §16.7)
 
 ### Verify (terminal)
 - [ ] `dlc new myapp` produces a buildable project tree on disk
 - [ ] Define the **golden FS snapshot** for a known `dlc new` invocation (§11 Scaffolder row)
+- [ ] **wasm-parity check (Decision 26):** also build the engine as `engine.component.wasm` and run the same golden `command-result` vectors through the wasm engine; assert byte-identical output vs the in-process native run. This is the CI form of the cross-tier identity guarantee (native is convenience; wasm is the contract)
 
 **Exit:** `dlc new myapp` scaffolds + runs a working CLI project from the terminal; golden FS snapshot passes.
 
@@ -120,7 +130,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 ### Verify (browser + cross-tier)
 - [ ] `dlc new` runs in the browser; project persists in OPFS across reload
 - [ ] React UI renders and drives the engine; DevTools shows no host-capability errors
-- [ ] **Cross-tier identity:** the `engine.core.wasm` used by CLI and web is byte-identical (sha256); a shared golden vector produces identical `command-result` bytes on both
+- [ ] **Cross-tier identity (Decision 26):** web runs `engine.component.wasm`; the CLI runs the same engine codebase natively in-process. A shared golden vector produces byte-identical `command-result` across the native CLI run, the CI wasm-parity run (B2), and the browser — the wasm the browser loads is the same artifact the parity check exercises (sha256)
 
 **Exit:** `dlc` runs in terminal **and** browser (React UI) from one engine — the bootstrap milestone is met.
 
@@ -128,7 +138,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 
 ## Bootstrap exit criteria (roll-up)
 
-- [ ] One `engine.core.wasm` drives CLI (wasmtime component) and web (jco) — byte-identical
+- [ ] One engine **codebase** drives CLI (native in-process) and web (`engine.component.wasm` via jco); golden `command-result` vectors byte-identical across native, CI wasm-parity, and browser (Decision 26)
 - [ ] `dlc new myapp` works from the terminal (scaffold to disk) and the browser (scaffold to OPFS + download)
 - [ ] React UI on the web tier drives the engine
 - [ ] Capabilities limited to Console + Filesystem; graceful behavior where a cap is absent
@@ -168,7 +178,7 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 
 ### Platform & tooling
 - [ ] Extract **`ilc-platform`** module once App #2 shares it (§16.4) — templates depend-on, never inline
-- [ ] `dlc` command surface: `dlc build`, `dlc verify`, `dlc proto`, `dlc host add <tier>` (§16.7)
+- [ ] `dlc` command surface: **tier-scoped** `dlc build <tier>` / `dlc run <tier>` / `dlc verify [<tier>] [--parity]` (Decision 27 — tiers are composition recipes, not forks), plus `dlc proto`, `dlc host add <tier>` (§16.7). Supersedes the bootstrap `make build-host` / `build-engine` / `verify-parity` for scaffolded apps
 - [ ] **Project manifest** `dlc.toml` (§16.8) — capabilities/tiers/storage/ui/launch/platform pin; drives build/verify/host-add/launch
 - [ ] Regenerate / upgrade (re-apply templates against a newer `platform` pin)
 - [ ] Scaffolder verify in CI: `dlc new … → devbox run verify` (§11 Scaffolder row)
