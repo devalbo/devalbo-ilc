@@ -14,7 +14,11 @@
 // every tier, including wasm and (eventually) embedded.
 package platform
 
-import "strconv"
+import (
+	"strconv"
+
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
+)
 
 // Result is the host-neutral outcome of a command. The wasip2 entrypoint maps it
 // to the WIT command-result; the native host consumes it directly. An empty Err
@@ -32,30 +36,34 @@ type Handler func(request []byte) Result
 
 // Method ids reserved for the platform, in per-capability blocks. Permanent:
 //
-//	    1 –   99   core lifecycle
-//	  100 –  199   filesystem
-//	  200 –  299   index      (SQLite)
-//	  300 –  399   events
-//	  400 –  499   display
-//	  500 –  599   network
-//	  600 –  999   reserved
-//	 1000 +        the app's own commands
+//	   1 –   99   core lifecycle
+//	 100 –  199   filesystem
+//	 200 –  299   index      (SQLite)
+//	 300 –  399   events
+//	 400 –  499   display
+//	 500 –  599   network
+//	 600 –  999   reserved
+//	1000 +        the app's own commands
 //
 // One flat map serves all of it, so the ranges are what stop an app colliding
 // with a platform verb added later. The platform range is far larger than it
 // needs to be on purpose: ids are u32, so reserving 999 costs nothing, while
 // widening the range once apps exist would break every app inside it.
 // See proto/devalbo/ilc/v1/platform.proto.
+// The ids themselves are GENERATED from platform.proto by
+// protoc-gen-dlc-registry and re-exported here so callers have one obvious name.
+// They are not written down twice.
 const (
 	// core lifecycle (1–99)
-	MethodVersion uint32 = 1
+	MethodVersion = ilcv1.MethodVersion
 
 	// filesystem (100–199)
-	MethodExportFs uint32 = 100
-	MethodImportFs uint32 = 101
-	MethodResetFs  uint32 = 102
+	MethodExportFs = ilcv1.MethodExportFs
+	MethodImportFs = ilcv1.MethodImportFs
+	MethodResetFs  = ilcv1.MethodResetFs
 
-	// AppMethodBase is the first id an app may claim.
+	// AppMethodBase is the first id an app may claim. Not generated: it is the
+	// range boundary itself, which the .proto documents but cannot express.
 	AppMethodBase uint32 = 1000
 )
 
@@ -72,6 +80,26 @@ func Register(method uint32, h Handler) {
 		panic("platform: duplicate method_id " + strconv.FormatUint(uint64(method), 10))
 	}
 	registry[method] = h
+}
+
+// RegisterRaw registers the generated dispatch maps from
+// protoc-gen-dlc-registry, which hand back `map[method_id]func(request) (response, error)`.
+//
+// The generated code cannot import this package (it lives in the message package,
+// which this package imports — that would be a cycle), so it emits plain funcs
+// and this adapts them into the Result envelope. That indirection is the whole
+// reason ids are declared exactly once, in the .proto.
+func RegisterRaw(handlers map[uint32]func([]byte) ([]byte, error)) {
+	for method, fn := range handlers {
+		h := fn // capture per iteration
+		Register(method, func(request []byte) Result {
+			out, err := h(request)
+			if err != nil {
+				return Result{Err: err.Error()}
+			}
+			return Result{Success: true, Output: out}
+		})
+	}
 }
 
 // Unregister drops a handler so an app can replace a platform verb with its own.

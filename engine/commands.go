@@ -19,24 +19,22 @@ import (
 
 const version = "dlc 0.0.0-bootstrap"
 
-// Permanent method ids for dlc's own commands, mirroring the
-// `(devalbo.options.v1.method_id)` options on DlcService. They live in the
-// **app range** (1000+); 1–999 belongs to the platform, in per-capability
-// blocks. These constants and the registration below are what
-// protoc-gen-dlc-registry will generate (and lock).
+// dlc's own method ids, GENERATED from commands.proto and re-exported for
+// callers (tests, the parity runner). They live in the **app range** (1000+);
+// 1–999 belongs to the platform, in per-capability blocks.
 const (
-	MethodNew  uint32 = platform.AppMethodBase + 0 // 1000
-	MethodEcho uint32 = platform.AppMethodBase + 1 // 1001
+	MethodNew  = dlcv1.MethodNew
+	MethodEcho = dlcv1.MethodEcho
 )
 
 // This init is the shape every scaffolded app's init will have: inherit the
-// platform's verbs, tell it who you are, then register your own.
+// platform's verbs, tell it who you are, then register your own — and never
+// write an id down, because the generated Handlers map carries them.
 func init() {
 	platform.RegisterAll()
 	platform.SetVersion(version)
 
-	platform.Register(MethodNew, platform.TypedHandler(handleNew))
-	platform.Register(MethodEcho, platform.TypedHandler(handleEcho))
+	platform.RegisterRaw(dlcv1.DlcServiceHandlers(handleNew, handleEcho))
 }
 
 func handleEcho(req *dlcv1.EchoRequest) (*dlcv1.EchoResponse, error) {

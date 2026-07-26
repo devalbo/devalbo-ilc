@@ -10,3 +10,17 @@ plugins:
     out: ../gen/ts
     opt:
       - target=ts
+  # Command dispatch + method_id constants, generated from the service defs that
+  # go-lite ignores (it emits messages only). Also enforces the id lock — see
+  # cmd/protoc-gen-dlc-registry. `go run` keeps it buildable from a fresh clone
+  # with no install step; cwd here is proto/.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/cmd/protoc-gen-dlc-registry"]
+    out: ../gen/go
+    # strategy: all — buf's DEFAULT is `directory`, which invokes a plugin once
+    # per directory. The id lock needs every service in ONE invocation, or each
+    # call writes a lock holding only its own directory's ids and the next call
+    # fails against it.
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lock=method-ids.lock

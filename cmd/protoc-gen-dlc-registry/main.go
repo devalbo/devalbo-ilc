@@ -1,0 +1,388 @@
+// protoc-gen-dlc-registry — generates the engine's command dispatch from the
+// .proto, so `method_id` is written down exactly once (Decision 29).
+//
+// WHY THIS EXISTS: protoc-gen-go-lite emits messages only — it ignores services
+// entirely — so `method_id` reaches the generated Go nowhere. Without this
+// plugin the ids have to be hand-mirrored into Go constants, and nothing catches
+// a mismatch: the parity check reads the Go constants on both sides, so it would
+// compare a wrong id against itself and pass.
+//
+// WHAT IT EMITS, per .proto that declares a service, into that proto's own Go
+// package (so there is no new import to wire up):
+//
+//	const MethodNew uint32 = 1000              // one per rpc
+//	func DlcServiceHandlers(...) map[uint32]func([]byte) ([]byte, error)
+//
+// The handler map is built from typed functions the app supplies; the generated
+// closures do the decode/encode. Note what is deliberately absent: any reference
+// to engine/platform. Generated code lives in the *message* package, and platform
+// imports that package — so importing platform here would be an import cycle.
+// Handing back a plain map keeps the generated code dependency-free and lets the
+// app feed it to platform.RegisterRaw.
+//
+// IT ALSO LOCKS THE IDS. `buf breaking` guards message wire compatibility but
+// knows nothing about a custom option's *value*, so renumbering a command is a
+// one-character change that silently breaks every deployed host. The plugin
+// compares every id against a committed lock file and fails the build on any
+// change. Re-bless deliberately with DLC_ID_LOCK_UPDATE=1.
+//
+// Custom options arrive as UNKNOWN FIELDS on MethodOptions (that is how they
+// ship in a buf image), so they need dynamicpb + a re-unmarshal to read — see
+// resolveMethodOpts. `HasExtension` is unreliable across dynamicpb type
+// identities, hence Range. All spike-measured; see spikes/options/.
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/pluginpb"
+)
+
+const methodIDExt = "devalbo.options.v1.method_id"
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "protoc-gen-dlc-registry:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	in, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	var req pluginpb.CodeGeneratorRequest
+	if err := proto.Unmarshal(in, &req); err != nil {
+		return fmt.Errorf("unmarshal CodeGeneratorRequest: %w", err)
+	}
+
+	resolver, err := extensionResolver(&req)
+	if err != nil {
+		return err
+	}
+
+	generate := map[string]bool{}
+	for _, name := range req.FileToGenerate {
+		generate[name] = true
+	}
+
+	var resp pluginpb.CodeGeneratorResponse
+	locked := map[string]uint32{}
+
+	for _, file := range req.ProtoFile {
+		services, err := servicesOf(file, resolver)
+		if err != nil {
+			return err
+		}
+		if len(services) == 0 {
+			continue
+		}
+		// Every service contributes to the lock, even from a dependency we are
+		// not generating — the lock is about the wire, not about codegen.
+		for _, svc := range services {
+			for _, m := range svc.methods {
+				locked[file.GetPackage()+"."+svc.name+"."+m.name] = m.id
+			}
+		}
+		if !generate[file.GetName()] {
+			continue
+		}
+		content, err := render(file, services)
+		if err != nil {
+			return err
+		}
+		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+			Name:    proto.String(strings.TrimSuffix(file.GetName(), ".proto") + ".registry.pb.go"),
+			Content: proto.String(content),
+		})
+	}
+
+	if err := checkLock(paramValue(req.GetParameter(), "lock"), locked); err != nil {
+		return err
+	}
+
+	out, err := proto.Marshal(&resp)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(out)
+	return err
+}
+
+// ---- descriptors ---------------------------------------------------------
+
+type method struct {
+	name       string
+	id         uint32
+	input      string // Go type name in this package
+	output     string
+	fieldParam string // lowerCamel param name
+}
+
+type service struct {
+	name    string
+	methods []method
+}
+
+// extensionResolver registers every extension declared anywhere in the request,
+// so custom options can be re-parsed off the raw *Options messages.
+func extensionResolver(req *pluginpb.CodeGeneratorRequest) (*protoregistry.Types, error) {
+	files, err := protodesc.NewFiles(&descriptorpb.FileDescriptorSet{File: req.ProtoFile})
+	if err != nil {
+		return nil, fmt.Errorf("protodesc.NewFiles: %w", err)
+	}
+	types := &protoregistry.Types{}
+	var rangeErr error
+	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		for i := 0; i < fd.Extensions().Len(); i++ {
+			if err := types.RegisterExtension(dynamicpb.NewExtensionType(fd.Extensions().Get(i))); err != nil {
+				rangeErr = err
+				return false
+			}
+		}
+		return true
+	})
+	return types, rangeErr
+}
+
+func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.Types) ([]service, error) {
+	var out []service
+	for _, svc := range file.Service {
+		s := service{name: svc.GetName()}
+		for _, m := range svc.Method {
+			opts, err := resolveMethodOpts(m.GetOptions(), resolver)
+			if err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", svc.GetName(), m.GetName(), err)
+			}
+			id, ok := extUint32(opts, methodIDExt)
+			if !ok {
+				// A service without method_id is not a command surface — skip
+				// the whole file rather than guessing an id for it.
+				return nil, fmt.Errorf("%s.%s: missing (%s); every rpc in a command service needs one",
+					svc.GetName(), m.GetName(), methodIDExt)
+			}
+			s.methods = append(s.methods, method{
+				name:       m.GetName(),
+				id:         id,
+				input:      shortName(m.GetInputType()),
+				output:     shortName(m.GetOutputType()),
+				fieldParam: lowerFirst(m.GetName()) + "Fn",
+			})
+		}
+		if len(s.methods) > 0 {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func resolveMethodOpts(src *descriptorpb.MethodOptions, resolver *protoregistry.Types) (*descriptorpb.MethodOptions, error) {
+	if src == nil {
+		return &descriptorpb.MethodOptions{}, nil
+	}
+	b, err := proto.Marshal(src)
+	if err != nil {
+		return nil, err
+	}
+	out := &descriptorpb.MethodOptions{}
+	if err := (proto.UnmarshalOptions{Resolver: resolver}).Unmarshal(b, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// extUint32 reads a custom option by full name. Range, not HasExtension: the
+// latter is unreliable across dynamicpb ExtensionType identities.
+func extUint32(m proto.Message, name protoreflect.FullName) (uint32, bool) {
+	var out uint32
+	var found bool
+	m.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		if fd.FullName() == name {
+			out = uint32(v.Uint())
+			found = true
+			return false
+		}
+		return true
+	})
+	return out, found
+}
+
+// ---- rendering -----------------------------------------------------------
+
+func render(file *descriptorpb.FileDescriptorProto, services []service) (string, error) {
+	pkg, err := goPackageName(file)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "// Code generated by protoc-gen-dlc-registry. DO NOT EDIT.\n")
+	fmt.Fprintf(&b, "// source: %s\n//\n", file.GetName())
+	fmt.Fprintf(&b, "// Command ids and dispatch for this file's service(s). The ids are the\n")
+	fmt.Fprintf(&b, "// permanent method_id values from the .proto and are guarded by the id lock —\n")
+	fmt.Fprintf(&b, "// changing one is a wire-breaking change, not a rename.\n\n")
+	fmt.Fprintf(&b, "package %s\n\n", pkg)
+
+	for _, svc := range services {
+		fmt.Fprintf(&b, "// Method ids for %s.\nconst (\n", svc.name)
+		for _, m := range svc.methods {
+			fmt.Fprintf(&b, "\tMethod%s uint32 = %d\n", m.name, m.id)
+		}
+		fmt.Fprintf(&b, ")\n\n")
+	}
+
+	for _, svc := range services {
+		fmt.Fprintf(&b, "// %sHandlers builds the dispatch map for %s from typed handlers.\n", svc.name, svc.name)
+		fmt.Fprintf(&b, "// The returned map goes to platform.RegisterRaw; the closures below own the\n")
+		fmt.Fprintf(&b, "// decode/encode, so an app never touches request bytes or an id.\n")
+		fmt.Fprintf(&b, "func %sHandlers(\n", svc.name)
+		for _, m := range svc.methods {
+			fmt.Fprintf(&b, "\t%s func(*%s) (*%s, error),\n", m.fieldParam, m.input, m.output)
+		}
+		fmt.Fprintf(&b, ") map[uint32]func([]byte) ([]byte, error) {\n")
+		fmt.Fprintf(&b, "\treturn map[uint32]func([]byte) ([]byte, error){\n")
+		for _, m := range svc.methods {
+			fmt.Fprintf(&b, "\t\tMethod%s: func(request []byte) ([]byte, error) {\n", m.name)
+			fmt.Fprintf(&b, "\t\t\tvar req %s\n", m.input)
+			fmt.Fprintf(&b, "\t\t\tif err := req.UnmarshalVT(request); err != nil {\n")
+			fmt.Fprintf(&b, "\t\t\t\treturn nil, err\n\t\t\t}\n")
+			fmt.Fprintf(&b, "\t\t\tresp, err := %s(&req)\n", m.fieldParam)
+			fmt.Fprintf(&b, "\t\t\tif err != nil {\n\t\t\t\treturn nil, err\n\t\t\t}\n")
+			fmt.Fprintf(&b, "\t\t\treturn resp.MarshalVT()\n")
+			fmt.Fprintf(&b, "\t\t},\n")
+		}
+		fmt.Fprintf(&b, "\t}\n}\n\n")
+	}
+	return b.String(), nil
+}
+
+// goPackageName pulls the package name out of `option go_package = "path;name"`.
+func goPackageName(file *descriptorpb.FileDescriptorProto) (string, error) {
+	opt := file.GetOptions().GetGoPackage()
+	if opt == "" {
+		return "", fmt.Errorf("%s: no go_package option", file.GetName())
+	}
+	if i := strings.LastIndex(opt, ";"); i >= 0 {
+		return opt[i+1:], nil
+	}
+	if i := strings.LastIndex(opt, "/"); i >= 0 {
+		return opt[i+1:], nil
+	}
+	return opt, nil
+}
+
+func shortName(fullType string) string {
+	return fullType[strings.LastIndex(fullType, ".")+1:]
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+func paramValue(params, key string) string {
+	for _, part := range strings.Split(params, ",") {
+		if k, v, ok := strings.Cut(part, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
+
+// ---- the id lock ---------------------------------------------------------
+
+// checkLock compares the ids in this build against a committed lock file. This
+// is the guard `buf breaking` cannot provide: it validates message wire
+// compatibility, but a method_id is a custom option's VALUE, so renumbering a
+// command looks like nothing to it while breaking every deployed host.
+func checkLock(path string, current map[string]uint32) error {
+	if path == "" {
+		return nil // no lock configured; ids are unguarded
+	}
+	want := renderLock(current)
+
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		// First run: create it, so the very next build is guarded.
+		fmt.Fprintf(os.Stderr, "protoc-gen-dlc-registry: creating id lock %s\n", path)
+		return os.WriteFile(path, []byte(want), 0o644)
+	}
+	if string(existing) == want {
+		return nil
+	}
+	if os.Getenv("DLC_ID_LOCK_UPDATE") == "1" {
+		fmt.Fprintf(os.Stderr, "protoc-gen-dlc-registry: updating id lock %s\n", path)
+		return os.WriteFile(path, []byte(want), 0o644)
+	}
+	return fmt.Errorf(
+		"method_id lock mismatch in %s\n\n%s\nA method_id is permanent: changing one silently breaks every host\n"+
+			"that already speaks it, and `buf breaking` cannot see it (it is an option\n"+
+			"value, not a field number). If this change is deliberate, re-bless with:\n\n"+
+			"    DLC_ID_LOCK_UPDATE=1 make gen\n",
+		path, diffLock(string(existing), want))
+}
+
+func renderLock(ids map[string]uint32) string {
+	keys := make([]string, 0, len(ids))
+	for k := range ids {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b bytes.Buffer
+	b.WriteString("# method_id lock — generated by protoc-gen-dlc-registry. COMMIT THIS FILE.\n")
+	b.WriteString("# Each line is a permanent wire id. A change here is a breaking change.\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s %d\n", k, ids[k])
+	}
+	return b.String()
+}
+
+// diffLock reports just the lines that moved — the whole file is noise when one
+// id changed.
+func diffLock(old, new string) string {
+	parse := func(s string) map[string]string {
+		out := map[string]string{}
+		for _, line := range strings.Split(s, "\n") {
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if k, v, ok := strings.Cut(line, " "); ok {
+				out[k] = v
+			}
+		}
+		return out
+	}
+	before, after := parse(old), parse(new)
+	var lines []string
+	for k, v := range after {
+		if prev, ok := before[k]; !ok {
+			lines = append(lines, "  + "+k+" = "+v+" (new)")
+		} else if prev != v {
+			lines = append(lines, "  ! "+k+": "+prev+" -> "+v+"  <-- CHANGED")
+		}
+	}
+	for k, v := range before {
+		if _, ok := after[k]; !ok {
+			lines = append(lines, "  - "+k+" = "+v+" (removed)")
+		}
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n") + "\n"
+}

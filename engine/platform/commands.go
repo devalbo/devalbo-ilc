@@ -23,10 +23,12 @@ func SetVersion(v string) { version = v }
 // before registering the app's own — the ids cannot collide (1–99 vs 100+), so
 // order is a readability choice, not a correctness one.
 func RegisterAll() {
-	Register(MethodVersion, TypedHandler(handleVersion))
-	Register(MethodExportFs, TypedHandler(handleExportFs))
-	Register(MethodImportFs, TypedHandler(handleImportFs))
-	Register(MethodResetFs, TypedHandler(handleResetFs))
+	RegisterRaw(ilcv1.PlatformServiceHandlers(
+		handleVersion,
+		handleExportFs,
+		handleImportFs,
+		handleResetFs,
+	))
 }
 
 func handleVersion(*ilcv1.VersionRequest) (*ilcv1.VersionResponse, error) {
