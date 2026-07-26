@@ -1,0 +1,18 @@
+version: v2
+# Reflection-free codegen (TinyGo-safe) + the ILC command registry.
+plugins:
+  - local: protoc-gen-go-lite
+    out: ../gen/go
+    opt:
+      - paths=source_relative
+  # Emits method_id constants + the dispatch map from the service definitions
+  # (go-lite emits messages only, so the ids would otherwise reach Go nowhere),
+  # and locks the ids so a renumber cannot happen by accident.
+  # strategy: all — buf's default invokes a plugin once per DIRECTORY, which
+  # would make the lock see only part of the world.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/cmd/protoc-gen-dlc-registry"]
+    out: ../gen/go
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lock=method-ids.lock

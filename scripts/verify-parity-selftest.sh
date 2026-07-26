@@ -41,11 +41,25 @@ cat > "$PROBE" <<'EOF'
 
 // TEMPORARY — written and deleted by scripts/verify-parity-selftest.sh.
 // If you are reading this in a committed tree, a self-test run died; delete it.
-// It changes engine behavior in the TinyGo/wasm build ONLY, which is the
-// divergence the parity check exists to catch.
+//
+// It empties the embedded template FS in the TinyGo/wasm build ONLY, so the wasm
+// engine scaffolds nothing while the native one scaffolds a full tree. That
+// diverges the command results AND the written filesystems, which is exactly
+// what the parity check exists to catch.
+//
+// Deliberately hooked to templates.FS rather than to any engine internal: it is
+// an exported var that scaffolding cannot work without, so this probe stays
+// valid as the engine changes. (An earlier probe poked a private slice that was
+// later deleted — the self-test caught its own rot, which is the point.)
 package engine
 
-func init() { scaffoldTemplates[2].path = "READ.md" }
+import (
+	"embed"
+
+	"github.com/devalbo/devalbo-ilc/templates"
+)
+
+func init() { templates.FS = embed.FS{} }
 EOF
 
 echo "-------------------------------------------------"

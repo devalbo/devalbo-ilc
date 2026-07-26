@@ -77,11 +77,26 @@ func TestNew(t *testing.T) {
 	if resp.Path != "myapp" {
 		t.Errorf("path: got %q, want %q", resp.Path, "myapp")
 	}
-	want := []string{"go.mod", "engine/execute.go", "README.md"}
+	// The full skeleton, sorted — order is part of the contract, because the
+	// parity check diffs the written trees byte-for-byte.
+	want := []string{
+		".gitignore",
+		"Makefile",
+		"README.md",
+		"devbox.json",
+		"engine/commands.go",
+		"engine/commands_test.go",
+		"go.mod",
+		"hosts/native/main.go",
+		"proto/buf.gen.yaml",
+		"proto/buf.yaml",
+		"proto/devalbo/options/v1/README.md",
+		"proto/devalbo/options/v1/options.proto",
+		"proto/myapp/v1/commands.proto",
+	}
 	if len(resp.Files) != len(want) {
 		t.Fatalf("files: got %v, want %v", resp.Files, want)
 	}
-	// Order is part of the contract — the parity check diffs bytes.
 	for i, w := range want {
 		if resp.Files[i] != w {
 			t.Errorf("files[%d]: got %q, want %q", i, resp.Files[i], w)
@@ -96,23 +111,44 @@ func TestNewWritesTree(t *testing.T) {
 
 	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp"})
 
-	want := map[string]string{
-		"go.mod":            "module github.com/acme/myapp\n\ngo 1.23.0\n",
-		"README.md":         "# myapp\n\nScaffolded by `dlc new`. Module `github.com/acme/myapp`.\n",
-		"engine/execute.go": "", // content checked for the token only
-	}
-	for name, wantContent := range want {
-		got, err := os.ReadFile(filepath.Join(root, "myapp", name))
+	// Every emitted file must be fully substituted — a stray {{.Token}} is the
+	// classic scaffolder bug, and it compiles fine until someone reads it.
+	var checked int
+	err := filepath.Walk(filepath.Join(root, "myapp"), func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		body, err := os.ReadFile(path)
 		if err != nil {
-			t.Errorf("%s: %v", name, err)
-			continue
+			return err
 		}
-		if wantContent != "" && string(got) != wantContent {
-			t.Errorf("%s: got %q, want %q", name, got, wantContent)
+		if strings.Contains(string(body), "{{.") {
+			t.Errorf("%s: unsubstituted token", path)
 		}
-		if strings.Contains(string(got), "{{.") {
-			t.Errorf("%s: unsubstituted token in %q", name, got)
+		if strings.Contains(path, "{{") {
+			t.Errorf("%s: unsubstituted token in the PATH", path)
 		}
+		checked++
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked < 10 {
+		t.Errorf("only %d files written; expected the full skeleton", checked)
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(root, "myapp", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(goMod), "module github.com/acme/myapp") {
+		t.Errorf("go.mod: %q", goMod)
+	}
+	// The template file is go.mod.tmpl (a literal go.mod would make the
+	// template a nested module and break embedding) — the suffix must be gone.
+	if _, err := os.Stat(filepath.Join(root, "myapp", "go.mod.tmpl")); err == nil {
+		t.Error("go.mod.tmpl was emitted verbatim; the .tmpl suffix should be stripped")
 	}
 }
 
@@ -180,7 +216,10 @@ func TestUnknownMethod(t *testing.T) {
 func TestExportImportRoundTrip(t *testing.T) {
 	inTempRoot(t)
 
-	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})
+	var scaffolded dlcv1.NewResponse
+	if err := scaffolded.UnmarshalVT(call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})); err != nil {
+		t.Fatal(err)
+	}
 
 	var exported ilcv1.ExportFsResponse
 	out := call(t, platform.MethodExportFs, &ilcv1.ExportFsRequest{Prefix: "myapp"})
@@ -205,11 +244,12 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if err := imported.UnmarshalVT(out); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"README.md", "engine/execute.go", "go.mod"}
-	if len(imported.Files) != len(want) {
-		t.Fatalf("imported %v, want %v", imported.Files, want)
+	// Everything the scaffold wrote comes back, in the same order — the bundle
+	// is sorted, which is what makes it byte-stable across tiers.
+	if len(imported.Files) != len(scaffolded.Files) {
+		t.Fatalf("imported %d files, scaffolded %d: %v", len(imported.Files), len(scaffolded.Files), imported.Files)
 	}
-	for i, w := range want {
+	for i, w := range scaffolded.Files {
 		if imported.Files[i] != w {
 			t.Errorf("files[%d]: got %q, want %q", i, imported.Files[i], w)
 		}
@@ -256,4 +296,54 @@ func TestExportImportRejectEscapingPrefix(t *testing.T) {
 	if r := engine.ExecuteMethod(platform.MethodExportFs, in); r.Success {
 		t.Error("expected refusal for an escaping prefix")
 	}
+}
+
+// The scaffold options exist in the schema but the single template emits one
+// shape. Accepting them and quietly emitting something else would hand the user
+// a project that contradicts what they asked for — so they are refused by name.
+func TestNewRejectsUnsupportedOptions(t *testing.T) {
+	inTempRoot(t)
+
+	cases := map[string]*dlcv1.NewRequest{
+		"tier":    {Name: "a", Tiers: []string{"web"}},
+		"cap":     {Name: "b", Caps: []string{"sqlite"}},
+		"ui":      {Name: "c", Ui: dlcv1.UiKind_UI_KIND_REACT},
+		"storage": {Name: "d", Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT},
+	}
+	for name, req := range cases {
+		in, err := req.MarshalVT()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := engine.ExecuteMethod(engine.MethodNew, in)
+		if r.Success {
+			t.Errorf("%s: expected refusal", name)
+			continue
+		}
+		if !strings.Contains(r.Err, "not supported yet") {
+			t.Errorf("%s: unhelpful error %q", name, r.Err)
+		}
+		// A refused request must not leave a half-written tree behind.
+		if _, err := os.Stat(req.Name); err == nil {
+			t.Errorf("%s: scaffolded despite refusing", name)
+		}
+	}
+
+	// The supported subset still works.
+	if r := engine.ExecuteMethod(engine.MethodNew, mustMarshal(t, &dlcv1.NewRequest{
+		Name:  "ok",
+		Caps:  []string{"console", "filesystem"},
+		Tiers: []string{"native"},
+	})); !r.Success {
+		t.Errorf("supported options were refused: %s", r.Err)
+	}
+}
+
+func mustMarshal(t *testing.T, m interface{ MarshalVT() ([]byte, error) }) []byte {
+	t.Helper()
+	b, err := m.MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

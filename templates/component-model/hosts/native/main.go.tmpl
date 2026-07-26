@@ -1,0 +1,103 @@
+// {{.AppName}} — native CLI host.
+//
+// The host's job is to turn native input into a REQUEST and hand it to the
+// engine; it holds no business logic. That is the ILC inversion: argv is one way
+// to build a request, a React form is another, a serial REPL a third — and all
+// three reach the same handlers.
+//
+// The engine is linked in-process here (no wasm runtime in the run path), which
+// is a build seam, not a fork: the same engine package compiles to wasm for the
+// browser tier.
+//
+// Parsing lives HERE, not in the engine — so this file may use any parser you
+// like (cobra, kong, huh menus). It is deliberately stdlib-only to start.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/devalbo/devalbo-ilc/engine/platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
+
+	_ "{{.Module}}/engine" // importing the engine registers its commands
+	{{.PkgName}}v1 "{{.Module}}/gen/go/{{.PkgName}}/v1"
+)
+
+func main() {
+	args := os.Args[1:]
+	if len(args) == 0 {
+		usage()
+		os.Exit(2)
+	}
+
+	switch args[0] {
+	case "version":
+		var resp ilcv1.VersionResponse
+		must(call(platform.MethodVersion, &ilcv1.VersionRequest{}, &resp))
+		fmt.Println(resp.Version)
+
+	case "greet":
+		req := &{{.PkgName}}v1.GreetRequest{}
+		if len(args) > 1 {
+			req.Name = args[1]
+		}
+		var resp {{.PkgName}}v1.GreetResponse
+		must(call({{.PkgName}}v1.MethodGreet, req, &resp))
+		fmt.Println(resp.Text)
+
+	// export-fs / import-fs come from the platform — every ILC app gets them,
+	// and a bundle exported here imports anywhere else the app runs.
+	case "export-fs":
+		var resp ilcv1.ExportFsResponse
+		must(call(platform.MethodExportFs, &ilcv1.ExportFsRequest{}, &resp))
+		os.Stdout.Write(resp.Bundle)
+
+	case "import-fs":
+		if len(args) != 2 {
+			fail("import-fs: expected one <bundle.json>")
+		}
+		bundle, err := os.ReadFile(args[1])
+		if err != nil {
+			fail(err.Error())
+		}
+		var resp ilcv1.ImportFsResponse
+		must(call(platform.MethodImportFs, &ilcv1.ImportFsRequest{Bundle: bundle}, &resp))
+		for _, f := range resp.Files {
+			fmt.Println("  + " + f)
+		}
+
+	default:
+		usage()
+		os.Exit(2)
+	}
+}
+
+// call is the whole host↔engine boundary: encode the request, dispatch on the
+// method id, decode the response. Errors arrive in the result envelope.
+func call(method uint32, req interface{ MarshalVT() ([]byte, error) }, resp interface{ UnmarshalVT([]byte) error }) error {
+	request, err := req.MarshalVT()
+	if err != nil {
+		return err
+	}
+	r := platform.Execute(method, request)
+	if !r.Success {
+		return fmt.Errorf("%s", r.Err)
+	}
+	return resp.UnmarshalVT(r.Output)
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: {{.AppName}} <version|greet [name]|export-fs|import-fs <bundle>>")
+}
+
+func must(err error) {
+	if err != nil {
+		fail(err.Error())
+	}
+}
+
+func fail(msg string) {
+	fmt.Fprintln(os.Stderr, "{{.AppName}}: "+msg)
+	os.Exit(1)
+}

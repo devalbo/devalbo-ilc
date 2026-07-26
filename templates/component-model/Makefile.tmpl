@@ -1,0 +1,23 @@
+# {{.AppName}} — build & verify.
+# Run inside `devbox shell`.
+
+.PHONY: gen
+gen: ## generate proto bindings + command dispatch
+	cd proto && buf lint && buf generate
+
+.PHONY: build
+build: gen ## build the native CLI (engine linked in-process)
+	go build -o {{.AppName}} ./hosts/native
+
+.PHONY: run
+run: build ## build then say hello
+	./{{.AppName}} greet
+
+.PHONY: test
+test: ## unit tests
+	go test ./...
+
+.PHONY: verify
+verify: build ## the smoke test: the binary exists and answers
+	@./{{.AppName}} version
+	@./{{.AppName}} greet ILC

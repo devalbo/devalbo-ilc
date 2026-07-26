@@ -9,7 +9,16 @@
 // ever disagree, the cross-tier promise is broken.
 import { expect, test } from "@playwright/test";
 
-const EXPECTED = ["myapp/README.md", "myapp/engine/execute.go", "myapp/go.mod"];
+// A representative slice of the scaffold, not the whole list — the full set is
+// asserted natively in engine/execute_test.go, and duplicating it here would
+// mean two places to update for one template change. What matters on this tier
+// is that the browser writes the SAME tree, including nested directories.
+const EXPECTED = [
+  "myapp/go.mod",
+  "myapp/engine/commands.go",
+  "myapp/hosts/native/main.go",
+  "myapp/proto/myapp/v1/commands.proto",
+];
 
 // Each test starts from an empty OPFS: it is origin-scoped and outlives a
 // reload (that being the point), so leftovers from a previous run would make
@@ -54,7 +63,10 @@ test("scaffolds into OPFS and survives a reload", async ({ page }) => {
     const file = await (await dir.getFileHandle("go.mod")).getFile();
     return file.text();
   });
-  expect(goMod).toBe("module github.com/you/myapp\n\ngo 1.23.0\n");
+  expect(goMod).toContain("module github.com/you/myapp");
+  // No --platform-path in the browser, so the replace directive comes through
+  // commented, with instructions rather than a broken build.
+  expect(goMod).toContain("// replace github.com/devalbo/devalbo-ilc =>");
 });
 
 test("honors --module, like the CLI does", async ({ page }) => {
@@ -71,7 +83,7 @@ test("honors --module, like the CLI does", async ({ page }) => {
     const file = await (await dir.getFileHandle("go.mod")).getFile();
     return file.text();
   });
-  expect(goMod).toBe("module github.com/acme/acmeapp\n\ngo 1.23.0\n");
+  expect(goMod).toContain("module github.com/acme/acmeapp");
 });
 
 test("refuses to scaffold over an existing tree", async ({ page }) => {
@@ -123,11 +135,10 @@ test("exports a BFT bundle and re-imports it", async ({ page }) => {
   // inverse — see the note on runExport().
   const parsed = JSON.parse(bundle);
   expect(Object.keys(parsed.entries)).toEqual(["myapp"]);
-  expect(Object.keys(parsed.entries.myapp.entries).sort()).toEqual([
-    "README.md",
-    "engine",
-    "go.mod",
-  ]);
+  const app = Object.keys(parsed.entries.myapp.entries).sort();
+  expect(app).toContain("go.mod");
+  expect(app).toContain("engine");
+  expect(app).toContain("proto");
 
   // Wipe, then import the downloaded bundle back — the tree returns.
   // `clear OPFS` reloads the page by design: a running engine cannot be rebound
@@ -141,7 +152,7 @@ test("exports a BFT bundle and re-imports it", async ({ page }) => {
     mimeType: "application/json",
     buffer: Buffer.from(bundle),
   });
-  await expect(page.getByTestId("log")).toContainText("imported 3 files");
+  await expect(page.getByTestId("log")).toContainText("imported 13 files");
   for (const f of EXPECTED) {
     await expect(page.getByTestId("files")).toContainText(f);
   }

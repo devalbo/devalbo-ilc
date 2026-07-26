@@ -164,7 +164,9 @@ hosts/desktop/build/    # wails output
 │   └── ilc.wit                     # the capability world (§6)
 ├── proto/                          # versioned packages in matching dirs (idiomatic buf; STANDARD lint)
 │   ├── devalbo/ilc/v1/common.proto # shared types + errors (IlcError)
-│   ├── devalbo/dlc/v1/commands.proto  # DlcService: in-engine verbs + method_id (Decision 29/30)
+│   ├── devalbo/ilc/v1/platform.proto  # PlatformService: the verbs every app INHERITS (ids 1-9999)
+│   ├── devalbo/dlc/v1/commands.proto  # DlcService: dlc's OWN verbs (app band, 10000+)
+│   ├── method-ids.lock             # committed: a method_id change fails the build
 │   ├── devalbo/options/v1/options.proto # method_id + field metadata (host-side only)
 │   ├── devalbo/<app>/v1/…          # per-app domain, e.g. record.proto / display.proto (pilot)
 │   └── buf.yaml / buf.gen.yaml      # local buf (lint + breaking=WIRE_JSON; gen go/ts)
@@ -657,7 +659,18 @@ Every tier feeds the same `execute` entry, so **there is one dispatch path** —
 
 **One byte boundary, negotiated (Decision 31).** The guest exposes a *single* command entry — `execute(method: u32, request: list<u8>) -> command-result` (scalar id + proto-bytes payload) — WAMR-portable (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings need the Component Model WAMR lacks). Rich typed DX is a **host-side** generated wrapper over the same proto, not a second guest ABI; a small `supported-abis()` export lets the guest advertise its boundaries, and a rich WIT boundary is reserved *per-capability* for CM-only features (streams / resources / `wasi:http`).
 
-**Framing — service + `method_id`, messages passed directly.** Commands are authored as proto `service` rpcs with permanent `method_id`s; request/response messages cross the wire **directly** — no oneof or envelope for the command surface (the discriminator is a scalar `method: u32` param, WAMR-fine per Decision 31). RPC-idiomatic (explicit req→resp pairing) with a rename-safe numeric key. `protoc-gen-dlc-registry` emits the engine's `method_id→handler` registration **from the buf image** (go-lite generates no service stubs, so the descriptors are the only source); host introspection uses the standard descriptor set (above). The oneof stays for *response variants*, not command dispatch. The concrete surface is `proto/devalbo/dlc/v1/commands.proto` — `DlcService` with permanent ids for the **in-engine** verbs only (`Version`, `Echo`, `New`, `ExportFs`, `ImportFs`; toolchain verbs stay host-side per Decision 30) — over the shared options package `proto/devalbo/options/v1/options.proto`. Failure rides the `command-result` envelope, so responses carry no error field.
+**Framing — service + `method_id`, messages passed directly.** Commands are authored as proto `service` rpcs with permanent `method_id`s; request/response messages cross the wire **directly** — no oneof or envelope for the command surface (the discriminator is a scalar `method: u32` param, WAMR-fine per Decision 31). RPC-idiomatic (explicit req→resp pairing) with a rename-safe numeric key. `protoc-gen-dlc-registry` emits the engine's `method_id→handler` registration **from the buf image** (go-lite generates no service stubs, so the descriptors are the only source); host introspection uses the standard descriptor set (above). The oneof stays for *response variants*, not command dispatch. The concrete surface is split by **who owns the verb**: `proto/devalbo/ilc/v1/platform.proto` (`PlatformService` — `Version`, `ExportFs`, `ImportFs`, `ResetFs`: what every app *inherits*) and `proto/devalbo/dlc/v1/commands.proto` (`DlcService` — `New`, `Echo`: `dlc`'s *own* verbs). Both sit over the shared options package `proto/devalbo/options/v1/options.proto`. In-engine verbs only — toolchain verbs stay host-side per Decision 30. Failure rides the `command-result` envelope, so responses carry no error field.
+
+**`method_id` bands (permanent).** One flat `map[u32]handler` serves everything, so the boundary is what keeps an app from colliding with a capability ILC adds later:
+
+| Band | Owner |
+| --- | --- |
+| **1 – 9999** | **ILC itself**, subdivided by capability: 1–99 core lifecycle · 100–199 filesystem · 200–299 index · 300–399 events · 400–499 display · 500–599 network · **600–9999 reserved for capabilities not yet shipped** |
+| **10000 +** | **the app** |
+
+Each band is deliberately far larger than it needs to be: ids are `u32`, so over-reserving costs nothing, while *widening* a band once apps exist breaks every id above it. `protoc-gen-dlc-registry` writes a committed `proto/method-ids.lock` and fails the build on any change, because `buf breaking` validates message wire compatibility and cannot see an option's *value*.
+
+**`dlc` claims no reserved block — it is an app like any other** (`New` = 10000). It needs none: `dlc` and a scaffolded app never share a registry (an app imports `engine/platform`, never `dlc`'s `engine`), so collision is impossible by construction and a block would be signalling rather than protection. Keeping `dlc` in the app band is also the dogfooding — any friction it feels there is friction every scaffolded app feels, which is the point of App #1. If `dlc`'s scaffolder is ever shared *as a capability* (an app embedding `new`), it takes an **ILC** block out of the reserved 600–9999, not a `dlc` one. Cross-app command routing (§9, Phase 5) needs **app identity in the envelope** regardless — a global id carve-out would give false comfort about a problem that lives elsewhere.
 
 **Reactivity loop:** the UI issues an `execute(list-records)` request to read; a write emits `data-changed`; the host's subscription (React `useEngineEvent` / Wails `EventsOn`) invalidates and re-fetches.
 

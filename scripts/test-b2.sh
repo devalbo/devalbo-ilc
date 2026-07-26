@@ -9,6 +9,7 @@
 #   correctness   go test ./engine/     does the engine do the right thing?
 #   parity        verify-parity.sh      do the native and wasm builds agree?
 #   meta          …-selftest.sh         can the parity check fail at all?
+#   product       verify-scaffold.sh    does `dlc new` emit something that WORKS?
 #
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
@@ -28,6 +29,7 @@ run_check() { # id  label  command...
 run_check "T-B2.0" "engine command registry + dispatch (unit)" go test ./engine/
 run_check "T-B2.1" "native↔wasm parity (argv + method boundaries)" ./scripts/verify-parity.sh
 run_check "T-B2.2" "parity self-test (the check can detect drift)" ./scripts/verify-parity-selftest.sh
+run_check "T-B2.3" "scaffold builds and runs (dlc new -> gen -> build -> run)" ./scripts/verify-scaffold.sh
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then

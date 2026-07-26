@@ -12,12 +12,7 @@ import {
   PlatformMethod,
   reset,
 } from "../../hosts/web/api";
-import {
-  NewRequest,
-  NewResponse,
-  StorageKind,
-  UiKind,
-} from "@gen/devalbo/dlc/v1/commands.pb";
+import { NewRequest, NewResponse } from "@gen/devalbo/dlc/v1/commands.pb";
 // The filesystem/bundle verbs are the PLATFORM's, not dlc's — every app gets
 // this same download/import UI for free.
 import {
@@ -52,14 +47,11 @@ export function App() {
   async function runNew() {
     setBusy(true);
     try {
-      const request = NewRequest.toBinary({
-        name,
-        module,
-        caps: ["console", "filesystem"],
-        tiers: ["native", "web"],
-        ui: UiKind.REACT,
-        storage: StorageKind.SPLIT,
-      });
+      // Only what the template can actually honor. The engine now REJECTS
+      // unsupported caps/tiers/ui/storage rather than silently emitting
+      // something else, so sending aspirational values here would just fail —
+      // correctly. They come back as the template grows.
+      const request = NewRequest.toBinary({ name, module });
       const r = await execute(Method.New, request);
       if (!r.success) {
         say(`new failed: ${r.error ?? "(no message)"}`);

@@ -11,10 +11,12 @@ import "devalbo/options/v1/options.proto";
 // `devalbo/ilc/v1/platform.proto`; dlc depends on them exactly the way a
 // scaffolded app does, which is what keeps the platform boundary honest.
 //
-// Each command is one rpc carrying a permanent `method_id` in the **app range
-// (1000+)**; 1–999 is reserved for the platform, in per-capability blocks (see
-// platform.proto). The engine dispatches on that number through one flat
-// `map[u32]handler`, so the rpc *name* is cosmetic and renaming is wire-safe.
+// Each command is one rpc carrying a permanent `method_id` in the **app band
+// (10000+)**. 1–9999 is reserved for ILC itself, in per-capability blocks (see
+// platform.proto) — `dlc` is an app like any other and claims no id below the
+// line. The engine
+// dispatches on that number through one flat `map[u32]handler`, so the rpc
+// *name* is cosmetic and renaming is wire-safe.
 //
 // Only **in-engine** commands live here (Decision 30): verbs that touch nothing
 // but the filesystem / app-data, so they run in the terminal *and* the browser.
@@ -28,10 +30,10 @@ import "devalbo/options/v1/options.proto";
 // method_id parameter.
 service DlcService {
   rpc New(NewRequest) returns (NewResponse) {
-    option (devalbo.options.v1.method_id) = 1000;
+    option (devalbo.options.v1.method_id) = 10000;
   }
   rpc Echo(EchoRequest) returns (EchoResponse) {
-    option (devalbo.options.v1.method_id) = 1001;
+    option (devalbo.options.v1.method_id) = 10001;
   }
 }
 
@@ -64,6 +66,12 @@ message NewRequest {
   StorageKind storage = 6 [
     (devalbo.options.v1.help) = "storage layout",
     (devalbo.options.v1.default) = "STORAGE_KIND_SPLIT"
+  ];
+  // BOOTSTRAP: path to a local devalbo-ilc checkout, written into the generated
+  // go.mod as a `replace`. Needed only until ilc-platform is published — see
+  // platformReplace() in engine/scaffold.go.
+  string platform_path = 7 [
+    (devalbo.options.v1.help) = "local devalbo-ilc checkout (bootstrap; until ilc-platform is published)"
   ];
 }
 message NewResponse {

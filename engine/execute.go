@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
+	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
@@ -75,6 +76,7 @@ func Execute(args []string) Result {
 	newFS := flag.NewFlagSet("new", flag.ContinueOnError)
 	newFS.SetOutput(io.Discard)
 	newModule := newFS.String("module", "", "Go module path (default github.com/you/<app>)")
+	newPlatform := newFS.String("platform-path", "", "local devalbo-ilc checkout (bootstrap: until ilc-platform is published)")
 	newCmd := &ffcli.Command{
 		Name:       "new",
 		ShortUsage: "new [--module path] <app>",
@@ -86,11 +88,18 @@ func Execute(args []string) Result {
 			if len(args) > 1 {
 				return errors.New("new: expected one <app> name, flags before it (e.g. dlc new --module X myapp)")
 			}
-			root, module, files, err := scaffold(args[0], *newModule)
+			// Build a request and dispatch, exactly as a host front-end does
+			// (Decision 28). The shim gets no private path into the scaffolder,
+			// so anything true of `dlc new` here is true of it in the browser.
+			resp, err := callNew(&dlcv1.NewRequest{
+				Name:         args[0],
+				Module:       *newModule,
+				PlatformPath: *newPlatform,
+			})
 			if err != nil {
 				return err
 			}
-			out.Write(renderManifest(root, module, files))
+			out.Write(renderManifest(resp))
 			return nil
 		},
 	}
@@ -162,6 +171,22 @@ func Execute(args []string) Result {
 // The argv shim reaches platform verbs the same way any caller does — through
 // the registry, by method_id — rather than by importing their handlers. That
 // keeps one dispatch path, and it is the shape a scaffolded app's CLI will copy.
+
+func callNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
+	request, err := req.MarshalVT()
+	if err != nil {
+		return nil, err
+	}
+	r := platform.Execute(MethodNew, request)
+	if !r.Success {
+		return nil, errors.New(r.Err)
+	}
+	var resp dlcv1.NewResponse
+	if err := resp.UnmarshalVT(r.Output); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
 
 func platformExport(prefix string) (*ilcv1.ExportFsResponse, error) {
 	req, err := (&ilcv1.ExportFsRequest{Prefix: prefix}).MarshalVT()

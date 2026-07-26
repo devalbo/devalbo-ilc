@@ -35,6 +35,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"go/format"
 	"io"
 	"os"
 	"sort"
@@ -91,9 +92,14 @@ func run() error {
 		}
 		// Every service contributes to the lock, even from a dependency we are
 		// not generating — the lock is about the wire, not about codegen.
-		for _, svc := range services {
-			for _, m := range svc.methods {
-				locked[file.GetPackage()+"."+svc.name+"."+m.name] = m.id
+		// Except spikes: they are throwaway proofs kept as regression tests, not
+		// a wire contract anyone speaks, so locking them is pure noise in the
+		// diff that a real id change would have to compete with.
+		if !isSpikePackage(file.GetPackage()) {
+			for _, svc := range services {
+				for _, m := range svc.methods {
+					locked[file.GetPackage()+"."+svc.name+"."+m.name] = m.id
+				}
 			}
 		}
 		if !generate[file.GetName()] {
@@ -103,6 +109,13 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		// Generated code is code someone will read in a diff. gofmt it here so
+		// `gofmt -l .` stays clean and nobody has to reformat generated output.
+		formatted, err := format.Source([]byte(content))
+		if err != nil {
+			return fmt.Errorf("%s: generated invalid Go: %w", file.GetName(), err)
+		}
+		content = string(formatted)
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name:    proto.String(strings.TrimSuffix(file.GetName(), ".proto") + ".registry.pb.go"),
 			Content: proto.String(content),
@@ -182,6 +195,13 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 			})
 		}
 		if len(s.methods) > 0 {
+			// Emit in ascending id order, not declaration order. The id is the
+			// permanent thing — the rpc name is cosmetic — so sorting by it makes
+			// the band structure legible at a glance (1..99 core, 100.. filesystem,
+			// 10000+ app) and keeps the generated file stable when an rpc is moved
+			// around in the .proto. Applied once here so the constants, the handler
+			// parameters, and the map all read in the same order.
+			sort.Slice(s.methods, func(i, j int) bool { return s.methods[i].id < s.methods[j].id })
 			out = append(out, s)
 		}
 	}
@@ -280,6 +300,12 @@ func goPackageName(file *descriptorpb.FileDescriptorProto) (string, error) {
 		return opt[i+1:], nil
 	}
 	return opt, nil
+}
+
+// isSpikePackage reports whether a proto package belongs to a de-risking spike
+// (devalbo.*spike*.v1) rather than to shipped code.
+func isSpikePackage(pkg string) bool {
+	return strings.Contains(pkg, "spike")
 }
 
 func shortName(fullType string) string {

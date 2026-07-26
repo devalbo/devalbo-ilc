@@ -18,11 +18,10 @@ export type { CommandResult };
  * wire-safe. Mirrored by hand today; `protoc-gen-dlc-registry` will generate
  * them.
  *
- * The ranges are the platform/app boundary and are permanent — per-capability
- * blocks below 1000, the app above it (devalbo/ilc/v1/platform.proto):
- *   1–99      core lifecycle        600–999   reserved
- *   100–199   filesystem            1000+     the app (devalbo/dlc/v1)
- *   200–599   index / events / display / network
+ * Two permanent bands (devalbo/ilc/v1/platform.proto):
+ *   1–9999    ILC itself, subdivided by capability
+ *               1–99 core · 100–199 filesystem · 200–599 index/events/display/network
+ *   10000+    the app (devalbo/dlc/v1) — dlc claims no id below the line
  */
 export const PlatformMethod = {
   Version: 1,
@@ -32,8 +31,8 @@ export const PlatformMethod = {
 } as const;
 
 export const Method = {
-  New: 1000,
-  Echo: 1001,
+  New: 10000,
+  Echo: 10001,
 } as const;
 
 let worker: Worker | null = null;

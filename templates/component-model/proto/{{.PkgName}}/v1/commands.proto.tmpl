@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package {{.PkgName}}.v1;
+
+option go_package = "{{.Module}}/gen/go/{{.PkgName}}/v1;{{.PkgName}}v1";
+
+import "devalbo/options/v1/options.proto";
+
+// {{.AppName}}'s own commands.
+//
+// METHOD IDS — two permanent bands, and yours is the second:
+//
+//	    1 –  9999   ILC itself (version, export-fs, import-fs, reset-fs, and
+//	                every capability it adds later)
+//	10000 +         YOURS
+//
+// The id is permanent — it *is* the wire — and `proto/method-ids.lock` fails the
+// build if one ever changes. The rpc *name* is cosmetic, so renaming a command
+// is safe; renumbering it is not.
+service AppService {
+  rpc Greet(GreetRequest) returns (GreetResponse) {
+    option (devalbo.options.v1.method_id) = 10000;
+  }
+}
+
+message GreetRequest {
+  string name = 1 [
+    (devalbo.options.v1.help) = "who to greet",
+    (devalbo.options.v1.short) = "n"
+  ];
+}
+message GreetResponse {
+  string text = 1;
+}

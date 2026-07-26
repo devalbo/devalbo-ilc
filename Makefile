@@ -16,8 +16,18 @@ gen: ## generate WIT + proto bindings (requires devbox shell)
 	wit-bindgen-go generate --world async-engine --out gen/go ./wit
 	cd proto && buf lint && buf generate
 
+.PHONY: sync-template-proto
+sync-template-proto: ## copy the shared options.proto into the scaffold template
+	# A scaffolded app imports devalbo/options/v1/options.proto for `method_id`,
+	# but that file lives HERE — so it travels with the scaffold until it is
+	# published to a schema registry. Kept a pure byte-copy (provenance lives in
+	# the README beside it) so TestTemplateOptionsProtoInSync is exact equality
+	# and the eventual swap to a registry dep is a clean delete.
+	@cp proto/devalbo/options/v1/options.proto \
+		templates/component-model/proto/devalbo/options/v1/options.proto.tmpl
+
 .PHONY: build-host
-build-host: ## native dlc binary — engine linked in-process (Decision 26)
+build-host: sync-template-proto ## native dlc binary — engine linked in-process (Decision 26)
 	go build -o $(DLC) $(HOST_SRC)
 
 .PHONY: build-engine
@@ -31,6 +41,10 @@ component: build-engine ## wasip2-direct emits the component in one shot (no was
 .PHONY: verify-parity
 verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-for-byte (argv + method boundaries)
 	@./scripts/verify-parity.sh
+
+.PHONY: verify-scaffold
+verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs
+	@./scripts/verify-scaffold.sh
 
 .PHONY: parity-vectors
 parity-vectors: ## regenerate verify/parity/method-vectors.json from the typed fixtures

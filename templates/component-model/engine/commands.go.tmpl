@@ -1,0 +1,47 @@
+// Package engine holds {{.AppName}}'s business logic — ALL of it, and nothing
+// else. This package is the one portable artifact: it is linked natively by the
+// CLI host and compiles to wasm for the browser, so anything platform-specific
+// here would break a tier.
+//
+// Rules that keep it portable:
+//   - Never call a platform API directly; use the injected capabilities.
+//   - Stay TinyGo-safe and reflection-free — no encoding/json, no text/template.
+//   - Touch the filesystem only through platform.SafeJoin / platform.WriteTree,
+//     so path containment is inherited rather than re-implemented.
+package engine
+
+import (
+	"github.com/devalbo/devalbo-ilc/engine/platform"
+
+	{{.PkgName}}v1 "{{.Module}}/gen/go/{{.PkgName}}/v1"
+)
+
+const version = "{{.AppName}} 0.1.0"
+
+// Method ids are GENERATED from commands.proto — you never write one down.
+// Yours live at 1000+; 1–999 belong to the platform.
+const MethodGreet = {{.PkgName}}v1.MethodGreet
+
+// init wires the app up. This is the whole pattern:
+//
+//	inherit the platform's verbs → say who you are → register your own.
+//
+// The generated Handlers map carries the ids, so adding a command means adding
+// an rpc to commands.proto and a handler here — never an id in two places.
+func init() {
+	platform.RegisterAll()
+	platform.SetVersion(version)
+
+	platform.RegisterRaw({{.PkgName}}v1.AppServiceHandlers(handleGreet))
+}
+
+// handleGreet is a command: typed request in, typed response out. Failure is an
+// `error` — it rides the command-result envelope, which is why no response
+// message has an error field.
+func handleGreet(req *{{.PkgName}}v1.GreetRequest) (*{{.PkgName}}v1.GreetResponse, error) {
+	name := req.Name
+	if name == "" {
+		name = "world"
+	}
+	return &{{.PkgName}}v1.GreetResponse{Text: "hello, " + name + " — from {{.AppName}}"}, nil
+}

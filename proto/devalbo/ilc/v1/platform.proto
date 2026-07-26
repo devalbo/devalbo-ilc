@@ -13,24 +13,28 @@ import "devalbo/options/v1/options.proto";
 //
 // METHOD ID RANGES — permanent, and the reason this file exists separately:
 //
-//	    1 –   99   core lifecycle (version; later describe, supported-abis)
-//	  100 –  199   filesystem      (export/import/reset; later read/write/delete/list)
-//	  200 –  299   index (SQLite)
-//	  300 –  399   events
-//	  400 –  499   display
-//	  500 –  599   network
-//	  600 –  999   reserved for future capabilities
-//	 1000 +        THE APP's own commands
+//	     1 –  9999   ILC — the whole framework's surface, reserved entirely
+//	 10000 +         THE APP's own commands
+//
+// The ILC band is subdivided by capability, mirroring §6:
+//
+//	     1 –    99   core lifecycle (version; later describe, supported-abis)
+//	   100 –   199   filesystem     (export/import/reset; later read/write/delete/list)
+//	   200 –   299   index (SQLite)
+//	   300 –   399   events
+//	   400 –   499   display
+//	   500 –   599   network
+//	   600 –  9999   reserved for future ILC capabilities
 //
 // One capability per block, mirroring §6, so a new capability lands in its own
 // block instead of being wedged into the next free number — and an id's
 // magnitude tells you what it is when you are reading a wire trace.
 //
-// Dispatch is one flat `map[uint32]handler` across all of it, so the ranges are
-// what keep an app from colliding with a platform verb added later. The platform
-// range is deliberately far larger than it needs to be: `method_id` is a u32, so
-// reserving 999 values costs nothing, while WIDENING the range after apps exist
-// would break every app that had claimed an id inside it. `buf breaking` plus
+// Dispatch is one flat `map[uint32]handler` across both bands, so the boundary
+// is what keeps an app from colliding with a capability ILC adds later. 9999 is
+// deliberately far more than the framework will need: `method_id` is a u32, so
+// over-reserving costs nothing, while WIDENING the band after apps exist would
+// break every app id above it. `buf breaking` plus
 // protoc-gen-dlc-registry's id-lock guard the numbers once assigned.
 service PlatformService {
   // --- core lifecycle block (1–99) ---

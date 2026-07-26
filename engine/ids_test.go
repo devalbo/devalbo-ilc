@@ -9,7 +9,9 @@
 package engine_test
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"testing"
@@ -72,13 +74,63 @@ func TestMethodIDsMatchProto(t *testing.T) {
 func TestMethodIDsRespectRanges(t *testing.T) {
 	for name, id := range protoIDs(t, "../proto/devalbo/ilc/v1/platform.proto") {
 		if id == 0 || id >= platform.AppMethodBase {
-			t.Errorf("platform %s = %d, must be in 1–%d", name, id, platform.AppMethodBase-1)
+			t.Errorf("platform %s = %d, must be in 1–%d (ILC's band)",
+				name, id, platform.AppMethodBase-1)
 		}
 	}
 	for name, id := range protoIDs(t, "../proto/devalbo/dlc/v1/commands.proto") {
 		if id < platform.AppMethodBase {
-			t.Errorf("app %s = %d, must be >= %d (1–%d is reserved for the platform)",
-				name, id, platform.AppMethodBase, platform.AppMethodBase-1)
+			t.Errorf("app %s = %d, must be >= %d (1–9999 is reserved for ILC)",
+				name, id, platform.AppMethodBase)
 		}
+	}
+}
+
+// The scaffold carries its own copy of options.proto (a generated project has no
+// other way to resolve `method_id` until the platform is published). A copy that
+// drifts from the original is the classic vendoring failure — an app would
+// generate against options the platform does not actually read.
+func TestTemplateOptionsProtoInSync(t *testing.T) {
+	const rel = "proto/devalbo/options/v1/options.proto"
+	source, err := os.ReadFile("../" + rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vendored, err := os.ReadFile("../templates/component-model/" + rel + ".tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(source) != string(vendored) {
+		t.Error("templates/…/options.proto has drifted — run `make sync-template-proto`")
+	}
+}
+
+// Every file under templates/ must declare its intent with a suffix: `.tmpl`
+// (substitute tokens) or `.raw` (copy verbatim). The suffix does double duty —
+// it declares what the renderer does, and it keeps the Go tool out. Without it,
+// a template `.go` file is not valid Go, and a file named `go.mod` makes the
+// directory a nested module that embed refuses outright. Neither failure points
+// at the template that caused it, so the rule is enforced rather than remembered.
+func TestTemplateFilesAreSuffixed(t *testing.T) {
+	err := filepath.WalkDir("../templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		// templates.go is the embed declaration, not a template.
+		if filepath.Ext(path) == ".go" && filepath.Dir(path) == "../templates" {
+			return nil
+		}
+		if filepath.Base(path) == "README.md" && filepath.Dir(path) == "../templates" {
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".tmpl", ".raw":
+		default:
+			t.Errorf("%s: every template file must end in .tmpl (substituted) or .raw (verbatim) — see templates/README.md", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
