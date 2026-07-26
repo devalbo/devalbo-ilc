@@ -21,6 +21,9 @@ const ilc = ilcVite({
 
 export default defineConfig({
   root: ".",
-  server: { port: 5173, strictPort: true, ...ilc.server },
+  // Spread ilc FIRST, then server — otherwise ilc.server replaces the whole
+  // server block and drops strictPort. Without strictPort, a busy 5173 makes
+  // Vite silently pick another port while Playwright still waits on 5173.
   ...ilc,
+  server: { port: 5173, strictPort: true, ...ilc.server },
 });

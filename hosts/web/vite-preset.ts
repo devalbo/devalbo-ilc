@@ -70,6 +70,10 @@ export function ilcVite(opts: IlcViteOptions) {
     },
     optimizeDeps: { exclude: ["@bytecodealliance/preview2-shim"] },
     worker: { format: "es" as const },
-    server: { fs: { allow: [root, here] } },
+    // Allow the app root, this package, and the package's parent (the platform
+    // checkout when consumed via file:). Vite resolves realpaths of symlinked
+    // file: deps; omitting the parent fails on some CI layouts with
+    // "outside of Vite serving allow list".
+    server: { fs: { allow: [root, here, dirname(here)] } },
   };
 }

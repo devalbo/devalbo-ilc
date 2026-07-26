@@ -43,17 +43,17 @@ PKG="$(printf '%s' "$APP" | tr -c 'a-zA-Z0-9' '_')" # identifier-safe, as the re
 [ -f "$PROJ/go.mod" ] || fail "no go.mod in the scaffold"
 
 step "buf generate"
-( cd "$PROJ/proto" && buf lint && buf generate ) >/dev/null 2>&1 || fail "codegen in the scaffolded project"
+( cd "$PROJ/proto" && buf lint && buf generate ) || fail "codegen in the scaffolded project"
 
 # The id lock must be created by the first generate — a scaffolded app is
 # guarded from its first build, not from whenever someone remembers.
 [ -f "$PROJ/proto/method-ids.lock" ] || fail "no method-ids.lock after generate"
 
 step "go mod tidy"
-( cd "$PROJ" && go mod tidy ) >/dev/null 2>&1 || fail "go mod tidy"
+( cd "$PROJ" && go mod tidy ) || fail "go mod tidy"
 
 step "go test ./..."
-( cd "$PROJ" && go test ./... ) >/dev/null 2>&1 || fail "the scaffold's own tests"
+( cd "$PROJ" && go test ./... ) || fail "the scaffold's own tests"
 
 step "go build"
 ( cd "$PROJ" && go build -o "$APP" ./hosts/native ) || fail "building the scaffolded app"
@@ -78,7 +78,7 @@ case "$bundle" in '{'*'"type": "directory"'*) ;; *) fail "export-fs did not emit
 # The browser RUN of a scaffolded app is checked separately (test-b3): it needs
 # npm install + Playwright, which is minutes, not seconds.
 step "dlc build web"
-( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) >/dev/null 2>&1 \
+( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) \
 	|| fail "dlc build web on the scaffolded app"
 
 [ -f "$PROJ/build/engine.component.wasm" ] || fail "no wasm component was produced"

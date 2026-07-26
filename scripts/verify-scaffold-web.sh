@@ -35,7 +35,7 @@ echo "scaffold (web): dlc new -> build web -> run it in Chromium"
 go build -buildvcs=false -o "$WORK/dlc" ./hosts/native || fail "building dlc"
 
 step "dlc new $APP"
-( cd "$WORK" && "$WORK/dlc" new --module "example.com/$APP" --platform-path "$REPO" "$APP" >/dev/null ) \
+( cd "$WORK" && "$WORK/dlc" new --module "example.com/$APP" --platform-path "$REPO" "$APP" ) \
 	|| fail "dlc new"
 PROJ="$WORK/$APP"
 
@@ -43,22 +43,24 @@ PROJ="$WORK/$APP"
 # scaffold cannot resolve its own module graph until they exist. (`go mod tidy`
 # first fails with "unrecognized import path .../gen/go/...", which reads like a
 # network problem and is not.)
+#
+# Step output is kept visible — swallowing stderr made CI failures undiagnosable.
 step "make gen"
-( cd "$PROJ" && make gen ) >/dev/null 2>&1 || fail "make gen"
+( cd "$PROJ" && make gen ) || fail "make gen"
 
 step "go mod tidy"
-( cd "$PROJ" && go mod tidy ) >/dev/null 2>&1 || fail "go mod tidy"
+( cd "$PROJ" && go mod tidy ) || fail "go mod tidy"
 
 step "make build-web (dlc build web)"
-( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) >/dev/null 2>&1 || fail "make build-web"
+( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) || fail "make build-web"
 [ -f "$PROJ/frontend/src/wasm/engine.component.js" ] || fail "no transpiled component in the web root"
 
 step "npm install (fresh project — slow)"
-( cd "$PROJ/frontend" && npm install --silent --no-audit --no-fund ) >/dev/null 2>&1 \
+( cd "$PROJ/frontend" && npm install --no-audit --no-fund ) \
 	|| fail "npm install in the scaffolded frontend"
 
 step "playwright install chromium"
-( cd "$PROJ/frontend" && npx playwright install chromium ) >/dev/null 2>&1 \
+( cd "$PROJ/frontend" && npx playwright install chromium ) \
 	|| fail "playwright browser download"
 
 # The spec that runs here came from the template — it is the test the user gets.
