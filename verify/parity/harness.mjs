@@ -13,10 +13,26 @@
 // The method stream carries the error string too: on that boundary the failures
 // (envelope errors, unregistered ids, undecodable requests) are as much of the
 // contract as the successes, and TinyGo must word them exactly as native Go does.
+//
+// FILESYSTEM ROOT: commands like `new` write real files, so the guest is given a
+// preopen rooted at $PARITY_ROOT — the wasm-side equivalent of the native run's
+// cwd (§5.2: the host binds the root, the engine just uses `os`). Preopens must
+// be set BEFORE the component is instantiated, hence the dynamic import below.
 import { readFileSync } from "node:fs";
-import { execute, executeCli } from "./out/engine.component.js";
+import { _setPreopens } from "@bytecodealliance/preview2-shim/filesystem";
 
 const [, , mode, vectorFile] = process.argv;
+const root = process.env.PARITY_ROOT;
+if (!root) {
+  console.error("harness.mjs: PARITY_ROOT must point at an isolated directory");
+  process.exit(2);
+}
+// Replaces the shim's default "/" -> "/" mapping, so the guest cannot reach
+// outside the sandbox the runner gave it.
+_setPreopens({ "/": root });
+
+const { execute, executeCli } = await import("./out/engine.component.js");
+
 const vectors = JSON.parse(readFileSync(vectorFile, "utf8"));
 const b64 = (out) => Buffer.from(Uint8Array.from(out ?? [])).toString("base64");
 

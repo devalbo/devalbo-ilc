@@ -10,6 +10,7 @@ package engine
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
@@ -46,19 +47,42 @@ func handleEcho(req *dlcv1.EchoRequest) (*dlcv1.EchoResponse, error) {
 }
 
 func handleNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
-	if req.Name == "" {
-		return nil, errors.New("new: missing <app> name")
+	root, _, files, err := scaffold(req.Name, req.Module)
+	if err != nil {
+		return nil, err
 	}
-	module := req.Module
-	if module == "" {
-		module = defaultModule(req.Name)
-	}
-	files := scaffoldFiles(req.Name, module)
 	paths := make([]string, 0, len(files))
 	for _, f := range files {
 		paths = append(paths, f.path)
 	}
-	// Path is the scaffold root relative to the filesystem capability's root;
-	// writing the tree lands with that seam (§7.3), so this reports intent.
-	return &dlcv1.NewResponse{Path: req.Name, Files: paths}, nil
+	// Path is the scaffold root relative to the host-bound filesystem root (§5.2).
+	return &dlcv1.NewResponse{Path: root, Files: paths}, nil
+}
+
+// scaffold is the one implementation behind both `new` entry points (the proto
+// handler and the argv shim), so the two can never drift. It writes the tree to
+// the host-bound filesystem root and returns what it wrote.
+func scaffold(name, module string) (root, resolvedModule string, files []templateFile, err error) {
+	if name == "" {
+		return "", "", nil, errors.New("new: missing <app> name")
+	}
+	if module == "" {
+		module = defaultModule(name)
+	}
+	// `root` is what we report — always relative, so a native run and a wasm run
+	// describe the same tree. `dest` is where it actually lands, anchored at the
+	// tier's filesystem root (fsRoot: cwd natively, the WASI preopen in wasm).
+	root, err = safeJoin("", name)
+	if err != nil {
+		return "", "", nil, errors.New("new: " + err.Error())
+	}
+	dest := filepath.Join(fsRoot(), root)
+	if dirIsOccupied(dest) {
+		return "", "", nil, errors.New("new: " + name + " already exists and is not empty")
+	}
+	files = scaffoldFiles(name, module)
+	if err := writeTree(dest, files); err != nil {
+		return "", "", nil, errors.New("new: " + err.Error())
+	}
+	return root, module, files, nil
 }

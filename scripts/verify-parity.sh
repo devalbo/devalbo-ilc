@@ -37,19 +37,30 @@ tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
 	&& npx jco transpile ../../engine.component.wasm -o out >/dev/null ) \
 	|| { echo "transpile failed"; exit 1; }
 
-# 3. run the SAME vectors through each side
+# 3. run the SAME vectors through each side.
+#
+# Each stream gets its OWN empty directory as its filesystem root: commands like
+# `new` write real files, so a shared or reused root would make vector N depend
+# on whether vector N-1 already created the tree (and would litter the repo).
+# Native binds the root by chdir'ing; the component binds it with a WASI preopen
+# (§5.2 — the host binds the root, the engine just uses `os`).
+REPO="$PWD"
+fresh_root() { local d="$BIN/root-$1"; rm -rf "$d"; mkdir -p "$d"; printf '%s' "$d"; }
+
 native_argv() {
-	python3 - "$BIN/dlc" "$ARGV_VEC" <<'PY'
+	python3 - "$BIN/dlc" "$REPO/$ARGV_VEC" "$(fresh_root native-argv)" <<'PY'
 import base64, json, subprocess, sys
-dlc, vec = sys.argv[1], sys.argv[2]
+dlc, vec, root = sys.argv[1], sys.argv[2], sys.argv[3]
 for args in json.load(open(vec)):
-    p = subprocess.run([dlc, *args], capture_output=True)
+    p = subprocess.run([dlc, *args], capture_output=True, cwd=root)
     ok = "true" if p.returncode == 0 else "false"
     print(f"{ok}\t{base64.b64encode(p.stdout).decode()}")
 PY
 }
-native_method() { "$BIN/parity-runner" "$METHOD_VEC"; }
-component_stream() { ( cd verify/parity && node harness.mjs "$1" "../../$2" ); }
+native_method() { ( cd "$(fresh_root native-method)" && "$BIN/parity-runner" "$REPO/$METHOD_VEC" ); }
+component_stream() {
+	( cd verify/parity && PARITY_ROOT="$(fresh_root "component-$1")" node harness.mjs "$1" "$REPO/$2" )
+}
 count() { python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$1"; }
 
 echo "-------------------------------------------------"
@@ -68,11 +79,35 @@ compare() {
 	return 1
 }
 
+# compare_trees <label> <native root> <component root>
+#
+# The golden FS snapshot (§11): commands like `new` write real files, so the
+# trees the two engines produced must match byte-for-byte — filenames, nesting,
+# and contents. This is a strictly stronger claim than the response streams,
+# which only prove the two engines *said* the same thing. `diff -r` covers
+# missing files, extra files, and differing contents in one shot.
+compare_trees() {
+	local label="$1" native="$2" component="$3"
+	local n; n="$(find "$native" -type f | wc -l | tr -d ' ')"
+	echo "wasm-parity [$label]: $n files written (native tree vs component tree)"
+	if diff -r "$native" "$component" >/dev/null 2>&1; then
+		printf "  ${G}✓${Z} trees identical\n"
+		return 0
+	fi
+	printf "  ${R}✗${Z} TREE MISMATCH (< native  > component):\n"
+	diff -r "$native" "$component" 2>&1 | sed 's/^/  /'
+	return 1
+}
+
 compare "argv" "$(native_argv)" "$(component_stream argv "$ARGV_VEC")" "$(count "$ARGV_VEC")" || status=1
 compare "method" "$(native_method)" "$(component_stream method "$METHOD_VEC")" "$(count "$METHOD_VEC")" || status=1
 
+# The streams above ran first, so the roots now hold whatever each engine wrote.
+compare_trees "argv fs" "$BIN/root-native-argv" "$BIN/root-component-argv" || status=1
+compare_trees "method fs" "$BIN/root-native-method" "$BIN/root-component-method" || status=1
+
 if [ "$status" -eq 0 ]; then
-	printf "${G}✓${Z} Decision 26 parity holds on both boundaries\n"
+	printf "${G}✓${Z} Decision 26 parity holds — same results AND same filesystem, native and wasm\n"
 else
 	printf "${R}✗${Z} parity broken — see the diff above\n"
 fi

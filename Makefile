@@ -144,8 +144,16 @@ spike-options: gen ## go-lite custom options gate (Decision 29)
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)
 	@./scripts/test-b1.sh
 
+.PHONY: test-b2
+test-b2: ## Phase B2 engine boundary: unit + parity + parity self-test
+	@./scripts/test-b2.sh
+
+.PHONY: verify-parity-selftest
+verify-parity-selftest: ## prove verify-parity can FAIL (inject tinygo-only drift)
+	@./scripts/verify-parity-selftest.sh
+
 .PHONY: test
-test: test-b0 test-b1 ## run all regression suites from first principles (B0 then B1)
+test: test-b0 test-b1 test-b2 ## run all regression suites from first principles (B0, B1, B2)
 
 .PHONY: help
 help:

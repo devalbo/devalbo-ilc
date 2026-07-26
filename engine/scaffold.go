@@ -1,11 +1,12 @@
 package engine
 
-// Scaffold rendering — the engine-logic half of `dlc new`. Writing the tree to
-// disk lands with the filesystem capability seam (import-fs → write tree, §7.3);
-// everything here is pure, so it behaves identically native and in wasm.
+// Scaffold rendering — the template half of `dlc new`. Rendering is pure; the
+// writing lives in fs.go, and `scaffold` in commands.go is the one place that
+// composes the two (both entry points go through it).
 
 import (
 	"bytes"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -39,14 +40,14 @@ func scaffoldFiles(app, module string) []templateFile {
 	return files
 }
 
-// renderScaffold formats the human-readable manifest the argv shim prints.
-func renderScaffold(app, module string) []byte {
+// renderManifest formats the human-readable summary the argv shim prints after
+// the tree has been written.
+func renderManifest(root, module string, files []templateFile) []byte {
 	var b bytes.Buffer
-	b.WriteString("scaffold " + app + " (module " + module + ")\n")
-	for _, f := range scaffoldFiles(app, module) {
-		b.WriteString("  + " + f.path + " (" + strconv.Itoa(len(f.content)) + " bytes)\n")
+	b.WriteString("scaffold " + root + " (module " + module + ")\n")
+	for _, f := range files {
+		b.WriteString("  + " + filepath.Join(root, f.path) + " (" + strconv.Itoa(len(f.content)) + " bytes)\n")
 	}
-	b.WriteString("note: rendered in-memory; file writing lands with the filesystem capability\n")
 	return b.Bytes()
 }
 

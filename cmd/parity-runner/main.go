@@ -46,6 +46,11 @@ type marshaler interface{ MarshalVT() ([]byte, error) }
 // the envelope-carried errors, and the two ways dispatch can fail — an
 // unregistered id and a request that will not decode. TinyGo and native Go must
 // agree on all of them, error strings included.
+//
+// Every `new` fixture uses a DISTINCT app name. `new` writes a real tree and
+// refuses to overwrite one, so sharing a name would make each vector's result
+// depend on whether an earlier vector already created it — the vectors must be
+// order-independent within a run.
 var fixtures = []struct {
 	name    string
 	method  uint32
@@ -55,10 +60,10 @@ var fixtures = []struct {
 	{name: "version", method: engine.MethodVersion, request: &dlcv1.VersionRequest{}},
 	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
 	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},
-	{name: "new myapp", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "myapp"}},
-	{name: "new with module", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp"}},
+	{name: "new (defaults)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-default"}},
+	{name: "new with module", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-module", Module: "github.com/acme/app-module"}},
 	{name: "new with enums", method: engine.MethodNew, request: &dlcv1.NewRequest{
-		Name:    "myapp",
+		Name:    "app-enums",
 		Caps:    []string{"console", "filesystem"},
 		Tiers:   []string{"native", "web"},
 		Ui:      dlcv1.UiKind_UI_KIND_REACT,

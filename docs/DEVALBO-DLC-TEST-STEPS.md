@@ -21,8 +21,8 @@ _Created 2026-07-25._
 - **Each test states:** *Goal · Builds on · Steps · Pass · Automate as.* "Automate as" is the eventual
   home (a `go test`, a Node test, a shell check, or a `make` target) — until the code exists, run the
   steps manually.
-- **Target convention:** `make test-b0` and `make test-b1` run each phase's suite; `make test` runs all.
-  These land as the tests are automated (§ Harness).
+- **Target convention:** `make test-b0`, `make test-b1`, `make test-b2` run each phase's suite; `make test`
+  runs all. These land as the tests are automated (§ Harness).
 
 ---
 
@@ -327,7 +327,24 @@ golden) land as those commands are built.
   fixtures in `cmd/parity-runner`, never hand-authored (same discipline as the T-B1.2 goldens). Re-run it
   when the schema moves; a diff is a regression to explain or re-bless.
 - **Pass:** every vector matches on both boundaries (script prints `Decision 26 parity holds on both boundaries`).
-- **Automate as:** [`scripts/verify-parity.sh`](../scripts/verify-parity.sh) via `make verify-parity`; fold into a `make test-b2` when B2 grows.
+- **Automate as:** [`scripts/verify-parity.sh`](../scripts/verify-parity.sh) via `make verify-parity`, run by `make test-b2`.
+
+### T-B2.2 — The parity check can fail (falsification)
+- **Goal:** prove T-B2.1 is capable of failing. A regression check nobody has seen fail is indistinguishable
+  from one that is silently broken — it reports green forever and no one notices.
+- **Steps:** `make verify-parity-selftest` writes a `//go:build tinygo` file into `engine/` that changes
+  behavior in the **wasm build only**, runs T-B2.1, and asserts it reports `PARITY MISMATCH` on **both**
+  boundaries; then deletes the injection and confirms the tree is restored.
+- **Pass:** all six assertions green. Exit status alone is deliberately **not** sufficient — a compile error
+  also exits non-zero, so the self-test requires the actual mismatch report on each boundary. (Verified by
+  stubbing `verify-parity.sh` to `exit 0`: the self-test correctly goes red.)
+- **What parity does NOT cover:** correctness. Edit shared engine code and *both* builds change together
+  and still agree — `verify-parity.sh` rebuilds both sides every run, so it is not a golden-output test.
+  It defends exactly one failure class: the native and TinyGo builds of one source disagreeing (a build
+  tag, a TinyGo stdlib gap, map iteration order leaking into output). Correctness lives in
+  `go test ./engine/` and the golden FS snapshot.
+- **Automate as:** [`scripts/verify-parity-selftest.sh`](../scripts/verify-parity-selftest.sh) via
+  `make verify-parity-selftest`, run by `make test-b2`.
 
 ---
 
@@ -336,7 +353,9 @@ golden) land as those commands are built.
 - **`spikes/`** dir holds each B1 proof as a runnable artifact (kept, not thrown away).
 - **`make test-b0`** — shell assertions (presence, `go vet`, `buf lint/build`) + `make doctor`.
 - **`make test-b1`** — builds + runs each spike; browser spikes via headless Chromium (Playwright).
-- **`make test`** — runs both, from first principles, in order.
+- **`make test-b2`** — the engine command boundary in three layers: `go test ./engine/` (correctness) →
+  `verify-parity.sh` (native == wasm) → `verify-parity-selftest.sh` (the parity check can fail).
+- **`make test`** — runs all three, from first principles, in order.
 - **CI:** `devbox run test` on push. The **cross-tier byte-identity** and **golden FS snapshot** checks
   (from §11 of the plan) join at Phase B2/B3.
 - **Golden files:** protobuf bytes/JSON (T-B1.2) and, later, FS snapshots are checked in; a diff = a

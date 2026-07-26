@@ -95,12 +95,11 @@ func Execute(args []string) Result {
 			if len(args) > 1 {
 				return errors.New("new: expected one <app> name, flags before it (e.g. dlc new --module X myapp)")
 			}
-			app := args[0]
-			module := *newModule
-			if module == "" {
-				module = defaultModule(app)
+			root, module, files, err := scaffold(args[0], *newModule)
+			if err != nil {
+				return err
 			}
-			out.Write(renderScaffold(app, module))
+			out.Write(renderManifest(root, module, files))
 			return nil
 		},
 	}

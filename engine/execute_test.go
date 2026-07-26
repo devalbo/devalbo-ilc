@@ -3,6 +3,9 @@
 package engine_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devalbo/devalbo-ilc/engine"
@@ -44,7 +47,26 @@ func TestEcho(t *testing.T) {
 	}
 }
 
+// inTempRoot runs fn with the process cwd pointed at a fresh directory — the
+// native stand-in for the host-bound filesystem root (§5.2). The engine writes
+// relative to that root, so this is what a browser's OPFS preopen does natively.
+func inTempRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(prev) })
+	return root
+}
+
 func TestNew(t *testing.T) {
+	inTempRoot(t)
+
 	var resp dlcv1.NewResponse
 	out := call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})
 	if err := resp.UnmarshalVT(out); err != nil {
@@ -61,6 +83,71 @@ func TestNew(t *testing.T) {
 	for i, w := range want {
 		if resp.Files[i] != w {
 			t.Errorf("files[%d]: got %q, want %q", i, resp.Files[i], w)
+		}
+	}
+}
+
+// The files must actually land on disk with the substituted content — the whole
+// point of `new`, and what the golden FS snapshot will assert (§11).
+func TestNewWritesTree(t *testing.T) {
+	root := inTempRoot(t)
+
+	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp"})
+
+	want := map[string]string{
+		"go.mod":            "module github.com/acme/myapp\n\ngo 1.23.0\n",
+		"README.md":         "# myapp\n\nScaffolded by `dlc new`. Module `github.com/acme/myapp`.\n",
+		"engine/execute.go": "", // content checked for the token only
+	}
+	for name, wantContent := range want {
+		got, err := os.ReadFile(filepath.Join(root, "myapp", name))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if wantContent != "" && string(got) != wantContent {
+			t.Errorf("%s: got %q, want %q", name, got, wantContent)
+		}
+		if strings.Contains(string(got), "{{.") {
+			t.Errorf("%s: unsubstituted token in %q", name, got)
+		}
+	}
+}
+
+// Scaffolding must never silently overwrite existing work.
+func TestNewRefusesOccupiedDir(t *testing.T) {
+	root := inTempRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, "myapp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "myapp", "keep.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	in, err := (&dlcv1.NewRequest{Name: "myapp"}).MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := engine.ExecuteMethod(engine.MethodNew, in); r.Success {
+		t.Fatal("expected failure scaffolding over a non-empty dir")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "myapp", "keep.txt"))
+	if err != nil || string(got) != "mine" {
+		t.Errorf("pre-existing file was disturbed: %q, %v", got, err)
+	}
+}
+
+// A name that escapes the host-bound root must be refused — `import-fs` will
+// accept untrusted bundles through the same safeJoin door.
+func TestNewRejectsEscapingNames(t *testing.T) {
+	inTempRoot(t)
+	for _, name := range []string{"../evil", "/etc/evil", "a/../../evil"} {
+		in, err := (&dlcv1.NewRequest{Name: name}).MarshalVT()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := engine.ExecuteMethod(engine.MethodNew, in); r.Success {
+			t.Errorf("%q: expected refusal", name)
 		}
 	}
 }

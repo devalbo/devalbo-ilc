@@ -15,19 +15,19 @@
     "request": ""
   },
   {
-    "name": "new myapp",
+    "name": "new (defaults)",
     "method": 3,
-    "request": "0a056d79617070"
+    "request": "0a0b6170702d64656661756c74"
   },
   {
     "name": "new with module",
     "method": 3,
-    "request": "0a056d7961707012156769746875622e636f6d2f61636d652f6d79617070"
+    "request": "0a0a6170702d6d6f64756c65121a6769746875622e636f6d2f61636d652f6170702d6d6f64756c65"
   },
   {
     "name": "new with enums",
     "method": 3,
-    "request": "0a056d796170701a07636f6e736f6c651a0a66696c6573797374656d22066e6174697665220377656228013001"
+    "request": "0a096170702d656e756d731a07636f6e736f6c651a0a66696c6573797374656d22066e6174697665220377656228013001"
   },
   {
     "name": "new missing name (envelope error)",
