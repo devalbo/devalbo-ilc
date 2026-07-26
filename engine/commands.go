@@ -1,45 +1,42 @@
 package engine
 
-// dlc's in-engine commands (Decision 30): the verbs that touch nothing but the
-// filesystem / app-data, so the same handler runs in the terminal and in the
-// browser. Toolchain verbs (build, run, verify, doctor, gen) are host-side
-// orchestration and never appear here.
+// dlc's OWN commands (Decision 30) — App #1's app-specific verbs. The verbs
+// every app inherits (version, export-fs, import-fs, reset-fs) come from
+// engine/platform; dlc depends on them exactly the way a scaffolded app does,
+// which is what keeps the platform boundary honest.
 //
-// Each handler is `func(*FooRequest) (*FooResponse, error)` — typed messages,
-// no envelope. typedHandler wraps them into the byte-level registry shape.
+// Each handler is `func(*FooRequest) (*FooResponse, error)` — typed messages, no
+// envelope. platform.TypedHandler wraps them into the byte-level registry shape.
 
 import (
 	"errors"
 	"path/filepath"
 	"strings"
 
+	"github.com/devalbo/devalbo-ilc/engine/platform"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 )
 
-// Permanent method ids, mirroring the `(devalbo.options.v1.method_id)` options
-// on DlcService in proto/devalbo/dlc/v1/commands.proto. These constants and the
-// registration below are what protoc-gen-dlc-registry will generate (and lock)
-// once the plugin lands; until then they are kept in sync by hand, and
-// `buf breaking` guards the numbers themselves.
+const version = "dlc 0.0.0-bootstrap"
+
+// Permanent method ids for dlc's own commands, mirroring the
+// `(devalbo.options.v1.method_id)` options on DlcService. They live in the
+// **app range** (1000+); 1–999 belongs to the platform, in per-capability
+// blocks. These constants and the registration below are what
+// protoc-gen-dlc-registry will generate (and lock).
 const (
-	MethodVersion  uint32 = 1
-	MethodEcho     uint32 = 2
-	MethodNew      uint32 = 3
-	MethodExportFs uint32 = 4
-	MethodImportFs uint32 = 5
+	MethodNew  uint32 = platform.AppMethodBase + 0 // 1000
+	MethodEcho uint32 = platform.AppMethodBase + 1 // 1001
 )
 
+// This init is the shape every scaffolded app's init will have: inherit the
+// platform's verbs, tell it who you are, then register your own.
 func init() {
-	Register(MethodVersion, typedHandler(handleVersion))
-	Register(MethodEcho, typedHandler(handleEcho))
-	Register(MethodNew, typedHandler(handleNew))
-	// MethodExportFs / MethodImportFs land with the filesystem capability seam
-	// (§7.3); until then execute reports them as unregistered rather than
-	// pretending to succeed.
-}
+	platform.RegisterAll()
+	platform.SetVersion(version)
 
-func handleVersion(*dlcv1.VersionRequest) (*dlcv1.VersionResponse, error) {
-	return &dlcv1.VersionResponse{Version: version}, nil
+	platform.Register(MethodNew, platform.TypedHandler(handleNew))
+	platform.Register(MethodEcho, platform.TypedHandler(handleEcho))
 }
 
 func handleEcho(req *dlcv1.EchoRequest) (*dlcv1.EchoResponse, error) {
@@ -53,7 +50,7 @@ func handleNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
 	}
 	paths := make([]string, 0, len(files))
 	for _, f := range files {
-		paths = append(paths, f.path)
+		paths = append(paths, f.Path)
 	}
 	// Path is the scaffold root relative to the host-bound filesystem root (§5.2).
 	return &dlcv1.NewResponse{Path: root, Files: paths}, nil
@@ -62,7 +59,11 @@ func handleNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
 // scaffold is the one implementation behind both `new` entry points (the proto
 // handler and the argv shim), so the two can never drift. It writes the tree to
 // the host-bound filesystem root and returns what it wrote.
-func scaffold(name, module string) (root, resolvedModule string, files []templateFile, err error) {
+//
+// Note what it does NOT do: path containment, directory creation, and the root
+// seam all come from the platform. An app writes template rendering; the platform
+// writes the dangerous parts once.
+func scaffold(name, module string) (root, resolvedModule string, files []platform.File, err error) {
 	if name == "" {
 		return "", "", nil, errors.New("new: missing <app> name")
 	}
@@ -71,17 +72,17 @@ func scaffold(name, module string) (root, resolvedModule string, files []templat
 	}
 	// `root` is what we report — always relative, so a native run and a wasm run
 	// describe the same tree. `dest` is where it actually lands, anchored at the
-	// tier's filesystem root (fsRoot: cwd natively, the WASI preopen in wasm).
-	root, err = safeJoin("", name)
+	// tier's filesystem root.
+	root, err = platform.SafeJoin("", name)
 	if err != nil {
 		return "", "", nil, errors.New("new: " + err.Error())
 	}
-	dest := filepath.Join(fsRoot(), root)
-	if dirIsOccupied(dest) {
+	dest := filepath.Join(platform.Root(), root)
+	if platform.DirIsOccupied(dest) {
 		return "", "", nil, errors.New("new: " + name + " already exists and is not empty")
 	}
 	files = scaffoldFiles(name, module)
-	if err := writeTree(dest, files); err != nil {
+	if err := platform.WriteTree(dest, files); err != nil {
 		return "", "", nil, errors.New("new: " + err.Error())
 	}
 	return root, module, files, nil

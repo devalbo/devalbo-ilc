@@ -21,8 +21,7 @@ _Created 2026-07-25._
 - **Each test states:** *Goal · Builds on · Steps · Pass · Automate as.* "Automate as" is the eventual
   home (a `go test`, a Node test, a shell check, or a `make` target) — until the code exists, run the
   steps manually.
-- **Target convention:** `make test-b0`, `make test-b1`, `make test-b2` run each phase's suite; `make test`
-  runs all. These land as the tests are automated (§ Harness).
+- **Target convention:** `make test-b0` … `make test-b3` run each phase's suite; `make test` runs all. These land as the tests are automated (§ Harness).
 
 ---
 
@@ -348,14 +347,49 @@ golden) land as those commands are built.
 
 ---
 
+## Phase B3 — the web tier
+
+### T-B3.1 — `dlc new` in the browser, persisted in OPFS
+- **Goal:** the **same engine** the CLI links natively runs as a wasip2 component under jco, writes a real
+  scaffold tree into **OPFS** through a WASI preopen, and the tree **survives a page reload**. This is the
+  browser half of the bootstrap milestone.
+- **Builds on:** T-B1.1 (component round-trip), T-B1.3 (OPFS persistence), T-B2.1 (native↔wasm parity).
+- **Steps:** `make verify-web` — builds the component, transpiles it via jco into `frontend/src/wasm`,
+  copies the es-lite messages into the Vite root, then drives Chromium headless: fill the app name, click
+  **dlc new**, assert the file list, **reload**, assert the tree is still there, and read `go.mod` back
+  **directly through the OPFS API** (bypassing the engine) to prove the bytes are really on disk.
+- **Pass:** three tests green — scaffold+reload, `--module` honored, and refusal to scaffold over an
+  existing tree.
+- **Cross-tier claim:** the assertions mirror `engine/execute_test.go` — same file set, same refusal, and
+  the refusal's wording comes from `engine/`, not from any JavaScript. If the two disagree, the one-engine
+  promise is broken.
+- **Watch it:** `make verify-web-watch` (headed + slowMo).
+- **Automate as:** `frontend/test/web.spec.ts` via `make verify-web` / `make test-b3`.
+
+### T-B3.2 — BFT bundles cross tiers (§7.3)
+- **Goal:** an app's whole state is portable as **one text blob**. Export in the browser, import in the
+  terminal, get the same tree — because BFT is text and the engine reading it is the same engine.
+- **Builds on:** T-B3.1.
+- **Steps:** `make verify-bundle-xtier` — Playwright scaffolds `xtier` in Chromium and downloads the
+  bundle to disk; the native `dlc` imports that file; the same tree is scaffolded natively; `diff -r`.
+- **Pass:** the browser's bundle rebuilds the CLI's tree exactly.
+- **Also covered by `make verify-web`:** export → clear → re-import round-trip in the browser, and refusal
+  of a bundle whose paths escape the root (the refusal comes from `engine/`, so every tier inherits it).
+- **Automate as:** [`scripts/verify-bundle-xtier.sh`](../scripts/verify-bundle-xtier.sh) via
+  `make verify-bundle-xtier` / `make test-b3`.
+
+---
+
 ## Harness (how these become automated regression)
 
 - **`spikes/`** dir holds each B1 proof as a runnable artifact (kept, not thrown away).
 - **`make test-b0`** — shell assertions (presence, `go vet`, `buf lint/build`) + `make doctor`.
 - **`make test-b1`** — builds + runs each spike; browser spikes via headless Chromium (Playwright).
+- **`make test-b3`** — the web tier: `dlc new` in headless Chromium persisted in OPFS, plus BFT
+  bundle interchange between the browser and the terminal.
 - **`make test-b2`** — the engine command boundary in three layers: `go test ./engine/` (correctness) →
   `verify-parity.sh` (native == wasm) → `verify-parity-selftest.sh` (the parity check can fail).
-- **`make test`** — runs all three, from first principles, in order.
+- **`make test`** — runs all four (B0→B3), from first principles, in order.
 - **CI:** `devbox run test` on push. The **cross-tier byte-identity** and **golden FS snapshot** checks
   (from §11 of the plan) join at Phase B2/B3.
 - **Golden files:** protobuf bytes/JSON (T-B1.2) and, later, FS snapshots are checked in; a diff = a

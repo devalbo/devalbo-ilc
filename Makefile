@@ -37,12 +37,35 @@ parity-vectors: ## regenerate verify/parity/method-vectors.json from the typed f
 	go run ./cmd/parity-runner -gen verify/parity/method-vectors.json
 
 .PHONY: build-wasm
-build-wasm: component ## transpile the component for the web (jco)
+build-wasm: component gen-web ## transpile the component for the web (jco)
 	jco transpile $(COMPONENT) -o frontend/src/wasm
+
+.PHONY: gen-web
+gen-web: gen ## copy generated es-lite messages into the Vite root
+	# Bundlers resolve @aptre/* from the IMPORTING file's directory tree, and
+	# gen/ts sits outside frontend/ — so the generated messages are copied in
+	# rather than aliased (same workaround as spike-proto; Spike 2 finding).
+	rm -rf frontend/src/gen
+	mkdir -p frontend/src/gen
+	cp -R gen/ts/devalbo frontend/src/gen/
 
 .PHONY: dev-web
 dev-web: build-wasm ## run the web tier dev server (Vite)
-	cd frontend && npm install && npm run dev
+	# `npm run vite` (not `npm run dev`) — the dev script delegates back here, so
+	# calling it would recurse. This target is the one that owns the build order.
+	cd frontend && npm install --silent --no-audit --no-fund && npm run vite
+
+.PHONY: verify-web
+verify-web: build-wasm ## B3: dlc new in the browser, persisted in OPFS (headless)
+	cd frontend && npm install --silent --no-audit --no-fund
+	cd frontend && npx playwright install chromium
+	cd frontend && npx playwright test
+
+.PHONY: verify-web-watch
+verify-web-watch: build-wasm ## verify-web headed + slowMo, so you can watch it
+	cd frontend && npm install --silent --no-audit --no-fund
+	cd frontend && npx playwright install chromium
+	cd frontend && DLC_WEB_WATCH=1 npx playwright test --headed
 
 .PHONY: test-b0
 test-b0: ## Phase B0 repo-integrity checks (no toolchain needed)
@@ -152,8 +175,15 @@ test-b2: ## Phase B2 engine boundary: unit + parity + parity self-test
 verify-parity-selftest: ## prove verify-parity can FAIL (inject tinygo-only drift)
 	@./scripts/verify-parity-selftest.sh
 
+.PHONY: verify-bundle-xtier
+verify-bundle-xtier: build-wasm ## §7.3: a BFT bundle exported in the browser imports in the terminal
+	@./scripts/verify-bundle-xtier.sh
+
+.PHONY: test-b3
+test-b3: verify-web verify-bundle-xtier ## Phase B3 web tier: dlc new in the browser, OPFS persistence, BFT interchange
+
 .PHONY: test
-test: test-b0 test-b1 test-b2 ## run all regression suites from first principles (B0, B1, B2)
+test: test-b0 test-b1 test-b2 test-b3 ## run all regression suites from first principles (B0..B3)
 
 .PHONY: help
 help:

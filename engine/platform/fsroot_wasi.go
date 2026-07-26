@@ -1,8 +1,8 @@
 //go:build tinygo
 
-package engine
+package platform
 
-// The wasm filesystem root: the WASI preopen. There is no working directory
+// Root is the wasm filesystem root: the WASI preopen. There is no working directory
 // under WASI — TinyGo resolves a path by matching it against the preopens the
 // host installed, so a bare relative path finds no preopen and fails ENOENT.
 // Anchoring at "/" makes it match the host's root preopen: OPFS in the browser,
@@ -11,4 +11,4 @@ package engine
 //
 // This is the whole filesystem "capability seam" — the logic above it is
 // identical across tiers, which is the point.
-func fsRoot() string { return "/" }
+func Root() string { return "/" }

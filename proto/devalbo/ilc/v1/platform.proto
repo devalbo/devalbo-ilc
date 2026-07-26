@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package devalbo.ilc.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1;ilcv1";
+
+import "devalbo/options/v1/options.proto";
+
+// The ILC platform's own command surface — the verbs EVERY app inherits rather
+// than writes (§16.3). Apps depend on these; they never inline them, so a fix
+// here (path containment, bundle parsing) reaches every app on a version bump
+// instead of being frozen into whatever `dlc new` copied that day (§16.6).
+//
+// METHOD ID RANGES — permanent, and the reason this file exists separately:
+//
+//	    1 –   99   core lifecycle (version; later describe, supported-abis)
+//	  100 –  199   filesystem      (export/import/reset; later read/write/delete/list)
+//	  200 –  299   index (SQLite)
+//	  300 –  399   events
+//	  400 –  499   display
+//	  500 –  599   network
+//	  600 –  999   reserved for future capabilities
+//	 1000 +        THE APP's own commands
+//
+// One capability per block, mirroring §6, so a new capability lands in its own
+// block instead of being wedged into the next free number — and an id's
+// magnitude tells you what it is when you are reading a wire trace.
+//
+// Dispatch is one flat `map[uint32]handler` across all of it, so the ranges are
+// what keep an app from colliding with a platform verb added later. The platform
+// range is deliberately far larger than it needs to be: `method_id` is a u32, so
+// reserving 999 values costs nothing, while WIDENING the range after apps exist
+// would break every app that had claimed an id inside it. `buf breaking` plus
+// protoc-gen-dlc-registry's id-lock guard the numbers once assigned.
+service PlatformService {
+  // --- core lifecycle block (1–99) ---
+  // Every app wants a version command; the string itself is app-supplied.
+  rpc Version(VersionRequest) returns (VersionResponse) {
+    option (devalbo.options.v1.method_id) = 1;
+  }
+  // --- filesystem block (100–199) ---
+  rpc ExportFs(ExportFsRequest) returns (ExportFsResponse) {
+    option (devalbo.options.v1.method_id) = 100;
+  }
+  rpc ImportFs(ImportFsRequest) returns (ImportFsResponse) {
+    option (devalbo.options.v1.method_id) = 101;
+  }
+  rpc ResetFs(ResetFsRequest) returns (ResetFsResponse) {
+    option (devalbo.options.v1.method_id) = 102;
+  }
+}
+
+message VersionRequest {}
+message VersionResponse {
+  string version = 1;
+}
+
+// Filesystem export/import — the first-class platform primitive (§7.3). An
+// app's whole state is a filesystem tree, so one bundle moves it between the
+// terminal, the browser, and an embedded device.
+enum BundleFormat {
+  BUNDLE_FORMAT_UNSPECIFIED = 0; // treat as BFT (the default)
+  BUNDLE_FORMAT_BFT = 1;         // single human-readable JSON
+  BUNDLE_FORMAT_ZIP = 2;
+  BUNDLE_FORMAT_PROTO = 3;
+}
+
+// How an import treats what is already on disk. Explicit because the default
+// (merge) silently cannot express a deletion: dropping a file from a bundle and
+// re-importing leaves the old file in place.
+enum ImportMode {
+  IMPORT_MODE_UNSPECIFIED = 0; // treat as MERGE
+  IMPORT_MODE_MERGE = 1;       // write the bundle over whatever is there
+  IMPORT_MODE_REPLACE = 2;     // clear the destination first, then write
+}
+
+message ExportFsRequest {
+  string prefix = 1 [
+    (devalbo.options.v1.help) = "subtree to export (default: whole root)",
+    (devalbo.options.v1.short) = "p"
+  ];
+  BundleFormat format = 2 [
+    (devalbo.options.v1.help) = "bundle format",
+    (devalbo.options.v1.default) = "BUNDLE_FORMAT_BFT",
+    (devalbo.options.v1.short) = "f"
+  ];
+}
+message ExportFsResponse {
+  bytes bundle = 1;
+}
+
+message ImportFsRequest {
+  bytes bundle = 1 [
+    (devalbo.options.v1.help) = "bundle bytes to import",
+    (devalbo.options.v1.required) = true
+  ];
+  string prefix = 2 [
+    (devalbo.options.v1.help) = "destination subtree",
+    (devalbo.options.v1.short) = "p"
+  ];
+  ImportMode mode = 3 [
+    (devalbo.options.v1.help) = "merge into the destination, or replace it",
+    (devalbo.options.v1.default) = "IMPORT_MODE_MERGE"
+  ];
+}
+message ImportFsResponse {
+  repeated string files = 1;
+}
+
+// reset-fs — delete a subtree (§7.3). The counterpart that makes "replace"
+// expressible on its own, and the only way to re-scaffold over an existing tree.
+message ResetFsRequest {
+  string prefix = 1 [
+    (devalbo.options.v1.help) = "subtree to delete (default: whole root)",
+    (devalbo.options.v1.short) = "p"
+  ];
+}
+message ResetFsResponse {
+  repeated string removed = 1; // top-level entries that were deleted
+}

@@ -23,33 +23,24 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"strconv"
+	"os"
 	"strings"
 
+	"github.com/devalbo/devalbo-ilc/engine/platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
-const version = "dlc 0.0.0-bootstrap"
+// Result is the dispatch envelope. Aliased from the platform so hosts keep
+// importing one package (this one) while the type is owned where the registry
+// lives.
+type Result = platform.Result
 
-// Result is the host-neutral outcome of a command. The wasip2 entrypoint maps it
-// to the WIT command-result; the native host consumes it directly. An empty Err
-// means success-with-no-error (maps to option<string> = none).
-type Result struct {
-	Success bool
-	Output  []byte
-	Err     string
-}
-
-// ExecuteMethod dispatches one command: method_id → registry → the handler
-// decodes `request` as its own message type and returns response bytes in the
-// command-result envelope (Decision 28). An unknown id is an error result, not a
-// panic — hosts and engines version independently.
+// ExecuteMethod dispatches one command through the platform registry. Importing
+// this package is what registers dlc's commands (see commands.go's init), so a
+// host that links the app gets the app's verbs plus the platform's.
 func ExecuteMethod(method uint32, request []byte) Result {
-	h, ok := lookup(method)
-	if !ok {
-		return Result{Err: "unknown method_id " + strconv.FormatUint(uint64(method), 10)}
-	}
-	return h(request)
+	return platform.Execute(method, request)
 }
 
 // Execute is the bootstrap argv shim (see the package doc): it builds the
@@ -104,8 +95,59 @@ func Execute(args []string) Result {
 		},
 	}
 
+	// export-fs [--prefix p] — the bundle goes to stdout, so it pipes:
+	//   dlc export-fs --prefix myapp > myapp.bft.json
+	exportFS := flag.NewFlagSet("export-fs", flag.ContinueOnError)
+	exportFS.SetOutput(io.Discard)
+	exportPrefix := exportFS.String("prefix", "", "subtree to export (default: whole root)")
+	exportCmd := &ffcli.Command{
+		Name:       "export-fs",
+		ShortUsage: "export-fs [--prefix path]",
+		FlagSet:    exportFS,
+		Exec: func(_ context.Context, args []string) error {
+			if len(args) > 0 {
+				return errors.New("export-fs: unexpected argument " + args[0] + " (use --prefix)")
+			}
+			resp, err := platformExport(*exportPrefix)
+			if err != nil {
+				return err
+			}
+			out.Write(resp.Bundle)
+			return nil
+		},
+	}
+
+	// import-fs <bundle.json> [--prefix p] — the inverse; `dlc new` is the same
+	// operation with a template bundle (§7.3).
+	importFS := flag.NewFlagSet("import-fs", flag.ContinueOnError)
+	importFS.SetOutput(io.Discard)
+	importPrefix := importFS.String("prefix", "", "destination subtree")
+	importReplace := importFS.Bool("replace", false, "clear the destination first (default: merge)")
+	importCmd := &ffcli.Command{
+		Name:       "import-fs",
+		ShortUsage: "import-fs [--prefix path] <bundle.json>",
+		FlagSet:    importFS,
+		Exec: func(_ context.Context, args []string) error {
+			if len(args) != 1 {
+				return errors.New("import-fs: expected one <bundle.json>, flags before it")
+			}
+			bundle, err := os.ReadFile(args[0])
+			if err != nil {
+				return errors.New("import-fs: " + err.Error())
+			}
+			resp, err := platformImport(bundle, *importPrefix, *importReplace)
+			if err != nil {
+				return err
+			}
+			for _, f := range resp.Files {
+				out.WriteString("  + " + f + "\n")
+			}
+			return nil
+		},
+	}
+
 	root := &ffcli.Command{
-		Subcommands: []*ffcli.Command{versionCmd, echoCmd, newCmd},
+		Subcommands: []*ffcli.Command{versionCmd, echoCmd, newCmd, exportCmd, importCmd},
 		Exec: func(context.Context, []string) error {
 			return errors.New("no command (try: dlc version | dlc new <app>)")
 		},
@@ -115,4 +157,44 @@ func Execute(args []string) Result {
 		return Result{Err: err.Error()}
 	}
 	return Result{Success: true, Output: out.Bytes()}
+}
+
+// The argv shim reaches platform verbs the same way any caller does — through
+// the registry, by method_id — rather than by importing their handlers. That
+// keeps one dispatch path, and it is the shape a scaffolded app's CLI will copy.
+
+func platformExport(prefix string) (*ilcv1.ExportFsResponse, error) {
+	req, err := (&ilcv1.ExportFsRequest{Prefix: prefix}).MarshalVT()
+	if err != nil {
+		return nil, err
+	}
+	r := platform.Execute(platform.MethodExportFs, req)
+	if !r.Success {
+		return nil, errors.New(r.Err)
+	}
+	var resp ilcv1.ExportFsResponse
+	if err := resp.UnmarshalVT(r.Output); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func platformImport(bundle []byte, prefix string, replace bool) (*ilcv1.ImportFsResponse, error) {
+	mode := ilcv1.ImportMode_IMPORT_MODE_MERGE
+	if replace {
+		mode = ilcv1.ImportMode_IMPORT_MODE_REPLACE
+	}
+	req, err := (&ilcv1.ImportFsRequest{Bundle: bundle, Prefix: prefix, Mode: mode}).MarshalVT()
+	if err != nil {
+		return nil, err
+	}
+	r := platform.Execute(platform.MethodImportFs, req)
+	if !r.Success {
+		return nil, errors.New(r.Err)
+	}
+	var resp ilcv1.ImportFsResponse
+	if err := resp.UnmarshalVT(r.Output); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }

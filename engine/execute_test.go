@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/devalbo/devalbo-ilc/engine"
+	"github.com/devalbo/devalbo-ilc/engine/platform"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 )
 
 // call marshals a request, dispatches on method_id, and fails on an error result.
@@ -27,8 +29,8 @@ func call(t *testing.T, method uint32, req interface{ MarshalVT() ([]byte, error
 }
 
 func TestVersion(t *testing.T) {
-	var resp dlcv1.VersionResponse
-	if err := resp.UnmarshalVT(call(t, engine.MethodVersion, &dlcv1.VersionRequest{})); err != nil {
+	var resp ilcv1.VersionResponse
+	if err := resp.UnmarshalVT(call(t, platform.MethodVersion, &ilcv1.VersionRequest{})); err != nil {
 		t.Fatal(err)
 	}
 	if resp.Version == "" {
@@ -164,13 +166,94 @@ func TestNewRequiresName(t *testing.T) {
 	}
 }
 
-// Unknown and not-yet-registered ids must fail cleanly, never panic — hosts and
-// engines version independently. export-fs (4) is declared in commands.proto but
-// waits on the filesystem capability seam.
-func TestUnregisteredMethods(t *testing.T) {
-	for _, method := range []uint32{engine.MethodExportFs, 9999} {
-		if r := engine.ExecuteMethod(method, nil); r.Success {
-			t.Errorf("method %d: expected failure", method)
+// An unknown id must fail cleanly, never panic — hosts and engines version
+// independently, so a host may well ask for a command this engine lacks.
+func TestUnknownMethod(t *testing.T) {
+	if r := engine.ExecuteMethod(9999, nil); r.Success {
+		t.Error("expected failure for an unknown method_id")
+	}
+}
+
+// export-fs → import-fs across the command boundary: scaffold, bundle the tree,
+// import it somewhere else, and get the same files. This is the browser's
+// "download my project" and `dlc new` in one round-trip (§7.3).
+func TestExportImportRoundTrip(t *testing.T) {
+	inTempRoot(t)
+
+	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})
+
+	var exported ilcv1.ExportFsResponse
+	out := call(t, platform.MethodExportFs, &ilcv1.ExportFsRequest{Prefix: "myapp"})
+	if err := exported.UnmarshalVT(out); err != nil {
+		t.Fatal(err)
+	}
+	bundle := string(exported.Bundle)
+	if !strings.Contains(bundle, `"type": "directory"`) {
+		t.Fatalf("not a BFT bundle:\n%s", bundle)
+	}
+	// The scaffold is all text, so the bundle should be readable — that is the
+	// point of BFT over a zip.
+	if !strings.Contains(bundle, "module github.com/you/myapp") {
+		t.Errorf("expected readable go.mod content in the bundle:\n%s", bundle)
+	}
+
+	var imported ilcv1.ImportFsResponse
+	out = call(t, platform.MethodImportFs, &ilcv1.ImportFsRequest{
+		Bundle: exported.Bundle,
+		Prefix: "restored",
+	})
+	if err := imported.UnmarshalVT(out); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"README.md", "engine/execute.go", "go.mod"}
+	if len(imported.Files) != len(want) {
+		t.Fatalf("imported %v, want %v", imported.Files, want)
+	}
+	for i, w := range want {
+		if imported.Files[i] != w {
+			t.Errorf("files[%d]: got %q, want %q", i, imported.Files[i], w)
 		}
+	}
+
+	// Same bytes, not just the same names.
+	original, err := os.ReadFile(filepath.Join("myapp", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(filepath.Join("restored", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(restored) {
+		t.Errorf("go.mod differs after round-trip: %q vs %q", original, restored)
+	}
+}
+
+// zip and proto are declared in the schema but not implemented — say so rather
+// than quietly returning BFT under another name.
+func TestExportRejectsUnimplementedFormats(t *testing.T) {
+	inTempRoot(t)
+	in, err := (&ilcv1.ExportFsRequest{Format: ilcv1.BundleFormat_BUNDLE_FORMAT_ZIP}).MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := engine.ExecuteMethod(platform.MethodExportFs, in)
+	if r.Success {
+		t.Fatal("expected refusal for zip")
+	}
+	if !strings.Contains(r.Err, "only BFT") {
+		t.Errorf("unhelpful error: %q", r.Err)
+	}
+}
+
+// A prefix must not be able to reach outside the host-bound root.
+func TestExportImportRejectEscapingPrefix(t *testing.T) {
+	inTempRoot(t)
+	in, err := (&ilcv1.ExportFsRequest{Prefix: "../.."}).MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := engine.ExecuteMethod(platform.MethodExportFs, in); r.Success {
+		t.Error("expected refusal for an escaping prefix")
 	}
 }

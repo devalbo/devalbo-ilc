@@ -80,7 +80,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] `supported-abis() -> list<u8>` export (byte-ABI, Decision 31) — the guest advertises its boundaries + versions (`["bytes/1"]` today) so hosts pick the richest supported. Cheap hook now; enables a per-capability rich WIT boundary later without breaking the byte path.
 - [ ] **`protoc-gen-dlc-registry` plugin** — reads the `service` + `method_id` options **from the `buf build` image / CodeGeneratorRequest descriptors** (go-lite emits no service stubs, so generated Go is not a source — spike-measured) → emits the engine's `method_id → handler` registration (the reflection-free part) and **enforces `method_id` stability** against a committed lock. Host-side introspection uses the standard descriptor set (no custom host config to generate). Runs under `dlc gen` / `buf generate` (Decision 29).
 - [ ] `engine/caps_native.go` / `caps_wasip2.go` / `caps_wasip1.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26)
-- [ ] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`
+- [x] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`. **Landed** as method ids 4/5 in **BFT** (the real spec: recursive `directory`/`text`/`binary` nodes, alphabetical entries, base64 for binary). Hand-written encoder **and** parser in `engine/bft.go` — `encoding/json` is reflection-heavy and banned in the engine, so the parser accepts only the BFT subset (objects + strings). Bundles are byte-stable (sorted) and text-vs-binary is chosen by content, so a scaffold bundle is readable and diffable. Untrusted-input safe: every path goes through `safeJoin`. Non-regular files (symlinks) are **skipped** — BFT cannot represent them and reading one errors.
 - [ ] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.AppName}}`)
 
 ### Templates (its own area, §16.6 — bootstrap sequencing locked)
@@ -89,6 +89,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] `templates/fragments/` in-tree for overlay packs (`--caps` / `--tiers` / …) — ABI mode picks the skeleton, not a fragment
 - [ ] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates
 - [ ] **`templates/wamr/`** — Backlog until embedded verify exists; do not add an unverifiable stub in B2
+- [ ] **`reset-fs` / import modes in the UI** — `reset-fs` (id 12) and `ImportMode.REPLACE` exist and are tested; the browser uses REPLACE for imports but has no reset button and no per-file editing (§7.3 file verbs remain open — see the notes-app question in §13)
 
 ### Build pipeline
 - [x] Makefile: `build-engine` (TinyGo **`-target=wasip2`** → `engine.component.wasm`; wasip2-direct per Spike 1) — plus `verify-parity` (both boundaries) and `parity-vectors` (regenerate the method goldens)
@@ -113,23 +114,23 @@ not optional — it's what turns a throwaway spike into durable regression + des
 ## Phase B3 — `dlc` in the browser + React UI (web host)
 
 ### Web host (TypeScript — glue + UI only, no business logic)
-- [ ] `hosts/web/worker.ts` — jco instantiate the component + `preview2-shim`; `setPreopens({'/': opfsRoot})` (OPFS)
-- [ ] Inject capabilities: WASI stdio → `console.*`; filesystem → OPFS
-- [ ] Expose the engine to the main thread via **Comlink**
-- [ ] `hosts/web/api.ts` — environment-agnostic adapter (`execute(method, request)`; the UI builds the proto request — Decision 28)
+- [x] `hosts/web/worker.ts` — jco instantiate the component + `preview2-shim`; OPFS-backed WASI root. **Landed:** hydrate OPFS → FileData tree **before** instantiating (the guest snapshots its preopen; a later `_setFileData` is invisible), flush back after every `execute`, exposed over Comlink. `reboot()`/`reset()` drop the instance when OPFS changes out of band.
+- [x] Inject capabilities: filesystem → OPFS via `hosts/web/opfs.ts` (hydrate/flush/list/clear, lifted from Spike 3) + a **pinned** patched `preview2-shim` filesystem in `hosts/web/shim/` (stock breaks TinyGo writes on bigint offsets). **Still open:** WASI stdio → `console.*`.
+- [x] Expose the engine to the main thread via **Comlink**
+- [x] `hosts/web/api.ts` — environment-agnostic adapter (`execute(method, request)`; the UI builds the proto request — Decision 28). Sole door from UI to engine; carries the mirrored `Method` ids.
 
 ### React UI (the UI capability)
-- [ ] `frontend/` — React + Vite app that drives `dlc` via the adapter
-- [ ] A scaffolding UI: run `dlc new`, browse the generated tree in OPFS, show console output
-- [ ] **Download the result** — `export-fs` the OPFS tree → zip/BFT → browser download
+- [x] `frontend/` — React + Vite app that drives `dlc` via the adapter. `vite.config.ts` carries the three non-obvious bits: browser export conditions, the shim pin, and `worker.format: "es"` (the worker dynamic-imports). Bare specifiers imported from `hosts/web/` must be aliased — that dir sits outside the Vite root on purpose.
+- [x] A scaffolding UI: run `dlc new`, browse the generated tree in OPFS, show a log. The **form is this tier's parser** (Decision 28) — it encodes a `NewRequest` with es-lite and hands over bytes.
+- [x] **Download the result** — `export-fs` the OPFS tree → BFT → browser download, and the inverse (import a bundle into OPFS). The UI exports the **whole root** so download/import are exact inverses; `--prefix` subtrees stay available on the CLI.
 
 ### Async + build
 - [ ] jco JSPI path for any async custom caps (from Spike 5: Node ≥24 + `--experimental-wasm-jspi` + async import/export — no ILC shim)
-- [ ] Makefile: `build-wasm` (TinyGo → jco transpile → `frontend/src/wasm/`), `dev-web` (Vite)
+- [x] Makefile: `build-wasm` (TinyGo → jco transpile → `frontend/src/wasm/`) + `gen-web` (es-lite → `frontend/src/gen/`), `dev-web` (Vite), `verify-web` / `verify-web-watch` (Playwright)
 
 ### Verify (browser + cross-tier)
-- [ ] `dlc new` runs in the browser; project persists in OPFS across reload
-- [ ] React UI renders and drives the engine; DevTools shows no host-capability errors
+- [x] `dlc new` runs in the browser; project persists in OPFS across reload — `make verify-web` (T-B3.1), 3 tests: scaffold+reload, `--module`, refusal to overwrite. Reload assertion reads `go.mod` back **directly via the OPFS API**, bypassing the engine. Falsification-checked: disabling the flush turns 2 of 3 red.
+- [x] React UI renders and drives the engine (headless Chromium, no host-capability errors). **Still open:** a `make verify-web-watch` eyeball pass in a real browser window.
 - [ ] **Cross-tier identity (Decision 26):** web runs `engine.component.wasm`; the CLI runs the same engine codebase natively in-process. A shared golden vector produces byte-identical `command-result` across the native CLI run, the CI wasm-parity run (B2), and the browser — the wasm the browser loads is the same artifact the parity check exercises (sha256)
 
 **Exit:** `dlc` runs in terminal **and** browser (React UI) from one engine — the bootstrap milestone is met.
@@ -172,12 +173,12 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `ilc-platform` depends (§16.6 sequencing #1–#2)
 
 ### Filesystem export/import (§7.3)
-- [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive)
+- [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive) — declared in `BundleFormat` and **explicitly refused** today rather than silently returning BFT
 - [ ] BFT **deflate** variant (size)
-- [ ] Two-apps/versions **BFT interchange** workflow (diff/migrate/merge)
+- [ ] Two-apps/versions **BFT interchange** workflow (diff/migrate/merge). **Foundation landed:** `make verify-bundle-xtier` proves a bundle exported in the **browser** imports in the **terminal** and rebuilds a byte-identical tree; the diff/migrate/merge workflows build on that.
 
 ### Platform & tooling
-- [ ] Extract **`ilc-platform`** module once App #2 shares it (§16.4) — templates depend-on, never inline
+- [~] Extract **`ilc-platform`** module once App #2 shares it (§16.4) — templates depend-on, never inline. **Package boundary landed early** as `engine/platform/` (a later module extraction is a directory move): dispatch, fs root seam, `SafeJoin`/`WriteTree`, BFT, and the inherited verbs. Driven by the template work — a template built against the wrong boundary would teach it to every scaffolded app. **Method id ranges reserved: 1–99 platform, 100+ app** (`platform.AppMethodBase`); done before the id-lock exists, when renumbering is still free. dlc's own `New`/`Echo` moved to 100/101.
 - [ ] `dlc` command surface: **tier-scoped** `dlc build <tier>` / `dlc run <tier>` / `dlc verify [<tier>] [--parity]` (Decision 27 — tiers are composition recipes, not forks), plus `dlc proto`, `dlc host add <tier>` (§16.7). Supersedes the bootstrap `make build-host` / `build-engine` / `verify-parity` for scaffolded apps
 - [ ] **Project manifest** `dlc.toml` (§16.8) — capabilities/tiers/storage/ui/launch/platform pin; drives build/verify/host-add/launch
 - [ ] Regenerate / upgrade (re-apply templates against a newer `platform` pin)

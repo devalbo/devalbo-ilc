@@ -28,7 +28,9 @@ import (
 	"os"
 
 	"github.com/devalbo/devalbo-ilc/engine"
+	"github.com/devalbo/devalbo-ilc/engine/platform"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 )
 
 // vector is one golden call across the boundary. Request is hex-encoded proto
@@ -57,7 +59,7 @@ var fixtures = []struct {
 	request marshaler
 	raw     string // hex, for deliberately malformed bytes (wins over request)
 }{
-	{name: "version", method: engine.MethodVersion, request: &dlcv1.VersionRequest{}},
+	{name: "version", method: platform.MethodVersion, request: &ilcv1.VersionRequest{}},
 	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
 	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},
 	{name: "new (defaults)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-default"}},
@@ -70,8 +72,27 @@ var fixtures = []struct {
 		Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT,
 	}},
 	{name: "new missing name (envelope error)", method: engine.MethodNew, request: &dlcv1.NewRequest{}},
-	{name: "export-fs (registered in proto, not in engine)", method: engine.MethodExportFs, request: &dlcv1.ExportFsRequest{}},
-	{name: "unknown method_id", method: 9999, request: &dlcv1.VersionRequest{}},
+	// export-fs runs AFTER the `new` fixtures above, so it bundles a root that
+	// already has trees in it — the vector is only meaningful because the
+	// ordering is fixed and the root starts empty.
+	{name: "export-fs whole root (BFT)", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{}},
+	{name: "export-fs subtree", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{Prefix: "app-default"}},
+	{name: "export-fs unimplemented format", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{Format: ilcv1.BundleFormat_BUNDLE_FORMAT_ZIP}},
+	{name: "import-fs a hand-written bundle", method: platform.MethodImportFs, request: &ilcv1.ImportFsRequest{
+		Prefix: "imported",
+		Bundle: []byte("{\n  \"type\": \"directory\",\n  \"entries\": {\n    \"hello.txt\": {\n      \"type\": \"text\",\n      \"content\": \"hi \\u00e9\\n\"\n    },\n    \"data.bin\": {\n      \"type\": \"binary\",\n      \"encoding\": \"base64\",\n      \"content\": \"AAECAwQF\"\n    }\n  }\n}\n"),
+	}},
+	{name: "import-fs replace mode", method: platform.MethodImportFs, request: &ilcv1.ImportFsRequest{
+		Prefix: "imported",
+		Mode:   ilcv1.ImportMode_IMPORT_MODE_REPLACE,
+		Bundle: []byte("{\"type\":\"directory\",\"entries\":{\"only.txt\":{\"type\":\"text\",\"content\":\"replaced\\n\"}}}"),
+	}},
+	{name: "reset-fs a subtree", method: platform.MethodResetFs, request: &ilcv1.ResetFsRequest{Prefix: "app-enums"}},
+	{name: "reset-fs a missing subtree (idempotent)", method: platform.MethodResetFs, request: &ilcv1.ResetFsRequest{Prefix: "never-existed"}},
+	{name: "reset-fs escaping prefix", method: platform.MethodResetFs, request: &ilcv1.ResetFsRequest{Prefix: "../.."}},
+	{name: "import-fs empty bundle", method: platform.MethodImportFs, request: &ilcv1.ImportFsRequest{}},
+	{name: "import-fs malformed bundle", method: platform.MethodImportFs, request: &ilcv1.ImportFsRequest{Bundle: []byte("not json")}},
+	{name: "unknown method_id", method: 9999, request: &ilcv1.VersionRequest{}},
 	{name: "malformed request bytes", method: engine.MethodNew, raw: "ff"},
 }
 

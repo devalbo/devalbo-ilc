@@ -9,10 +9,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/devalbo/devalbo-ilc/engine/platform"
 )
 
-// templateFile is one file in the scaffold. A plain slice (not a map) keeps the
-// output order deterministic — important for the native↔wasm parity check.
+// templateFile is one template before substitution. A plain slice (not a map)
+// keeps the output order deterministic — important for the native↔wasm parity
+// check. Rendering turns these into platform.File values.
 type templateFile struct {
 	path    string
 	content string
@@ -32,21 +35,24 @@ func defaultModule(app string) string { return "github.com/you/" + app }
 
 // scaffoldFiles renders every template file for the app. Both the proto `new`
 // handler and the argv shim go through it, so the two paths cannot drift.
-func scaffoldFiles(app, module string) []templateFile {
-	files := make([]templateFile, 0, len(scaffoldTemplates))
+func scaffoldFiles(app, module string) []platform.File {
+	files := make([]platform.File, 0, len(scaffoldTemplates))
 	for _, t := range scaffoldTemplates {
-		files = append(files, templateFile{t.path, substitute(t.content, app, module)})
+		files = append(files, platform.File{
+			Path:    t.path,
+			Content: []byte(substitute(t.content, app, module)),
+		})
 	}
 	return files
 }
 
 // renderManifest formats the human-readable summary the argv shim prints after
 // the tree has been written.
-func renderManifest(root, module string, files []templateFile) []byte {
+func renderManifest(root, module string, files []platform.File) []byte {
 	var b bytes.Buffer
 	b.WriteString("scaffold " + root + " (module " + module + ")\n")
 	for _, f := range files {
-		b.WriteString("  + " + filepath.Join(root, f.path) + " (" + strconv.Itoa(len(f.content)) + " bytes)\n")
+		b.WriteString("  + " + filepath.Join(root, f.Path) + " (" + strconv.Itoa(len(f.Content)) + " bytes)\n")
 	}
 	return b.Bytes()
 }

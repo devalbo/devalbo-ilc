@@ -29,6 +29,14 @@ spikes/opfs/blob-report/
 # Node / frontend
 node_modules/
 frontend/dist/
+# Web-tier generated input: jco transpile output + the es-lite messages copied
+# in from gen/ (see `make build-wasm` / `make gen-web`). Both are derived.
+frontend/src/wasm/
+frontend/src/gen/
+frontend/test-results/
+frontend/*.bft.json
+frontend/playwright-report/
+frontend/blob-report/
 
 # Later tiers (embedded / desktop)
 hosts/embedded/.pio/
