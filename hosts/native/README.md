@@ -1,18 +1,22 @@
-# hosts/native/ — CLI host (standard Go + wasmtime)
+# hosts/native/ — CLI host (standard Go, engine linked in-process)
 
 The terminal entry point. Standard Go (full reflection OK **in the host only**).
 
-**Flow (Decision 22):** thin **argv forwarder** — `os.Args` → wasmtime instantiates the engine
-component → `execute-cli(args)` → `command-result` → exit code. **App command parsing lives in the
-engine** (Spike 4 / ffcli), not here. The host may keep its own process flags (e.g. engine path) if
-needed; those must not be the app command surface.
+**Flow (Decisions 26 + 28):** `os.Args` → **host-side parser** → `(method_id, request bytes)` → native
+Environment → `engine.ExecuteMethod` **in-process** → `command-result` → exit code. There is **no wasm
+runtime in the run path** (Decision 26), which sidesteps the `wasmtime-go` Component-Model gap; the wasm
+component remains the parity contract, checked in CI by `make verify-parity`.
+
+**App command parsing lives HERE, not in the engine** (Decision 28, superseding Decision 22). The host is
+free to use any parser — cobra / ffcli / `huh` menus — because it is off the TinyGo leash. What keeps the
+tiers aligned is the shared proto request schema, not a shared argv parser.
 
 Constructs the native Environment (stdio, FS root = cwd/config dir).
 
 **Rule:** `encoding/json` / reflection are fine here (standard Go); they must never leak into `engine/`.
 
-**B2 note:** `wasmtime-go` does not yet expose the Component Model API — the embed path may need the
-wasmtime C API / another host language until Go bindings land. Spike 5 confirmed a **blocking** custom
-WIT import works under Rust wasmtime with the same guest component.
+**Status:** `main.go` is still the transitional argv forwarder over `engine.Execute` (the `execute-cli`
+shim). The host-side parser + request construction is the open B2 task; keep the engine binding behind a
+small lift-ready package so a wasm-runtime host can be swapped in later without rewriting that path.
 
-See [plan](../../docs/DEVALBO-ILC-GO-PLAN.md) §5.4, §8, Decision 22.
+See [plan](../../docs/DEVALBO-ILC-GO-PLAN.md) §5.4, §8, Decisions 26 + 28.

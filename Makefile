@@ -29,8 +29,12 @@ build-engine: gen ## TinyGo -target=wasip2 -> engine.component.wasm (wasip2-dire
 component: build-engine ## wasip2-direct emits the component in one shot (no wasip1 adapter)
 
 .PHONY: verify-parity
-verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-for-byte
+verify-parity: ## Decision 26: native dlc and the wasip2 component agree byte-for-byte (argv + method boundaries)
 	@./scripts/verify-parity.sh
+
+.PHONY: parity-vectors
+parity-vectors: ## regenerate verify/parity/method-vectors.json from the typed fixtures
+	go run ./cmd/parity-runner -gen verify/parity/method-vectors.json
 
 .PHONY: build-wasm
 build-wasm: component ## transpile the component for the web (jco)

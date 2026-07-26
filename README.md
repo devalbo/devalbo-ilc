@@ -49,12 +49,14 @@ changes across tiers.
 
 ```
 engine/       the shared business logic (Go → wasm) — reflection-free / TinyGo-safe
+cmd/          thin entrypoints: the wasip2 component shim + dev tools (no business logic)
 hosts/        per-platform capability providers (native, web) — no business logic
 wit/          the ILC capability world (framework)
 proto/        message types (protobuf; go-lite + es-lite codegen)
 frontend/     React + Vite web UI
 templates/    what `dlc new` emits (go:embed'd) — depend-on, never inline
 spikes/       de-risking proofs, kept as regression tests
+verify/       cross-tier checks — golden vectors proving native == wasm
 scripts/      pre-toolchain helpers (preflight)
 docs/         plan, tasks, prerequisites, test steps
 ```

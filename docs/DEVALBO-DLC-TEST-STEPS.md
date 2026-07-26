@@ -306,17 +306,27 @@ Roll-up: **RICH=GREEN** (R2.\*; R1 = negative control) · **PORTABLE=GREEN**.
 The first B2 proof exists (the walking skeleton + wasm-parity); the rest (`dlc doctor`, the `dlc new`
 golden) land as those commands are built.
 
-### T-B2.1 — Native/wasm parity of `engine.Execute` (Decision 26)
-- **Goal:** the one `engine.Execute` produces identical results whether **linked natively in-process** (the
+### T-B2.1 — Native/wasm parity of the engine (Decision 26)
+- **Goal:** the one engine produces identical results whether **linked natively in-process** (the
   `dlc` binary) or compiled to the **wasip2 component** (web + the parity contract) — so native convenience
   never silently diverges from the wasm contract.
 - **Builds on:** T-B1.1 (component round-trip) + a native `go build`.
 - **Steps:**
   1. `make build-host` → a `dlc` binary (`go build ./hosts/native`); `./dlc version` prints `dlc 0.0.0-bootstrap`.
   2. `make verify-parity` — builds the wasip2 component (`./cmd/engine-component`), transpiles via jco, and
-     runs the golden argv vectors ([`verify/parity/vectors.json`](../verify/parity/vectors.json)) through
-     **both** the native `dlc` and the component, diffing `<success>\t<base64(output)>` per vector.
-- **Pass:** every vector matches (script prints `native == component`).
+     runs golden vectors through **both** sides on **both boundaries**:
+     - **argv** — [`verify/parity/argv-vectors.json`](../verify/parity/argv-vectors.json) through the native
+       `dlc` binary vs `execute-cli`, diffing `<success>\t<base64(output)>` per vector. This is the
+       bootstrap shim; it retires with host-side parsing.
+     - **method** — [`verify/parity/method-vectors.json`](../verify/parity/method-vectors.json) (method_id +
+       hex proto request) through `cmd/parity-runner` vs `execute(method, request)`, diffing
+       `<success>\t<base64(output)>\t<error>`. The **error string is part of the diff**: on this boundary
+       the failure modes (envelope errors, unregistered ids, undecodable requests) are as much of the
+       contract as the successes, and TinyGo must word them exactly as native Go does.
+- **Regenerate the method vectors:** `make parity-vectors` — the hex requests are derived from typed
+  fixtures in `cmd/parity-runner`, never hand-authored (same discipline as the T-B1.2 goldens). Re-run it
+  when the schema moves; a diff is a regression to explain or re-bless.
+- **Pass:** every vector matches on both boundaries (script prints `Decision 26 parity holds on both boundaries`).
 - **Automate as:** [`scripts/verify-parity.sh`](../scripts/verify-parity.sh) via `make verify-parity`; fold into a `make test-b2` when B2 grows.
 
 ---

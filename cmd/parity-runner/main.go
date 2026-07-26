@@ -1,0 +1,136 @@
+// parity-runner — the native half of the `execute(method, request)` parity check
+// (Decision 26/31). It is a DEV TOOL, not a shipped host: it streams golden
+// method-id + proto-request vectors through the in-process engine and prints one
+// `<success>\t<base64(output)>\t<error>` line each, exactly as verify/parity's
+// harness.mjs does for the wasip2 component. scripts/verify-parity.sh diffs the
+// two streams.
+//
+// The argv half of the check runs the real `dlc` binary. This runner exists
+// because hosts/native does not yet build requests host-side (that lands with
+// the host-side parser); when it does, the real binary replaces this.
+//
+// Two modes:
+//
+//	parity-runner -gen  <file>   rewrite the vectors file from the fixtures below
+//	parity-runner       <file>   run the vectors, one result line each
+//
+// The requests are hex in the JSON but are *derived* from typed messages here —
+// never hand-authored — so the goldens stay honest when the schema moves. This
+// mirrors the Spike 2 golden.hex discipline. encoding/json is fine in this
+// package: it is native-only and never crosses into the engine.
+package main
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/devalbo/devalbo-ilc/engine"
+	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+)
+
+// vector is one golden call across the boundary. Request is hex-encoded proto
+// bytes so both runners decode identically without needing an encoder.
+type vector struct {
+	Name    string `json:"name"`
+	Method  uint32 `json:"method"`
+	Request string `json:"request"`
+}
+
+// marshaler is what every go-lite request message satisfies.
+type marshaler interface{ MarshalVT() ([]byte, error) }
+
+// fixtures are the source of truth for the vectors file. Cover the happy path,
+// the envelope-carried errors, and the two ways dispatch can fail — an
+// unregistered id and a request that will not decode. TinyGo and native Go must
+// agree on all of them, error strings included.
+var fixtures = []struct {
+	name    string
+	method  uint32
+	request marshaler
+	raw     string // hex, for deliberately malformed bytes (wins over request)
+}{
+	{name: "version", method: engine.MethodVersion, request: &dlcv1.VersionRequest{}},
+	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
+	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},
+	{name: "new myapp", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "myapp"}},
+	{name: "new with module", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp"}},
+	{name: "new with enums", method: engine.MethodNew, request: &dlcv1.NewRequest{
+		Name:    "myapp",
+		Caps:    []string{"console", "filesystem"},
+		Tiers:   []string{"native", "web"},
+		Ui:      dlcv1.UiKind_UI_KIND_REACT,
+		Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT,
+	}},
+	{name: "new missing name (envelope error)", method: engine.MethodNew, request: &dlcv1.NewRequest{}},
+	{name: "export-fs (registered in proto, not in engine)", method: engine.MethodExportFs, request: &dlcv1.ExportFsRequest{}},
+	{name: "unknown method_id", method: 9999, request: &dlcv1.VersionRequest{}},
+	{name: "malformed request bytes", method: engine.MethodNew, raw: "ff"},
+}
+
+func main() {
+	args := os.Args[1:]
+	gen := len(args) > 0 && args[0] == "-gen"
+	if gen {
+		args = args[1:]
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: parity-runner [-gen] <vectors.json>")
+		os.Exit(2)
+	}
+	if gen {
+		if err := writeVectors(args[0]); err != nil {
+			fmt.Fprintln(os.Stderr, "parity-runner:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if err := runVectors(args[0]); err != nil {
+		fmt.Fprintln(os.Stderr, "parity-runner:", err)
+		os.Exit(1)
+	}
+}
+
+// writeVectors derives the hex requests from the typed fixtures.
+func writeVectors(path string) error {
+	vectors := make([]vector, 0, len(fixtures))
+	for _, f := range fixtures {
+		req := f.raw
+		if req == "" {
+			b, err := f.request.MarshalVT()
+			if err != nil {
+				return fmt.Errorf("%s: %w", f.name, err)
+			}
+			req = hex.EncodeToString(b)
+		}
+		vectors = append(vectors, vector{Name: f.name, Method: f.method, Request: req})
+	}
+	out, err := json.MarshalIndent(vectors, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+// runVectors streams results in the shared line format.
+func runVectors(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var vectors []vector
+	if err := json.Unmarshal(raw, &vectors); err != nil {
+		return err
+	}
+	for _, v := range vectors {
+		request, err := hex.DecodeString(v.Request)
+		if err != nil {
+			return fmt.Errorf("%s: bad request hex: %w", v.Name, err)
+		}
+		r := engine.ExecuteMethod(v.Method, request)
+		fmt.Printf("%t\t%s\t%s\n", r.Success, base64.StdEncoding.EncodeToString(r.Output), r.Err)
+	}
+	return nil
+}
