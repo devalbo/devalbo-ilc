@@ -1,14 +1,20 @@
 // Package engine holds dlc's portable business logic. It compiles two ways
 // (Decision 26): linked natively in-process by hosts/native, and as a wasip2
-// component via cmd/engine-component. Execute is the single entry point both
-// paths call — keep it free of WIT / cm types and build tags so it builds under
-// plain `go` and TinyGo alike.
+// component via cmd/engine-component. Keep it free of WIT / cm types and build
+// tags so it builds under plain `go` and TinyGo alike.
 //
-// Command parsing is the in-engine ff/v3/ffcli tree (Decision 22, Spike 4): one
-// parser across every tier; the host only forwards argv. Everything here stays
-// reflection-free — ffcli over stdlib flag, and `new` renders templates with
-// plain string substitution rather than text/template (reflection-heavy under
-// TinyGo — Spike 4's cobra wall).
+// There are two entry points, and only one of them is the destination:
+//
+//   - ExecuteMethod(method, request) — the real boundary (Decisions 28/29/31).
+//     A scalar method_id plus proto-encoded request bytes; dispatch is a
+//     registry map lookup. Command *parsing* is host-side, so the engine never
+//     sees argv.
+//   - Execute(args) — the bootstrap argv shim. The parity harness and the
+//     native host still ride on it; it retires once the hosts build requests.
+//
+// Everything here stays reflection-free: ffcli over stdlib flag in the shim, and
+// `new` renders templates with plain string substitution rather than
+// text/template (reflection-heavy under TinyGo — Spike 4's cobra wall).
 package engine
 
 import (
@@ -34,10 +40,22 @@ type Result struct {
 	Err     string
 }
 
-// Execute builds the in-engine ffcli command tree and dispatches. Capability
-// access (writing a scaffold to disk, console) lands behind the caps seam
-// (caps_native.go / caps_wasip2.go, §5.3) when a command needs it; for now `new`
-// renders in memory so Execute stays tag-free and parity-safe.
+// ExecuteMethod dispatches one command: method_id → registry → the handler
+// decodes `request` as its own message type and returns response bytes in the
+// command-result envelope (Decision 28). An unknown id is an error result, not a
+// panic — hosts and engines version independently.
+func ExecuteMethod(method uint32, request []byte) Result {
+	h, ok := lookup(method)
+	if !ok {
+		return Result{Err: "unknown method_id " + strconv.FormatUint(uint64(method), 10)}
+	}
+	return h(request)
+}
+
+// Execute is the bootstrap argv shim (see the package doc): it builds the
+// in-engine ffcli command tree and dispatches. Its commands call the same
+// scaffold/version logic the registry handlers do, so the two paths cannot
+// drift while both exist.
 func Execute(args []string) Result {
 	var out bytes.Buffer
 
@@ -80,7 +98,7 @@ func Execute(args []string) Result {
 			app := args[0]
 			module := *newModule
 			if module == "" {
-				module = "github.com/you/" + app
+				module = defaultModule(app)
 			}
 			out.Write(renderScaffold(app, module))
 			return nil
@@ -98,42 +116,4 @@ func Execute(args []string) Result {
 		return Result{Err: err.Error()}
 	}
 	return Result{Success: true, Output: out.Bytes()}
-}
-
-// templateFile is one file in the scaffold. A plain slice (not a map) keeps the
-// output order deterministic — important for the native↔wasm parity check.
-type templateFile struct {
-	path    string
-	content string
-}
-
-// scaffoldTemplates is the minimal self-shaped skeleton dlc emits. Tokens
-// {{.AppName}} / {{.Module}} are substituted by renderScaffold. This is the
-// bootstrap in-tree template; it grows into templates/component-model/ (§16.6).
-var scaffoldTemplates = []templateFile{
-	{"go.mod", "module {{.Module}}\n\ngo 1.23.0\n"},
-	{"engine/execute.go", "package engine\n\n// {{.AppName}} engine, scaffolded by dlc.\nfunc Execute(args []string) string {\n\treturn \"hello from {{.AppName}}\"\n}\n"},
-	{"README.md", "# {{.AppName}}\n\nScaffolded by `dlc new`. Module `{{.Module}}`.\n"},
-}
-
-// renderScaffold token-substitutes each template file and returns a manifest of
-// what would be written. Disk writing lands with the filesystem capability seam
-// (import-fs -> write tree, §7.3); rendering is the engine-logic half.
-func renderScaffold(app, module string) []byte {
-	var b bytes.Buffer
-	b.WriteString("scaffold " + app + " (module " + module + ")\n")
-	for _, t := range scaffoldTemplates {
-		content := substitute(t.content, app, module)
-		b.WriteString("  + " + t.path + " (" + strconv.Itoa(len(content)) + " bytes)\n")
-	}
-	b.WriteString("note: rendered in-memory; file writing lands with the filesystem capability\n")
-	return b.Bytes()
-}
-
-// substitute is the reflection-free stand-in for text/template — safe under
-// TinyGo, and enough for the two scaffold tokens.
-func substitute(s, app, module string) string {
-	s = strings.ReplaceAll(s, "{{.AppName}}", app)
-	s = strings.ReplaceAll(s, "{{.Module}}", module)
-	return s
 }

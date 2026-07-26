@@ -18,10 +18,22 @@ import (
 	"go.bytecodealliance.org/cm"
 )
 
-func init() { wit.Exports.ExecuteCli = executeCli }
+func init() {
+	wit.Exports.Execute = execute
+	wit.Exports.ExecuteCli = executeCli
+}
 
+// execute is the real boundary: method_id + proto-encoded request bytes.
+func execute(method uint32, request cm.List[uint8]) wit.CommandResult {
+	return toCommandResult(engine.ExecuteMethod(method, request.Slice()))
+}
+
+// executeCli is the bootstrap argv shim (retires with host-side parsing).
 func executeCli(args cm.List[string]) wit.CommandResult {
-	r := engine.Execute(args.Slice())
+	return toCommandResult(engine.Execute(args.Slice()))
+}
+
+func toCommandResult(r engine.Result) wit.CommandResult {
 	res := types.CommandResult{
 		Success: r.Success,
 		Output:  cm.ToList(r.Output),
