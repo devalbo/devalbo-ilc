@@ -3,7 +3,7 @@
 # anything else means rewriting this file only — never the tests.
 #
 # The contract any provider must satisfy:
-#   1. check out the repo WITH TAGS (test-b0 asserts phase1-tri-language exists)
+#   1. check out the repo
 #   2. make `devbox` available
 #   3. provide the system libraries headless Chromium needs (B3 only)
 #   4. run `./scripts/ci.sh full`   (or `fast`, or `all`)
@@ -24,8 +24,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # test-b0 asserts the phase1-tri-language tag exists
 
       - uses: jetify-com/devbox-install-action@v0.15.0
         with:

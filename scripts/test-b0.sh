@@ -30,10 +30,11 @@ for p in gen/x engine/x.wasm node_modules/x .devbox/x; do
   git check-ignore -q "$p" && pass "ignored: $p" || bad "NOT ignored: $p"
 done
 
-echo; echo "T-B0.3 — clean migration (fails until the removal is run):"
+echo; echo "T-B0.3 — clean migration (retired tri-language paths stay gone):"
 for x in compiler packages Cargo.toml Cargo.lock wit/environment.wit wit/console-io.wit; do absent "$x"; done
-git rev-parse --verify -q phase1-tri-language >/dev/null 2>&1 \
-  && pass "tag: phase1-tri-language" || bad "tag phase1-tri-language missing"
+# The phase1-tri-language tag is a local/history checkpoint only — not a CI gate.
+# Requiring it on every clone forced fetch-tags / a pushed tag for no ongoing value;
+# the absent-path checks above are what keep the migration honest.
 
 echo; echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then

@@ -53,6 +53,10 @@ step() { # <label> <command...>
 # ---- fast: no wasm toolchain, no browser --------------------------------
 step "repo structure (B0)"      run make test-b0
 step "formatting"               run ./scripts/check-fmt.sh
+# gen/ is gitignored — a fresh clone (CI) has no bindings until we produce them.
+# B3/B2's wasm targets call `make gen` themselves; vet + unit tests do not, so
+# without this step a clean tree fails with "no matching versions for …/gen/go/…".
+step "codegen"                  run make gen
 step "vet"                      run go vet ./engine/... ./cmd/... ./hosts/...
 step "unit tests"               run go test ./engine/...
 
