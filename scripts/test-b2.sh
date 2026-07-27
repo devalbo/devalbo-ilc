@@ -16,14 +16,21 @@ cd "$(dirname "$0")/.." || exit 2
 if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Z=$'\033[0m'; else G=''; R=''; Z=''; fi
 
 fail=0
+# Sanity check, not a tree audit. The self-test injects a `//go:build tinygo`
+# probe; a survivor silently changes what later checks compile, on one tier only.
+# One `ls` is enough to turn that into a named failure.
+tree_clean() { [ -z "$(ls engine/zz_*.go 2>/dev/null)" ]; }
+
 run_check() { # id  label  command...
 	local id="$1" label="$2"; shift 2
 	printf "%s — %s:\n" "$id" "$label"
+	tree_clean || { printf "  ${R}✗${Z} stray engine/zz_*.go BEFORE %s — delete it\n" "$id"; exit 2; }
 	if "$@"; then
 		printf "  ${G}✓${Z} pass\n\n"
 	else
 		printf "  ${R}✗${Z} FAILED\n\n"; fail=$((fail+1))
 	fi
+	tree_clean || { printf "  ${R}✗${Z} %s left engine/zz_*.go behind\n" "$id"; exit 2; }
 }
 
 run_check "T-B2.0" "engine command registry + dispatch (unit)" go test ./engine/

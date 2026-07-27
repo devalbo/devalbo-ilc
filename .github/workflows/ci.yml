@@ -41,3 +41,21 @@ jobs:
       # environment-evaluation cost per step.
       - name: ci
         run: devbox run -- ./scripts/ci.sh ${{ github.event_name == 'schedule' && 'all' || 'full' }}
+
+      # Playwright writes each failure's received text, trace, and screenshots to
+      # test-results/. Those are the only artifacts a run produces that the log
+      # does NOT contain, and they answer the question a browser timeout cannot:
+      # did the call throw, or never return? Retrieving them by hand is not
+      # possible after the runner is torn down.
+      #
+      # Environment plumbing, so it lives in the adapter — the suites stay
+      # provider-agnostic and know nothing about artifact upload.
+      - name: failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore

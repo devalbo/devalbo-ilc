@@ -120,6 +120,14 @@ func scaffoldFiles(vars map[string]string, tiers []string) ([]platform.File, err
 	if err != nil {
 		return nil, err
 	}
+	// An empty template FS means the BINARY was built without templates/, not
+	// that the user did anything wrong. Say so: the bare walk error is
+	// "open component-model: file does not exist", which reads like a missing
+	// file on the user's disk and sends you looking in the wrong place.
+	if len(files) == 0 {
+		return nil, errors.New("this build embeds no templates " +
+			"(go:embed all:component-model produced an empty FS) — rebuild dlc from a full checkout")
+	}
 	// WalkDir is lexical, so this is already deterministic — but the parity
 	// check compares written trees byte-for-byte across native and wasm, and
 	// relying on an implementation detail for that is not worth the risk.

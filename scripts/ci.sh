@@ -38,6 +38,15 @@ else
 	run() { devbox run -- "$@"; }
 fi
 
+# Environment sanity: a leftover parity-drift probe is `//go:build tinygo` and
+# empties the template FS, so native stays green while every wasm build ships
+# nothing. Cheap to check, confusing to debug.
+if ls engine/zz_*.go >/dev/null 2>&1; then
+	printf "${R}✗ stray engine/zz_*.go — a self-test died and left it; wasm builds will embed no templates${Z}\n"
+	ls engine/zz_*.go
+	exit 2
+fi
+
 failed=()
 LOGS="$(mktemp -d)"
 trap 'rm -rf "$LOGS"' EXIT
