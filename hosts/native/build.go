@@ -148,7 +148,16 @@ func buildWeb(component, webOut, entry string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "build web: jco transpile -> "+webOut)
-	if err := run("jco", "transpile", component, "-o", webOut); err != nil {
+	// MAP the custom capability imports to real modules. jco turns a WIT import
+	// into a bare specifier — `import { emit } from 'devalbo:ilc/events'` — which
+	// no bundler can resolve on its own; the browser reports only "Failed to fetch
+	// dynamically imported module", naming the component rather than the import.
+	//
+	// Mapped to the PACKAGE path, not a relative file: the sink belongs to the ILC
+	// web host, so apps get fixes on a version bump instead of carrying a copy.
+	// Every capability added later needs a line here.
+	if err := run("jco", "transpile", component, "-o", webOut,
+		"--map", "devalbo:ilc/events=@devalbo/ilc-web/events"); err != nil {
 		return fmt.Errorf("build web: jco: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "build web: ok")

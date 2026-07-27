@@ -65,7 +65,11 @@ parity-vectors: ## regenerate verify/parity/method-vectors.json from the typed f
 
 .PHONY: build-wasm
 build-wasm: component gen-web ## transpile the component for the web (jco)
-	jco transpile $(COMPONENT) -o frontend/src/wasm
+	# --map: jco emits `import { emit } from 'devalbo:ilc/events'` for the custom
+	# capability import, which no bundler resolves on its own. Same mapping that
+	# `dlc build web` applies for scaffolded apps.
+	jco transpile $(COMPONENT) -o frontend/src/wasm \
+		--map 'devalbo:ilc/events=@devalbo/ilc-web/events'
 
 .PHONY: gen-web
 gen-web: gen ## copy generated es-lite messages into the Vite root
@@ -113,6 +117,10 @@ spike-async: gen ## Spike 5 (T-B1.5): async probe Rich/CM + Portable/WAMR-shaped
 .PHONY: test-b1
 test-b1: ## Phase B1 spikes (requires the devbox toolchain)
 	@./scripts/test-b1.sh
+
+.PHONY: lint-scripts
+lint-scripts: ## shell patterns that only fail once output grows (each one reached CI once)
+	@./scripts/lint-scripts.sh
 
 .PHONY: verify-example-apps
 verify-example-apps: ## the example apps (which CONSUME the platform) still build and pass

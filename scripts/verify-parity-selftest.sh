@@ -46,7 +46,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-cat > "$PROBE" <<'EOF'
+# Two probes, because parity now compares THREE things (results, filesystem,
+# events) and each dimension has to be shown to fail on its own. A probe that
+# breaks all three at once proves only that *something* is watching.
+#
+#   templates  breaks results + filesystem, leaves events untouched
+#   events     breaks ONLY the event stream — results and trees stay identical,
+#              so if it is caught, the event comparison is what caught it
+write_probe() { # <name>
+	case "$1" in
+	templates)
+		cat > "$PROBE" <<'EOF'
 //go:build tinygo
 
 // TEMPORARY — written and deleted by scripts/verify-parity-selftest.sh.
@@ -54,8 +64,7 @@ cat > "$PROBE" <<'EOF'
 //
 // It empties the embedded template FS in the TinyGo/wasm build ONLY, so the wasm
 // engine scaffolds nothing while the native one scaffolds a full tree. That
-// diverges the command results AND the written filesystems, which is exactly
-// what the parity check exists to catch.
+// diverges the command results AND the written filesystems.
 //
 // Deliberately hooked to templates.FS rather than to any engine internal: it is
 // an exported var that scaffolding cannot work without, so this probe stays
@@ -71,33 +80,27 @@ import (
 
 func init() { templates.FS = embed.FS{} }
 EOF
+		;;
+	events)
+		cat > "$PROBE" <<'EOF'
+//go:build tinygo
 
-echo "-------------------------------------------------"
-echo "parity self-test: injecting a tinygo-only divergence, expecting FAILURE"
+// TEMPORARY — written and deleted by scripts/verify-parity-selftest.sh.
+//
+// Emits one extra event in the wasm build ONLY. Nothing else changes: the same
+// commands run, the same responses come back, the same files get written. The
+// ONLY observable difference is one line in the event stream — so if the parity
+// check goes red here, the event comparison is the thing that caught it, and the
+// third dimension is load-bearing rather than decorative.
+package engine
 
-# Output goes to a FILE, never into a shell variable.
-#
-# The parity report contains whole scaffold trees as base64, which is hundreds of
-# kilobytes. Holding that in a variable pushed every subsequent `exec` past
-# Linux's ARG_MAX, so `rm` and `grep` both died with "Argument list too long" —
-# and because the failing `rm` was the probe cleanup, the tinygo-only probe
-# SURVIVED and silently emptied the template FS for every later wasm build in the
-# same CI run. One unquotable variable took out two suites.
-OUT="$(mktemp)"
-trap 'cleanup; rm -f "$OUT"' EXIT INT TERM
+import "github.com/devalbo/devalbo-ilc/engine/platform"
 
-./scripts/verify-parity.sh >"$OUT" 2>&1
-status=$?
-
-# Restore the tree BEFORE judging the result, and stop dead if that failed —
-# leaving the probe behind would poison every wasm build that follows, in this
-# suite and in the next one. That is worse than any verdict this script reports.
-if ! cleanup; then
-	printf "${R}✗${Z} could not remove %s — it MUST go before anything else builds\n" "$PROBE"
-	printf "  it is //go:build tinygo and empties the template FS, so wasm builds ship no templates\n"
-	printf "  run:  rm %s\n" "$PROBE"
-	exit 2
-fi
+func init() { platform.Emit("probe.tinygo-only", []byte("drift")) }
+EOF
+		;;
+	esac
+}
 
 fail=0
 check() { # label  condition-already-evaluated
@@ -108,39 +111,77 @@ check() { # label  condition-already-evaluated
 	fi
 }
 
-# Exit status alone is not enough: a compile error also exits non-zero and would
-# let a broken check masquerade as a working one. Require the actual mismatch
-# report, on each boundary.
-# Grep a FILE, not a pipe and not a herestring. A pipe would make `grep -q`'s
-# early exit SIGPIPE the writer, which `set -o pipefail` turns into a failure on
-# a SUCCESSFUL match; a variable would blow ARG_MAX. Both bite only once the
-# output grows, which is how each of them reached CI unnoticed.
-[ "$status" -ne 0 ]; check "parity check exited non-zero" $?
-grep -q "PARITY MISMATCH" "$OUT"; check "reported a PARITY MISMATCH" $?
-grep -q "wasm-parity \[method\]" "$OUT"; check "ran the method boundary" $?
-# The probe empties the template FS, so the written tree must differ too — the
-# FS-snapshot half of the check has to be load-bearing, not decorative.
-grep -q "TREE MISMATCH" "$OUT"; check "the filesystem tree caught it" $?
-[ ! -e "$PROBE" ]; check "probe removed (tree restored)" $?
+OUT="$(mktemp)"
+trap 'cleanup; rm -f "$OUT"' EXIT INT TERM
+
+# run_scenario <probe name> <headline>
+#
+# Output goes to a FILE, never a shell variable: the report contains whole
+# scaffold trees as base64, and holding that in a variable pushed every later
+# exec past Linux ARG_MAX — `rm` and `grep` died, the failing `rm` was this
+# script's own probe cleanup, and the surviving probe emptied the template FS for
+# every wasm build that followed. One variable, two broken suites.
+#
+# Grep the FILE, not a pipe and not a herestring: a pipe makes `grep -q`'s early
+# exit SIGPIPE the writer, which `set -o pipefail` turns into a failure on a
+# SUCCESSFUL match. Both traps only bite once the output grows.
+run_scenario() {
+	local probe="$1" headline="$2"
+	echo "-------------------------------------------------"
+	echo "$headline"
+
+	write_probe "$probe"
+	./scripts/verify-parity.sh >"$OUT" 2>&1
+	local status=$?
+
+	# Restore the tree BEFORE judging, and stop dead if that failed — leaving the
+	# probe behind poisons every wasm build that follows, here and in later
+	# suites. That is worse than any verdict this script could report.
+	if ! cleanup; then
+		printf "${R}✗${Z} could not remove %s — it MUST go before anything else builds\n" "$PROBE"
+		printf "  run:  rm %s\n" "$PROBE"
+		exit 2
+	fi
+
+	# Exit status alone is not enough: a compile error also exits non-zero and
+	# would let a broken check masquerade as a working one. Require the actual
+	# mismatch report.
+	[ "$status" -ne 0 ]; check "parity check exited non-zero" $?
+	grep -q "PARITY MISMATCH" "$OUT"; check "reported a PARITY MISMATCH" $?
+	grep -q "wasm-parity \[method\]" "$OUT"; check "ran the method boundary" $?
+
+	case "$probe" in
+	templates)
+		# The probe empties the template FS, so the written tree must differ too —
+		# the FS-snapshot half has to be load-bearing, not decorative.
+		grep -q "TREE MISMATCH" "$OUT"; check "the filesystem tree caught it" $?
+		;;
+	events)
+		# The precise claim: the EVENT stream diverged and nothing else did. If a
+		# tree mismatch showed up here the probe is doing more than it says, and
+		# this scenario would no longer isolate the event dimension.
+		grep -q "EVENT" "$OUT"; check "the event stream caught it" $?
+		! grep -q "TREE MISMATCH" "$OUT"; check "and ONLY the event stream (trees identical)" $?
+		;;
+	esac
+	[ ! -e "$PROBE" ]; check "probe removed (tree restored)" $?
+
+	if [ "$fail" -ne 0 ]; then
+		echo "--- full parity output was: ---"
+		cat "$OUT"
+	fi
+}
+
+run_scenario templates "parity self-test 1/2: emptying the template FS in wasm — expecting results + tree to diverge"
+run_scenario events    "parity self-test 2/2: one extra event in wasm — expecting ONLY the event stream to diverge"
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then
-	printf "${G}✓${Z} the parity check detects native↔wasm drift — it can fail, so its green means something\n"
+	printf "${G}✓${Z} parity detects native↔wasm drift on all three dimensions — results, filesystem, events\n"
 	exit 0
 fi
 printf "${R}✗${Z} the parity check did NOT catch injected drift — verify-parity.sh is not protecting you\n"
-
-# A surviving probe poisons every later tinygo build in this run (it empties the
-# template FS), so it is not just this check failing — it is a booby trap. Say so
-# unmistakably and stop.
 if [ -e "$PROBE" ]; then
-	printf "${R}✗${Z} %s SURVIVED — delete it before building anything else; wasm builds will embed no templates\n" "$PROBE"
+	printf "${R}✗${Z} %s SURVIVED — delete it before building anything else\n" "$PROBE"
 fi
-
-# The WHOLE report, not a tail. This is the one place the parity output exists —
-# it is not streamed (an expected-to-fail run would be pure noise on a green
-# suite), so truncating it here means the evidence is simply gone. It is large;
-# that is the correct trade when a check that guards every other check is broken.
-echo "--- full parity output was: ---"
-cat "$OUT"
 exit 1

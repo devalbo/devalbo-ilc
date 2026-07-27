@@ -31,6 +31,11 @@ if (!root) {
 _setPreopens({ "/": root });
 
 const { execute } = await import("./out/engine.component.js");
+// The events import is satisfied by ./events-sink.mjs, mapped at transpile time
+// (see verify-parity.sh). Importing it HERE too gives the harness the recording
+// side of the same module instance — ES modules are singletons, so what the
+// component emits is what we drain.
+const { drainEvents } = await import("./events-sink.mjs");
 
 const vectors = JSON.parse(readFileSync(vectorFile, "utf8"));
 const b64 = (out) => Buffer.from(Uint8Array.from(out ?? [])).toString("base64");
@@ -39,6 +44,12 @@ if (mode === "method") {
   for (const { method, request } of vectors) {
     const r = execute(method, Uint8Array.from(Buffer.from(request, "hex")));
     process.stdout.write(`${r.success === true}\t${b64(r.output)}\t${r.error ?? ""}\n`);
+    // Events INTERLEAVED with results, not compared as a separate stream: this
+    // way a mismatch in which command emitted what is caught too, not just the
+    // set of events. Same one run, stronger comparison.
+    for (const e of drainEvents()) {
+      process.stdout.write(`EVENT\t${e.topic}\t${e.payload}\n`);
+    }
   }
 } else {
   console.error("usage: harness.mjs method <vectors.json>");

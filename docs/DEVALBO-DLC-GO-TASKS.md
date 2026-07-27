@@ -189,6 +189,12 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [ ] **ABI-mode toggle at setup** (§5.6, Decision 25): `dlc new` derives portable byte-ABI vs rich Component-Model ABI from the `tiers` (`--wamr` forces portable); scaffold the matching capability-boundary + build targets (wasip1 core seam only when portable); a lint/check that keeps a portable-mode engine core-wasm-safe
 - [→] `dlc doctor` — **promoted to Phase B2** (CLI host): the command form of preflight, assessing per-tier readiness — [`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md)
 
+- [x] **Shell lint** (`make lint-scripts`, in `ci.sh`) — the patterns that stay green locally and only fail once output grows: capturing a verify script's output into a variable (blows Linux `ARG_MAX`), piping into `grep -q` (SIGPIPE + `pipefail` reports a *successful* match as failure), and writing into the repo without a cleanup trap. Each rule is a bug that already reached CI; each is falsified in place before being trusted.
+- [ ] **Local Linux CI emulation via Docker** — `docker/Dockerfile.ci` (Debian + devbox + Chromium system deps) and `make ci-docker` running `./scripts/ci.sh full`, so `ci.sh` gains a third caller alongside the shell and the workflow.
+  **Why:** every cross-platform bug so far has been Linux-vs-macOS, not x86-vs-ARM — `ARG_MAX`/E2BIG, case-sensitive paths, GNU vs BSD coreutils, missing Chromium libs. One of them (a failed `rm` leaving a `//go:build tinygo` probe that emptied the template FS) took out two suites and was invisible on macOS.
+  **Default `linux/arm64`**, not amd64: it runs at native speed on Apple Silicon and catches that whole class; keep `--platform linux/amd64` behind a flag for arch-specific work, where qemu makes it slow.
+  **Honest limits:** multi-GB image (nix store + TinyGo + node + Chromium), slow first build, and Debian+devbox is not byte-identical to `ubuntu-latest` — it narrows divergence rather than eliminating it, and only helps if someone runs it. The shell lint above covers the same bug class unconditionally, which is why it came first.
+
 ### Dispatch / distributed (Phase 5 territory)
 - [ ] Protobuf **envelope** + multi-handler routing + explicit registration (§8, §10 Decision 10)
 - [ ] **File LWW sync** (§9); Automerge per-doc as the upgrade path

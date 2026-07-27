@@ -29,7 +29,8 @@ tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
 	-o engine.component.wasm ./cmd/engine-component || { echo "component build failed"; exit 1; }
 ( cd verify/parity \
 	&& npm install --silent --no-audit --no-fund \
-	&& npx jco transpile ../../engine.component.wasm -o out >/dev/null ) \
+	&& npx jco transpile ../../engine.component.wasm -o out \
+		--map 'devalbo:ilc/events=../events-sink.mjs' >/dev/null ) \
 	|| { echo "transpile failed"; exit 1; }
 
 # 3. run the SAME vectors through each side.

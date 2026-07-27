@@ -17,6 +17,24 @@ interface types {
   }
 }
 
+// The first CUSTOM capability — one the HOST must provide, unlike console and
+// filesystem which the WASI runtime supplies. Its shape is the template every
+// later capability inherits (display, index, network), so it is deliberately
+// the same shape as `execute`: flat scalars + bytes.
+//
+// Flat because a rich WIT record or variant would require the Component Model
+// and strand the embedded tier — WAMR speaks core wasm + WASI p1 only (§5.3).
+// `string + list<u8>` lowers to pointer/length pairs, which `//go:wasmimport`
+// can express, so this declaration can survive to embedded. (UNVERIFIED: there
+// is no embedded tier to run it yet.)
+//
+// NO RETURN VALUE, deliberately. Emitting is fire-and-forget: a return would
+// invite the host to answer, and waiting on a host answer means blocking the
+// browser worker inside a synchronous component call.
+interface events {
+  emit: func(topic: string, payload: list<u8>);
+}
+
 world engine {
   // The TinyGo wasip2 runtime imports the standard WASI interfaces (stdio,
   // clocks, filesystem, random, environment). The world must declare them so
@@ -25,6 +43,11 @@ world engine {
   include wasi:cli/imports@0.2.0;
 
   use types.{command-result};
+
+  // Capabilities arrive as IMPORTS (§5.1). This does not weaken Decision 31:
+  // that governs what the engine EXPORTS — one command entry point, no second
+  // way in. This is the other direction.
+  import events;
 
   // The custom PERSISTENT entry — callable many times on a live instance (reactive UI).
   // A one-shot CLI may additionally use standard wasi:cli/command `run` + get-arguments.

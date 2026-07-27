@@ -84,6 +84,10 @@ func handleImportFs(req *ilcv1.ImportFsRequest) (*ilcv1.ImportFsResponse, error)
 	if err != nil {
 		return nil, errors.New("import-fs: " + err.Error())
 	}
+	// ONE event per command, not one per file: a 1000-file bundle must not become
+	// 1000 messages. The subscriber re-reads what it cares about (§7.1) — the
+	// event says something moved, not what.
+	emitDataChanged(req.Prefix, MethodImportFs)
 	return &ilcv1.ImportFsResponse{Files: files}, nil
 }
 
@@ -98,6 +102,7 @@ func handleResetFs(req *ilcv1.ResetFsRequest) (*ilcv1.ResetFsResponse, error) {
 	if err != nil {
 		return nil, errors.New("reset-fs: " + err.Error())
 	}
+	emitDataChanged(req.Prefix, MethodResetFs)
 	return &ilcv1.ResetFsResponse{Removed: removed}, nil
 }
 
@@ -153,4 +158,21 @@ func ResolveUnder(prefix string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(Root(), clean), nil
+}
+
+// emitDataChanged announces that the filesystem moved under a prefix.
+//
+// Emitted AFTER the write succeeds, never before: a subscriber that re-reads on
+// this event must find the new state already there. Emitting first would race
+// every listener against the write it is describing.
+//
+// Marshal failure is swallowed rather than returned — the command has already
+// succeeded, and failing it now because a notification could not be encoded
+// would turn a cosmetic problem into data the caller thinks was not written.
+func emitDataChanged(prefix string, method uint32) {
+	payload, err := (&ilcv1.DataChangedEvent{Prefix: prefix, Method: method}).MarshalVT()
+	if err != nil {
+		return
+	}
+	Emit(TopicDataChanged, payload)
 }

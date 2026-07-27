@@ -150,13 +150,30 @@ func runVectors(path string) error {
 	if err := json.Unmarshal(raw, &vectors); err != nil {
 		return err
 	}
+	// Record events so they can be compared against the wasm side. On this tier
+	// the sink is a Go function; on wasm it is the `devalbo:ilc/events` import
+	// satisfied by verify/parity/events-sink.mjs. Both record identically —
+	// that symmetry IS the check.
+	var events []string
+	platform.SetEventSink(func(topic string, payload []byte) {
+		events = append(events, fmt.Sprintf("EVENT\t%s\t%s",
+			topic, base64.StdEncoding.EncodeToString(payload)))
+	})
+
 	for _, v := range vectors {
 		request, err := hex.DecodeString(v.Request)
 		if err != nil {
 			return fmt.Errorf("%s: bad request hex: %w", v.Name, err)
 		}
+		events = events[:0]
 		r := engine.ExecuteMethod(v.Method, request)
 		fmt.Printf("%t\t%s\t%s\n", r.Success, base64.StdEncoding.EncodeToString(r.Output), r.Err)
+		// INTERLEAVED with the result, not a separate stream: this attributes
+		// each event to the command that caused it, so a divergence in *which*
+		// command emitted is caught, not just the set of events.
+		for _, e := range events {
+			fmt.Println(e)
+		}
 	}
 	return nil
 }

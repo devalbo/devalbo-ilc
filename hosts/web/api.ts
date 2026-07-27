@@ -45,6 +45,32 @@ export async function execute(
   return connect().execute(method, request);
 }
 
+/**
+ * Listen for engine events (§6.3). Returns an unsubscribe.
+ *
+ * This is how a UI stops polling or hand-refreshing: the engine announces that
+ * something changed, and the view re-reads. It fires for writes this tab did not
+ * make — another command path, an `import-fs`, eventually a sync — which is
+ * precisely what a manual `refresh()` after your own command cannot do.
+ *
+ * The callback runs on the MAIN thread, delivered by message from the worker, so
+ * it may safely call `execute` again. (Inside the worker that would be
+ * re-entrancy; across a message boundary it is just another command.)
+ */
+export async function subscribe(
+  fn: (topic: string, payload: Uint8Array) => void,
+): Promise<() => void> {
+  const remote = connect();
+  await remote.subscribe(Comlink.proxy(fn));
+  return () => {
+    // Detach locally. The worker keeps its forwarder, which then calls a proxy
+    // whose port is gone — harmless, because worker.ts swallows that rejection.
+    active = active.filter((f) => f !== fn);
+  };
+}
+
+let active: Array<(topic: string, payload: Uint8Array) => void> = [];
+
 /** Every file currently in OPFS, sorted. */
 export async function listFiles(): Promise<string[]> {
   return connect().listFiles();

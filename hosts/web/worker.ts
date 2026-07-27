@@ -13,6 +13,12 @@
 // preopen descriptor at instantiation, so a later `_setFileData` is invisible to
 // a live engine — which is also why `reboot()` exists rather than a re-hydrate.
 import * as Comlink from "comlink";
+
+// The sink the transpiled component imports as `devalbo:ilc/events` (mapped by
+// `dlc build web`). Importing it here gives the worker the SAME module instance
+// the engine calls into — ES modules are singletons per graph — so installing a
+// forwarder here is what makes the engine's events reachable.
+import { setForwarder } from "./events";
 import {
   _getFileDataTree,
   _setFileData,
@@ -103,6 +109,25 @@ const api = {
    */
   async clearStorage(): Promise<void> {
     await clearOPFS();
+  },
+
+  /**
+   * Register the main thread's event listener.
+   *
+   * `fn` arrives as a `Comlink.proxy`, so calling it POSTS A MESSAGE rather than
+   * running main-thread code here. That is the whole safety story: the engine is
+   * on the stack when an event fires, and a listener that called back into
+   * `execute` would re-enter it mid-command. A message boundary makes that
+   * structurally impossible instead of merely forbidden.
+   */
+  async subscribe(fn: (topic: string, payload: Uint8Array) => void): Promise<void> {
+    setForwarder((topic, payload) => {
+      // NOT awaited, deliberately. This runs inside the engine's synchronous
+      // call; awaiting would suspend mid-command. The proxy call returns a
+      // Promise we ignore — with a catch, so a dead port cannot surface as an
+      // unhandled rejection that looks like an engine fault.
+      void Promise.resolve(fn(topic, payload)).catch(() => {});
+    });
   },
 };
 
