@@ -1,4 +1,4 @@
-// {{.AppName}} — native CLI host.
+// {{.ProjectName}} — native CLI host.
 //
 // The host's job is to turn native input into a REQUEST and hand it to the
 // engine; it holds no business logic. That is the ILC inversion: argv is one way
@@ -88,7 +88,7 @@ func call(method uint32, req interface{ MarshalVT() ([]byte, error) }, resp inte
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: {{.AppName}} <version|greet [name]|export-fs|import-fs <bundle>>")
+	fmt.Fprintln(os.Stderr, "usage: {{.ProjectName}} <version|greet [name]|export-fs|import-fs <bundle>>")
 }
 
 func must(err error) {
@@ -98,6 +98,6 @@ func must(err error) {
 }
 
 func fail(msg string) {
-	fmt.Fprintln(os.Stderr, "{{.AppName}}: "+msg)
+	fmt.Fprintln(os.Stderr, "{{.ProjectName}}: "+msg)
 	os.Exit(1)
 }

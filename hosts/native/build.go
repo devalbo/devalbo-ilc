@@ -17,54 +17,64 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/devalbo/devalbo-ilc/wit"
 )
 
 // runBuild implements `dlc build <tier> [--out dir] [--web-out dir] [--entry pkg]`.
+//
+// Precedence: built-in defaults, then dlc.toml's [tiers.<tier>], then flags.
+// The manifest is what the project DECLARES; flags are one-off overrides. Either
+// alone should work, and neither should require editing the other.
 func runBuild(args []string) error {
 	tier := "web"
-	// TWO destinations, because the two artifacts have different audiences:
-	//
-	//   component  build/engine.component.wasm   a build artifact — also the
-	//              parity and interchange artifact; nothing serves it
-	//   web assets frontend/src/wasm/            jco's loader FETCHES the core
-	//              .wasm at runtime, so these must sit inside the web root or a
-	//              dev server will not serve them
-	//
-	// One --out for both would force every project to copy files after building
-	// (which is what the template used to do). The defaults match the layout
-	// `dlc new` emits; a project manifest (§16.8) is where these become
-	// declared rather than assumed.
-	out := "build"
-	webOut := filepath.Join("frontend", "src", "wasm")
-	entry := "./cmd/engine-component"
-
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		tier, args = args[0], args[1:]
 	}
+
+	// Flags first into their own vars, so the manifest cannot clobber an
+	// explicit override.
+	var outFlag, webOutFlag string
+	entry := "./cmd/engine-component"
 	for i := 0; i < len(args); i++ {
+		if i+1 >= len(args) {
+			return fmt.Errorf("build: %s needs a value", args[i])
+		}
 		switch args[i] {
 		case "--out":
-			if i+1 >= len(args) {
-				return fmt.Errorf("build: --out needs a directory")
-			}
-			out, i = args[i+1], i+1
+			outFlag, i = args[i+1], i+1
 		case "--web-out":
-			if i+1 >= len(args) {
-				return fmt.Errorf("build: --web-out needs a directory")
-			}
-			webOut, i = args[i+1], i+1
+			webOutFlag, i = args[i+1], i+1
 		case "--entry":
-			if i+1 >= len(args) {
-				return fmt.Errorf("build: --entry needs a package path")
-			}
 			entry, i = args[i+1], i+1
 		default:
 			return fmt.Errorf("build: unknown flag %q", args[i])
 		}
 	}
+
+	// The manifest decides which tiers exist. Building one the project does not
+	// declare is worth naming — otherwise `dlc build web` in a CLI-only project
+	// silently produces a web tier nobody asked for.
+	m, err := loadManifest()
+	if err != nil {
+		return err
+	}
+	declared, ok := m.Tiers[tier]
+	if !ok {
+		return fmt.Errorf("build: this project declares no [tiers.%s] in %s (has: %s)",
+			tier, manifestFile, strings.Join(tierNames(m), ", "))
+	}
+
+	// TWO destinations, because the two artifacts have different audiences:
+	//
+	//   component  a build artifact — also the parity and interchange artifact;
+	//              nothing serves it
+	//   web assets jco's loader FETCHES the core .wasm at run time, so these must
+	//              sit inside the web root or a dev server will not serve them
+	out := firstNonEmpty(outFlag, declared.Component, "build/engine.component.wasm")
+	webOut := firstNonEmpty(webOutFlag, declared.Assets, filepath.Join("frontend", "src", "wasm"))
 
 	switch tier {
 	case "web":
@@ -75,11 +85,37 @@ func runBuild(args []string) error {
 		// message. Named here so the refusal is specific.
 		return fmt.Errorf("build: tier %q needs no dlc — use `go build ./hosts/native`", tier)
 	default:
-		return fmt.Errorf("build: unknown tier %q (have: web)", tier)
+		return fmt.Errorf("build: tier %q is declared but dlc cannot build it yet", tier)
 	}
 }
 
-func buildWeb(out, webOut, entry string) error {
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// tierNames lists what the project actually declares, for the error above.
+func tierNames(m *Manifest) []string {
+	names := make([]string, 0, len(m.Tiers))
+	for name := range m.Tiers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return []string{"(none)"}
+	}
+	return names
+}
+
+// buildWeb: `component` is the wasm FILE path (not a directory) — the manifest
+// names a file, so the flag and the default do too. Treating it as a directory
+// produced `build/engine.component.wasm/engine.component.wasm`, which is the
+// kind of thing that looks fine in a log until someone reads it.
+func buildWeb(component, webOut, entry string) error {
 	for _, tool := range []string{"tinygo", "jco"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			return fmt.Errorf("build web: %s not found on PATH — run inside `devbox shell`", tool)
@@ -92,10 +128,9 @@ func buildWeb(out, webOut, entry string) error {
 	}
 	defer os.RemoveAll(witDir)
 
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(component), 0o755); err != nil {
 		return err
 	}
-	component := filepath.Join(out, "engine.component.wasm")
 
 	fmt.Fprintln(os.Stderr, "build web: tinygo -> "+component)
 	if err := run("tinygo", "build", "-target=wasip2",

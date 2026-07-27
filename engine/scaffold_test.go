@@ -15,14 +15,14 @@ import (
 )
 
 func TestRenderSubstitutes(t *testing.T) {
-	vars := map[string]string{"AppName": "myapp", "Module": "example.com/x"}
+	vars := map[string]string{"ProjectName": "myapp", "Module": "example.com/x"}
 	cases := map[string]string{
-		"hello {{AppName}}":      "hello myapp",
-		"hello {{.AppName}}":     "hello myapp", // Go-template style
-		"hello {{ .AppName }}":   "hello myapp", // whitespace
-		"{{AppName}}/{{Module}}": "myapp/example.com/x",
-		"no tokens here":         "no tokens here",
-		"":                       "",
+		"hello {{ProjectName}}":      "hello myapp",
+		"hello {{.ProjectName}}":     "hello myapp", // Go-template style
+		"hello {{ .ProjectName }}":   "hello myapp", // whitespace
+		"{{ProjectName}}/{{Module}}": "myapp/example.com/x",
+		"no tokens here":             "no tokens here",
+		"":                           "",
 	}
 	for in, want := range cases {
 		got, err := render(in, vars)
@@ -37,12 +37,12 @@ func TestRenderSubstitutes(t *testing.T) {
 }
 
 func TestRenderRejectsUnknownTokens(t *testing.T) {
-	vars := map[string]string{"AppName": "myapp"}
+	vars := map[string]string{"ProjectName": "myapp"}
 	for _, in := range []string{
 		"{{Nope}}",
 		"{{.AppNam}}", // the typo this exists to catch
-		"{{ AppName2 }}",
-		"ok {{AppName}} then {{Bad}}",
+		"{{ ProjectName2 }}",
+		"ok {{ProjectName}} then {{Bad}}",
 	} {
 		if _, err := render(in, vars); err == nil {
 			t.Errorf("%q: expected an error", in)
@@ -55,7 +55,7 @@ func TestRenderRejectsUnknownTokens(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, want := range []string{"Nope", "AppName"} {
+	for _, want := range []string{"Nope", "ProjectName"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should mention %q", err, want)
 		}
@@ -63,7 +63,7 @@ func TestRenderRejectsUnknownTokens(t *testing.T) {
 }
 
 func TestRenderRejectsUnterminated(t *testing.T) {
-	if _, err := render("hello {{AppName", map[string]string{"AppName": "x"}); err == nil {
+	if _, err := render("hello {{ProjectName", map[string]string{"ProjectName": "x"}); err == nil {
 		t.Error("expected an error for an unterminated token")
 	}
 }
@@ -72,11 +72,12 @@ func TestRenderRejectsUnterminated(t *testing.T) {
 // Rendering the real tree is the check: an unknown token in any file — or in any
 // PATH — fails here, at `go test` time, rather than when a user runs `dlc new`.
 func TestShippedTemplatesRender(t *testing.T) {
-	files, err := scaffoldFiles(scaffoldVars(&dlcv1.NewRequest{
+	req := &dlcv1.NewRequest{
 		Name:         "probe",
 		Module:       "example.com/probe",
 		PlatformPath: "/tmp/platform",
-	}))
+	}
+	files, err := scaffoldFiles(scaffoldVars(req), requestedTiers(req))
 	if err != nil {
 		t.Fatalf("the shipped templates do not render: %v", err)
 	}
@@ -98,7 +99,11 @@ func TestShippedTemplatesRender(t *testing.T) {
 // the set, so adding a request field without wiring it (or vice versa) is loud.
 func TestScaffoldVarsDictionary(t *testing.T) {
 	vars := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Module: "example.com/my-app"})
-	want := []string{"AppName", "Module", "PkgName", "PlatformPath", "PlatformReplace"}
+	want := []string{
+		"ProjectName", "ProjectVersion", "Module", "PkgName",
+		"PlatformPath", "PlatformPathFrontend", "PlatformReplace",
+		"TierSections",
+	}
 	if len(vars) != len(want) {
 		t.Errorf("dictionary has %d keys, want %d: %v", len(vars), len(want), vars)
 	}
@@ -112,7 +117,23 @@ func TestScaffoldVarsDictionary(t *testing.T) {
 	if vars["PkgName"] != "my_app" {
 		t.Errorf("PkgName: got %q, want %q", vars["PkgName"], "my_app")
 	}
-	if vars["AppName"] != "my-app" {
-		t.Errorf("AppName should be untouched: %q", vars["AppName"])
+	if vars["ProjectName"] != "my-app" {
+		t.Errorf("ProjectName should be untouched: %q", vars["ProjectName"])
+	}
+	// The version a new project starts at. It lands in dlc.toml, and every other
+	// copy is generated from there — nothing else should hard-code it.
+	if vars["ProjectVersion"] != "0.1.0" {
+		t.Errorf("ProjectVersion: got %q, want 0.1.0", vars["ProjectVersion"])
+	}
+
+	// A relative platform path is re-based for files one directory down; an
+	// absolute one is already location-independent.
+	rel := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "../.."})
+	if rel["PlatformPathFrontend"] != "../../.." {
+		t.Errorf("relative re-base: got %q, want ../../..", rel["PlatformPathFrontend"])
+	}
+	abs := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "/opt/ilc"})
+	if abs["PlatformPathFrontend"] != "/opt/ilc" {
+		t.Errorf("absolute path should pass through: %q", abs["PlatformPathFrontend"])
 	}
 }

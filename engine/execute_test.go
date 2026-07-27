@@ -310,7 +310,8 @@ func TestNewRejectsUnsupportedOptions(t *testing.T) {
 	inTempRoot(t)
 
 	cases := map[string]*dlcv1.NewRequest{
-		"tier":    {Name: "a", Tiers: []string{"web"}},
+		// "web" is supported now; an unknown tier still is not.
+		"tier":    {Name: "a", Tiers: []string{"embedded"}},
 		"cap":     {Name: "b", Caps: []string{"sqlite"}},
 		"ui":      {Name: "c", Ui: dlcv1.UiKind_UI_KIND_REACT},
 		"storage": {Name: "d", Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT},
@@ -351,4 +352,52 @@ func mustMarshal(t *testing.T, m interface{ MarshalVT() ([]byte, error) }) []byt
 		t.Fatal(err)
 	}
 	return b
+}
+
+// --tiers now decides what gets emitted, which is the whole point of recording
+// it: a native-only project should not carry a frontend it never builds.
+func TestNewTiersSelectFiles(t *testing.T) {
+	inTempRoot(t)
+
+	var nativeOnly dlcv1.NewResponse
+	out := call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "cli", Tiers: []string{"native"}})
+	if err := nativeOnly.UnmarshalVT(out); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range nativeOnly.Files {
+		if strings.HasPrefix(f, "frontend/") || strings.HasPrefix(f, "cmd/engine-component/") {
+			t.Errorf("native-only scaffold emitted a web-tier file: %s", f)
+		}
+	}
+	// …and the manifest agrees with what was emitted.
+	manifest, err := os.ReadFile(filepath.Join("cli", "dlc.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifest), "[tiers.web]") {
+		t.Error("native-only project declares [tiers.web]")
+	}
+	if !strings.Contains(string(manifest), "[tiers.native]") {
+		t.Error("manifest is missing [tiers.native]")
+	}
+
+	// The default is BOTH tiers — the cross-tier story is the product.
+	var both dlcv1.NewResponse
+	out = call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "full"})
+	if err := both.UnmarshalVT(out); err != nil {
+		t.Fatal(err)
+	}
+	var hasFrontend bool
+	for _, f := range both.Files {
+		if strings.HasPrefix(f, "frontend/") {
+			hasFrontend = true
+		}
+	}
+	if !hasFrontend {
+		t.Error("default scaffold has no web tier")
+	}
+	if len(both.Files) <= len(nativeOnly.Files) {
+		t.Errorf("both-tier scaffold (%d files) should exceed native-only (%d)",
+			len(both.Files), len(nativeOnly.Files))
+	}
 }

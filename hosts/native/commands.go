@@ -95,7 +95,8 @@ func runNew(args []string) error {
 	fs := newFlagSet("new")
 	module := fs.String("module", "", "Go module path (default github.com/you/<app>)")
 	platformPath := fs.String("platform-path", "", "local devalbo-ilc checkout (bootstrap: until ilc-platform is published)")
-	rest, err := parse(fs, args, "new [--module path] [--platform-path dir] <app>")
+	tiers := fs.String("tiers", "", "comma-separated tiers to scaffold (default: native,web)")
+	rest, err := parse(fs, args, "new [--module path] [--platform-path dir] [--tiers a,b] <project>")
 	if err != nil {
 		return err
 	}
@@ -108,6 +109,7 @@ func runNew(args []string) error {
 		Name:         rest[0],
 		Module:       *module,
 		PlatformPath: *platformPath,
+		Tiers:        splitList(*tiers),
 	}, &resp); err != nil {
 		return err
 	}
@@ -198,6 +200,22 @@ func runResetFS(args []string) error {
 		fmt.Println("  - " + r)
 	}
 	return nil
+}
+
+// splitList parses a comma-separated flag value. Empty means "unset", which the
+// engine reads as "the default set" — not as "no tiers".
+func splitList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func newFlagSet(name string) *flag.FlagSet {

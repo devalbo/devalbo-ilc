@@ -1,0 +1,22 @@
+# notes — what this project IS.
+#
+# Read by `dlc` (host-side toolchain only). The ENGINE never reads it: anything
+# it needs from here becomes GENERATED code via `dlc gen`.
+
+[project]
+name    = "notes"
+version = "0.1.0"
+module  = "github.com/devalbo/devalbo-ilc/example-apps/notes"
+
+[platform]
+# BOOTSTRAP: relative, so this works on any machine and in CI.
+path = "../.."
+
+[tiers.native]
+capabilities = ["console", "filesystem"]
+
+[tiers.web]
+capabilities = ["console", "filesystem"]
+root      = "frontend"
+assets    = "frontend/src/wasm"
+component = "build/engine.component.wasm"

@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 #
-# test-b1.sh — Phase B1 spikes as standing regression. REQUIRES the devbox
-# toolchain (run inside `devbox shell` or via `devbox run make test-b1`).
-# Each spike is a minimal proof of one load-bearing assumption; see
-# docs/DEVALBO-DLC-TEST-STEPS.md Phase B1.
+# test-b1.sh — the surviving B1 spike.
+#
+# Spikes 1–4, oneof, and options were RETIRED once product code covered their
+# claims: the real engine builds to wasip2 and runs under jco (B2/B3), the real
+# proto pipeline exercises go-lite ↔ es-lite every build, B3 asserts OPFS
+# persistence with the real engine, and protoc-gen-dlc-registry walks the
+# descriptor/dynamicpb path on every generate. Spike 4's premise died outright
+# with Decision 22. Keeping them meant maintaining a WIT world for a boundary we
+# had deliberately deleted.
+#
+# Their FINDINGS live on in spikes/README.md — that is the part that mattered.
+#
+# Spike 5 stays because nothing else covers it: there is no async capability
+# yet, so this is the only evidence for how one would work.
 #
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
@@ -19,10 +29,6 @@ run_spike() { # id  label  make-target
   fi
 }
 
-run_spike "T-B1.1" "component round-trip (TinyGo → wasip2 → component → jco)" spike-component
-run_spike "T-B1.2" "protobuf-go-lite ↔ es-lite under wasip2" spike-proto
-run_spike "T-B1.3" "OPFS persistence (engine write survives reload)" spike-opfs
-run_spike "T-B1.4" "in-engine CLI interpreter bake-off" spike-cli
 run_spike "T-B1.5" "async ecosystem probe (Rich/CM JSPI + Portable)" spike-async
 
 echo "-------------------------------------------------"

@@ -4,11 +4,12 @@
 # path                                              bytes  sha256
 .gitignore                                            140  c13251c69f070f73
 AGENTS.md                                            3831  a11069ac130a8153
-Makefile                                             1219  2b02a95a4af77b30
+Makefile                                             1240  10d4dd1e5f9684fc
 README.md                                            1614  05d371a3bf5b52de
 cmd/engine-component/main.go                          806  f1d35c0e07fcd0ff
 devbox.json                                           473  fd10c51393a9e86e
-engine/commands.go                                   1822  155d83854500b3b4
+dlc.toml                                             1563  46b26ff233a15610
+engine/commands.go                                   2029  7127e5a530c8bbd9
 engine/commands_test.go                               779  081f9b781e4d7dd7
 frontend/index.html                                   606  35e4d1bbb1b51a3b
 frontend/package.json                                 643  65806f4e6a4ba710

@@ -42,15 +42,19 @@ PROJ="$WORK/$APP"
 PKG="$(printf '%s' "$APP" | tr -c 'a-zA-Z0-9' '_')" # identifier-safe, as the renderer derives it
 [ -f "$PROJ/go.mod" ] || fail "no go.mod in the scaffold"
 
-step "buf generate"
-( cd "$PROJ/proto" && buf lint && buf generate ) || fail "codegen in the scaffolded project"
+# `make gen`, not raw `buf generate`: the project's gen target ALSO runs
+# `dlc gen`, which emits the dlcconfig package the engine imports. Calling buf
+# directly skips it and the build fails on a missing import — this check must
+# exercise what a user actually runs, not a shortcut past it.
+step "make gen"
+( cd "$PROJ" && PATH="$WORK:$PATH" make gen ) >/dev/null 2>&1 || fail "codegen in the scaffolded project"
 
 # The id lock must be created by the first generate — a scaffolded app is
 # guarded from its first build, not from whenever someone remembers.
 [ -f "$PROJ/proto/method-ids.lock" ] || fail "no method-ids.lock after generate"
 
 step "go mod tidy"
-( cd "$PROJ" && go mod tidy ) || fail "go mod tidy"
+( cd "$PROJ" && go mod tidy ) >/dev/null 2>&1 || fail "go mod tidy"
 
 step "go test ./..."
 ( cd "$PROJ" && go test ./... ) || fail "the scaffold's own tests"

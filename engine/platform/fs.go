@@ -155,3 +155,70 @@ func DirIsOccupied(root string) bool {
 	}
 	return len(entries) > 0
 }
+
+// ---- per-file access for app handlers ------------------------------------
+//
+// Added because App #2 needed them: an app storing one file per record has to
+// read, list, and delete individual files, and WriteTree/ReadTree only speak in
+// whole trees. These live here rather than in each app for the same reason
+// SafeJoin does — every one of them is a path-containment decision, and an app
+// that reached for `os` directly would be one `../` away from writing outside
+// its root.
+//
+// All paths are relative to the host-bound root (Root()), so an app never
+// composes an absolute path and never learns which tier it is on.
+
+// ReadFile reads one file under the root.
+func ReadFile(path string) ([]byte, error) {
+	full, err := SafeJoin(Root(), path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(full)
+}
+
+// WriteFile writes one file under the root, creating parents.
+func WriteFile(path string, content []byte) error {
+	return WriteTree(Root(), []File{{Path: path, Content: content}})
+}
+
+// ListDir returns the entry names directly under path, sorted.
+//
+// Sorted because the caller's output crosses the parity check: unsorted
+// directory order differs between filesystems, and native-vs-wasm would diverge
+// on nothing more than that.
+func ListDir(path string) ([]string, error) {
+	full, err := SafeJoin(Root(), path)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(full)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sortStrings(names)
+	return names, nil
+}
+
+// RemoveFile deletes one file, reporting whether it was there.
+//
+// "Not there" is not an error — deleting is idempotent. Note what this does NOT
+// do: classify the error with os.IsNotExist, which does not match TinyGo's WASI
+// errno. It re-stats instead, which is portable.
+func RemoveFile(path string) (bool, error) {
+	full, err := SafeJoin(Root(), path)
+	if err != nil {
+		return false, err
+	}
+	if err := os.Remove(full); err != nil {
+		if _, statErr := os.Stat(full); statErr != nil {
+			return false, nil // gone already
+		}
+		return false, err
+	}
+	return true, nil
+}

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package devalbo.options.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/options/v1;optionsv1";
+
+import "google/protobuf/descriptor.proto";
+
+// Registry metadata (Decision 29). Host-side tooling (protoreflect / FileDescriptorSet)
+// reads these; the TinyGo engine never looks at them at runtime.
+//
+// Extension numbers: private/experimental range 50000–99999.
+
+extend google.protobuf.MethodOptions {
+  // Permanent dispatch key. Rename-safe; buf breaking + id-lock guard stability.
+  uint32 method_id = 50000;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Method ids this service will NOT hand out — the `method_id` analogue of
+  // proto's own `reserved` for field numbers, which does not cover custom-option
+  // values. Use it to hold an id for a command that is designed but unbuilt, so
+  // the number cannot be claimed twice in the meantime.
+  //
+  // protoc-gen-dlc-registry enforces it: an rpc whose method_id is reserved
+  // fails the build, and reservations are recorded in the committed id lock, so
+  // "reserved" is a checkable declaration rather than a comment nobody reads.
+  repeated uint32 reserved_method_id = 50005;
+}
+
+extend google.protobuf.FieldOptions {
+  string help = 50001;
+  bool required = 50002;
+  // String form of the default (host parses to the field's wire type).
+  string default = 50003;
+  // Single-letter short flag (e.g. "n" → -n).
+  string short = 50004;
+}

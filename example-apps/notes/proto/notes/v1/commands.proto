@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package notes.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/notes/v1;notesv1";
+
+import "devalbo/options/v1/options.proto";
+
+// notes — App #2, the breadth pilot (§13).
+//
+// Its job is to be the first app that USES the ILC platform rather than being
+// it, and to drive out the capabilities the platform still lacks: a real index,
+// events, and split storage. Where it needs something that does not exist yet,
+// that absence is the finding.
+//
+// METHOD IDS — 1–9999 is ILC's; yours start at 10000.
+service NotesService {
+  rpc CreateRecord(CreateRecordRequest) returns (CreateRecordResponse) {
+    option (devalbo.options.v1.method_id) = 10000;
+  }
+  rpc ListRecords(ListRecordsRequest) returns (ListRecordsResponse) {
+    option (devalbo.options.v1.method_id) = 10001;
+  }
+  rpc OpenRecord(OpenRecordRequest) returns (OpenRecordResponse) {
+    option (devalbo.options.v1.method_id) = 10002;
+  }
+  rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse) {
+    option (devalbo.options.v1.method_id) = 10003;
+  }
+
+  // Held for the capabilities this app is meant to drive out (§13) — declared,
+  // not commented, so the numbers cannot be claimed twice in the meantime.
+  //   10004 = UpdateRecord
+  //   10005 = RebuildIndex  (needs the SQLite-index capability)
+  option (devalbo.options.v1.reserved_method_id) = 10004;
+  option (devalbo.options.v1.reserved_method_id) = 10005;
+}
+
+// A note. Stored as ONE canonical-JSON file per record (§7.1 split storage):
+// the file is the source of truth, and any index over it is disposable.
+message Record {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  // Seconds since the epoch. Not a timestamp type: the engine has no clock
+  // capability yet, so the HOST supplies this — one of the gaps this app exists
+  // to surface.
+  int64 created_at = 4;
+}
+
+message CreateRecordRequest {
+  string title = 1 [
+    (devalbo.options.v1.help) = "note title",
+    (devalbo.options.v1.required) = true
+  ];
+  string body = 2 [(devalbo.options.v1.help) = "note body"];
+  int64 created_at = 3 [(devalbo.options.v1.help) = "seconds since epoch (host-supplied)"];
+}
+message CreateRecordResponse {
+  Record record = 1;
+  string path = 2; // where it landed, relative to the filesystem root
+}
+
+message ListRecordsRequest {}
+message ListRecordsResponse {
+  repeated Record records = 1;
+}
+
+message OpenRecordRequest {
+  string id = 1 [
+    (devalbo.options.v1.help) = "record id",
+    (devalbo.options.v1.required) = true
+  ];
+}
+message OpenRecordResponse {
+  Record record = 1;
+}
+
+message DeleteRecordRequest {
+  string id = 1 [
+    (devalbo.options.v1.help) = "record id",
+    (devalbo.options.v1.required) = true
+  ];
+}
+message DeleteRecordResponse {
+  bool deleted = 1;
+}

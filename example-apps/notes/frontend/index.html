@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>notes — web</title>
+  </head>
+  <body>
+    <main>
+      <h1>notes</h1>
+      <p>
+        The same engine the CLI links, running here as a wasip2 component. Each
+        note is one JSON file in OPFS — split storage (§7.1), so the browser and
+        the terminal keep the store the same way.
+      </p>
+
+      <input id="title" placeholder="title" data-testid="title" />
+      <input id="body" placeholder="body" data-testid="body" />
+      <button id="create" data-testid="create">create</button>
+
+      <h2>notes (<span data-testid="count">0</span>)</h2>
+      <ul id="list" data-testid="list"></ul>
+
+      <pre id="out" data-testid="out"></pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

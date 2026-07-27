@@ -1,4 +1,4 @@
-# {{.AppName}}
+# {{.ProjectName}}
 
 Scaffolded by `dlc new`. An **ILC** app: your business logic lives once, in
 `engine/`, and every tier drives it through the same command boundary.
@@ -7,7 +7,7 @@ Scaffolded by `dlc new`. An **ILC** app: your business logic lives once, in
 devbox shell        # provision go + buf
 make gen            # proto → Go messages + command dispatch
 make verify         # build and smoke-test the CLI
-./{{.AppName}} greet ILC
+./{{.ProjectName}} greet ILC
 ```
 
 ## Layout

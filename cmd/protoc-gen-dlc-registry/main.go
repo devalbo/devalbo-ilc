@@ -39,6 +39,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -443,30 +444,94 @@ func checkLock(path string, current map[string]uint32) error {
 	if path == "" {
 		return nil // no lock configured; ids are unguarded
 	}
-	want := renderLock(current)
+	// Two names claiming one id is a runtime panic at registration; catching it
+	// here turns it into a build error with both names in it.
+	byID := map[uint32]string{}
+	for name, id := range current {
+		if other, dup := byID[id]; dup {
+			a, b := name, other
+			if b < a {
+				a, b = b, a
+			}
+			return fmt.Errorf("method_id %d is claimed by BOTH %s and %s", id, a, b)
+		}
+		byID[id] = name
+	}
 
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		// First run: create it, so the very next build is guarded.
 		fmt.Fprintf(os.Stderr, "protoc-gen-dlc-registry: creating id lock %s\n", path)
-		return os.WriteFile(path, []byte(want), 0o644)
+		return os.WriteFile(path, []byte(renderLock(current)), 0o644)
 	}
-	if string(existing) == want {
+
+	before := parseLock(string(existing))
+	var changed, removed []string
+	added := 0
+	for name, id := range current {
+		switch prev, ok := before[name]; {
+		case !ok:
+			added++
+		case prev != id:
+			changed = append(changed, fmt.Sprintf("  ! %s: %d -> %d", name, prev, id))
+		}
+	}
+	for name, id := range before {
+		if _, ok := current[name]; !ok {
+			removed = append(removed, fmt.Sprintf("  - %s = %d", name, id))
+		}
+	}
+
+	// ADDING a command is the ordinary case — a new id was never promised to
+	// anyone, so it cannot break a deployed host. Failing on it would mean
+	// re-blessing for every new command, which teaches people to set
+	// DLC_ID_LOCK_UPDATE reflexively and defeats the guard for the cases that
+	// matter. Additions update the lock silently; the diff is the review.
+	//
+	// CHANGING or REMOVING an id is different: both break every host that
+	// already speaks it, and neither is visible to `buf breaking` (a method_id
+	// is an option's VALUE, not a field number). Those still stop the build.
+	if len(changed) == 0 && len(removed) == 0 {
+		if added > 0 {
+			fmt.Fprintf(os.Stderr, "protoc-gen-dlc-registry: %s: +%d new id(s)\n", path, added)
+			return os.WriteFile(path, []byte(renderLock(current)), 0o644)
+		}
 		return nil
 	}
 	if os.Getenv("DLC_ID_LOCK_UPDATE") == "1" {
 		fmt.Fprintf(os.Stderr, "protoc-gen-dlc-registry: updating id lock %s\n", path)
-		return os.WriteFile(path, []byte(want), 0o644)
+		return os.WriteFile(path, []byte(renderLock(current)), 0o644)
 	}
+
+	sort.Strings(changed)
+	sort.Strings(removed)
+	detail := strings.Join(append(changed, removed...), "\n")
 	return fmt.Errorf(
-		"method_id lock mismatch in %s\n\n%s\nA method_id is permanent: changing one silently breaks every host\n"+
+		"method_id lock mismatch in %s\n\n%s\n\nA method_id is permanent: changing or removing one breaks every host\n"+
 			"that already speaks it, and `buf breaking` cannot see it (it is an option\n"+
-			"value, not a field number). If this change is deliberate, re-bless with:\n\n"+
+			"value, not a field number). Adding commands is fine and needs no action.\n"+
+			"If this change is deliberate, re-bless with:\n\n"+
 			"    DLC_ID_LOCK_UPDATE=1 make gen\n",
-		path, diffLock(string(existing), want))
+		path, detail)
+}
+
+func parseLock(s string) map[string]uint32 {
+	out := map[string]uint32{}
+	for _, line := range strings.Split(s, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		if id, err := strconv.ParseUint(strings.TrimSpace(v), 10, 32); err == nil {
+			out[k] = uint32(id)
+		}
+	}
+	return out
 }
 
 func renderLock(ids map[string]uint32) string {
@@ -483,37 +548,4 @@ func renderLock(ids map[string]uint32) string {
 		fmt.Fprintf(&b, "%s %d\n", k, ids[k])
 	}
 	return b.String()
-}
-
-// diffLock reports just the lines that moved — the whole file is noise when one
-// id changed.
-func diffLock(old, new string) string {
-	parse := func(s string) map[string]string {
-		out := map[string]string{}
-		for _, line := range strings.Split(s, "\n") {
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			if k, v, ok := strings.Cut(line, " "); ok {
-				out[k] = v
-			}
-		}
-		return out
-	}
-	before, after := parse(old), parse(new)
-	var lines []string
-	for k, v := range after {
-		if prev, ok := before[k]; !ok {
-			lines = append(lines, "  + "+k+" = "+v+" (new)")
-		} else if prev != v {
-			lines = append(lines, "  ! "+k+": "+prev+" -> "+v+"  <-- CHANGED")
-		}
-	}
-	for k, v := range before {
-		if _, ok := after[k]; !ok {
-			lines = append(lines, "  - "+k+" = "+v+" (removed)")
-		}
-	}
-	sort.Strings(lines)
-	return strings.Join(lines, "\n") + "\n"
 }

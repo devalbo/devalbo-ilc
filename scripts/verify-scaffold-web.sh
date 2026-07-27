@@ -46,7 +46,9 @@ PROJ="$WORK/$APP"
 #
 # Step output is kept visible — swallowing stderr made CI failures undiagnosable.
 step "make gen"
-( cd "$PROJ" && make gen ) || fail "make gen"
+# dlc must be on PATH: the project's gen target runs `dlc gen`, which emits the
+# dlcconfig package the engine imports.
+( cd "$PROJ" && PATH="$WORK:$PATH" make gen ) || fail "make gen"
 
 step "go mod tidy"
 ( cd "$PROJ" && go mod tidy ) || fail "go mod tidy"

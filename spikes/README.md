@@ -1,20 +1,39 @@
-# spikes/ — de-risking proofs, kept as permanent regression
+# spikes/ — de-risking findings (mostly retired code, permanent findings)
 
-Each subdir is a minimal, self-contained proof of one load-bearing assumption. **Kept, not thrown away** —
-they become standing regression tests so the foundation stays proven as code changes.
+Each spike was a minimal, self-contained proof of one load-bearing assumption, run *before* committing to
+a build shape. **The findings below are the point and they stay** — several of them reshaped the plan, and
+one of them (`preview2-shim` mangling TinyGo writes) is still load-bearing in shipped code today.
 
-Bootstrap spikes (B1): `component/` ✅, `proto/` ✅, `opfs/` ✅,
-`cli/` ✅ (ffcli default), `async/` ✅ (Rich JSPI GREEN · Portable GREEN).
-Registry de-risk (B2): `oneof/` ✅ · `options/` ✅ (go-lite tolerates custom options; host reads FileDescriptorSet).
+## What is still here
+
+| Spike | State |
+| --- | --- |
+| `async/` (Spike 5) | **live** — Rich JSPI ✅ · Portable ✅. Nothing else covers it: there is no async capability yet, so this remains the only evidence for how one would work. |
+
+## What was retired, and why
+
+Spikes 1–4, `oneof/`, and `options/` were **deleted once product code covered their claims** — a spike that
+duplicates a real check is maintenance without information:
+
+| Spike | Now covered by |
+| --- | --- |
+| 1 `component/` | the real engine builds to wasip2 and runs under jco — `make test-b2` / `test-b3` |
+| 2 `proto/` | the real proto pipeline runs go-lite ↔ es-lite on every build; the browser decodes real messages |
+| 3 `opfs/` | B3 asserts scaffold → OPFS → survives reload, with the real engine |
+| 4 `cli/` | **premise died**: Decision 22 (in-engine parsing) was superseded by Decision 28. It measured a choice we no longer make. |
+| `oneof/` | flat messages + map dispatch are what shipped; the oneof half was for response variants that do not exist |
+| `options/` | `protoc-gen-dlc-registry` walks the descriptor / `dynamicpb` path on every `make gen` |
+
+Keeping them also meant maintaining a WIT world (`spike-engine`) purely so they could compile against
+`execute-cli` — a boundary deliberately deleted when host-side parsing landed. That was the tell: the
+scaffolding to preserve them had outgrown what they told us.
+
+**The findings are unabridged below.** Where a finding still constrains shipped code, it is cross-referenced
+from the code itself (`hosts/web/shim/README.md`, `docs/WASI-UPGRADES.md`, `AGENTS.md`).
 
 Steps + pass criteria: [test-steps](../docs/DEVALBO-DLC-TEST-STEPS.md) Phase B1.
 
-**Convention:** each spike documents its findings here (*what worked · what we assumed and didn't · why ·
-implications*). A finding that contradicts the plan **updates the plan** — it's a deliverable, not optional.
-
----
-
-## Spike 1 — `component/` (T-B1.1) — ✅ GREEN
+## Spike 1 — `component/` (T-B1.1) — ✅ GREEN · RETIRED (code deleted)
 
 **Goal:** prove a TinyGo engine can build to a WASM component and run under jco, returning `"ok:hi"`.
 
@@ -130,7 +149,7 @@ a lockfile-driven `wkg wit fetch` earns the extra moving parts.
 
 ---
 
-## Spike 2 — `proto/` (T-B1.2) — ✅ GREEN
+## Spike 2 — `proto/` (T-B1.2) — ✅ GREEN · RETIRED (code deleted)
 
 **Goal:** prove reflection-free protobuf works in a TinyGo wasip2 engine **and** round-trips to JS via
 `protobuf-es-lite` (binary + canonical JSON).
@@ -193,7 +212,7 @@ TinyGo gate remains: the wasip2 build succeeds (as in Spike 1).
 
 ---
 
-## Spike 3 — `opfs/` (T-B1.3) — ✅ GREEN
+## Spike 3 — `opfs/` (T-B1.3) — ✅ GREEN · RETIRED (code deleted)
 
 **Goal:** engine `os.WriteFile` reaches OPFS via WASI preopen and survives a page reload.
 
@@ -262,7 +281,7 @@ invisible to a live instance. Hydrate **then** dynamic-import the component.
 
 ---
 
-## Spike 4 — `cli/` (T-B1.4) — ✅ GREEN
+## Spike 4 — `cli/` (T-B1.4) — ✅ GREEN · RETIRED (premise superseded by Decision 28)
 
 **Goal:** prove a subcommand + flag parser can live **inside** the TinyGo engine (host = argv forwarder);
 bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).

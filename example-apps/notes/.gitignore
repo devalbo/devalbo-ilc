@@ -1,0 +1,10 @@
+/gen/
+/build/
+frontend/node_modules/
+frontend/src/gen/
+frontend/src/wasm/
+frontend/test-results/
+frontend/dist/
+/notes
+.devbox/
+*.wasm

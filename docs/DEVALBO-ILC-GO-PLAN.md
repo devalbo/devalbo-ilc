@@ -962,7 +962,7 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
   tier**. Never runtime-`git clone` a template into the user’s project. (Submodule checkout, when used,
   is a *dev* boundary only.)
 - **Composition + parameterization.** `dlc new` selects a **skeleton tree + fragment overlays**; a token
-  pass substitutes `{{.Module}}` / `{{.AppName}}` / selected capability imports. Bundles are BFT/zip so
+  pass substitutes `{{.Module}}` / `{{.ProjectName}}` / selected capability imports. Bundles are BFT/zip so
   they stay diffable.
 - **ABI-mode-aware defaults.** Skeleton choice follows ABI mode (Decision 25). **CLI scaffolder default is
   ffcli** in both families; Spike 4 measured hand-rolled (~497 KiB wasip1) / go-arg as fall-backs if we

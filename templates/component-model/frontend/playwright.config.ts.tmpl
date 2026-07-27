@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 // Headed / watch options:
 //   npx playwright test --headed
-//   {{.AppName}}_WEB_WATCH=1 npx playwright test --headed   (slowMo + no timeout)
+//   {{.ProjectName}}_WEB_WATCH=1 npx playwright test --headed   (slowMo + no timeout)
 const watch = process.env.WEB_WATCH === "1";
 
 export default defineConfig({

@@ -113,7 +113,7 @@ wit/               ✅ the ILC capability world (framework)
 proto/             ✅ message types + command services (go-lite + es-lite codegen)
 frontend/          ✅ dlc's own React + Vite UI (a scaffolded app gets a vanilla-TS one)
 templates/         ✅ what `dlc new` emits (go:embed'd) — depend-on, never inline
-spikes/            ✅ de-risking proofs, kept as regression tests
+spikes/            ✅ de-risking FINDINGS (one live spike; the rest retired, their lessons kept)
 verify/            ✅ cross-tier checks — golden vectors proving native == wasm
 scripts/           ✅ preflight + the verify suites
 docs/              plan, tasks, prerequisites, test steps
@@ -131,9 +131,9 @@ Every claim above has a target behind it. `make test` runs all of them.
 | Target | Proves |
 | --- | --- |
 | `make test-b0` | repo structure + toolchain integrity |
-| `make test-b1` | the five de-risking spikes still pass |
-| `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs · the scaffold matches its golden snapshot |
-| `make test-b3` | `dlc` in headless Chromium (scaffold → OPFS → survives reload) · BFT bundle crosses browser → terminal · **a scaffolded app runs in a browser via its own test** |
+| `make test-b1` | the surviving de-risking spike (async); the rest retired once product code covered them — findings kept in `spikes/README.md` |
+| `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs · the scaffold matches its golden snapshot · the example apps build and pass |
+| `make test-b3` | `dlc` in headless Chromium (scaffold → OPFS → survives reload) · BFT bundle crosses browser → terminal · a scaffolded app runs in a browser via its own test · **the example apps run in a browser** |
 | `make ci` | what CI runs, identically — `fast` / `full` / `all` tiers |
 
 ✅ **CI runs them** — `./scripts/ci.sh full` on push, `all` (adding the B1 spikes) nightly. The script is

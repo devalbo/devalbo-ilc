@@ -1,4 +1,4 @@
-// Package engine holds {{.AppName}}'s business logic — ALL of it, and nothing
+// Package engine holds {{.ProjectName}}'s business logic — ALL of it, and nothing
 // else. This package is the one portable artifact: it is linked natively by the
 // CLI host and compiles to wasm for the browser, so anything platform-specific
 // here would break a tier.
@@ -13,10 +13,13 @@ package engine
 import (
 	"github.com/devalbo/devalbo-ilc/engine/platform"
 
+	"{{.Module}}/gen/go/dlcconfig"
 	{{.PkgName}}v1 "{{.Module}}/gen/go/{{.PkgName}}/v1"
 )
 
-const version = "{{.AppName}} 0.1.0"
+// No version string here. It lives in dlc.toml and reaches this package as
+// GENERATED code — the same rule as method ids: one place to edit, and no
+// second copy that can disagree.
 
 // Method ids are GENERATED from commands.proto — you never write one down.
 // Yours live at 1000+; 1–999 belong to the platform.
@@ -30,7 +33,7 @@ const MethodGreet = {{.PkgName}}v1.MethodGreet
 // an rpc to commands.proto and a handler here — never an id in two places.
 func init() {
 	platform.RegisterAll()
-	platform.SetVersion(version)
+	platform.SetVersion(dlcconfig.Display())
 
 	platform.RegisterRaw({{.PkgName}}v1.AppServiceHandlers(handleGreet))
 }
@@ -43,5 +46,5 @@ func handleGreet(req *{{.PkgName}}v1.GreetRequest) (*{{.PkgName}}v1.GreetRespons
 	if name == "" {
 		name = "world"
 	}
-	return &{{.PkgName}}v1.GreetResponse{Text: "hello, " + name + " — from {{.AppName}}"}, nil
+	return &{{.PkgName}}v1.GreetResponse{Text: "hello, " + name + " — from {{.ProjectName}}"}, nil
 }

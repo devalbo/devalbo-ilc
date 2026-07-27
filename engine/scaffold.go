@@ -36,8 +36,33 @@ const (
 	suffixVerbatim  = ".raw"
 )
 
-// scaffoldFiles renders the whole embedded template tree for an app.
-func scaffoldFiles(vars map[string]string) ([]platform.File, error) {
+// tierOf reports which tier a template path belongs to, or "" for files every
+// project gets. Path-prefix based rather than a manifest listing each file:
+// adding a file to a tier should mean putting it in that tier's directory, not
+// editing a list somewhere else that will fall out of date.
+func tierOf(path string) string {
+	switch {
+	case strings.HasPrefix(path, "frontend/"),
+		strings.HasPrefix(path, "cmd/engine-component/"):
+		// Both exist only to produce and serve the wasm component.
+		return "web"
+	case strings.HasPrefix(path, "hosts/native/"):
+		return "native"
+	default:
+		return ""
+	}
+}
+
+// scaffoldFiles renders the embedded template tree for the requested tiers.
+//
+// A file belonging to a tier the project did not ask for is simply not emitted —
+// which is what makes `--tiers` mean something. Everything else (engine, proto,
+// docs, the manifest itself) is unconditional.
+func scaffoldFiles(vars map[string]string, tiers []string) ([]platform.File, error) {
+	enabled := map[string]bool{}
+	for _, t := range tiers {
+		enabled[t] = true
+	}
 	var files []platform.File
 
 	err := fs.WalkDir(templates.FS, templates.Root, func(path string, d fs.DirEntry, err error) error {
@@ -47,11 +72,19 @@ func scaffoldFiles(vars map[string]string) ([]platform.File, error) {
 		if d.IsDir() {
 			return nil
 		}
+		rel := strings.TrimPrefix(path, templates.Root+"/")
+
+		// Decide from the TEMPLATE path — before suffix-stripping and token
+		// substitution — so the rule is about where a file lives, not what it
+		// renders to. Skipping here also avoids reading a file we will discard.
+		if tier := tierOf(rel); tier != "" && !enabled[tier] {
+			return nil
+		}
+
 		content, err := fs.ReadFile(templates.FS, path)
 		if err != nil {
 			return err
 		}
-		rel := strings.TrimPrefix(path, templates.Root+"/")
 
 		var out []byte
 		switch {

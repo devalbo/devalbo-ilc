@@ -41,7 +41,7 @@ No second schema for the scaffolder to drift from: what the command accepts *is*
 
 | Token | From |
 | --- | --- |
-| `{{AppName}}` | `NewRequest.name`, verbatim |
+| `{{ProjectName}}` | `NewRequest.name`, verbatim |
 | `{{Module}}` | `NewRequest.module`, defaulted to `github.com/you/<app>` |
 | `{{PkgName}}` | derived — identifier-safe (`my-app` → `my_app`); proto packages and Go imports cannot contain dashes |
 | `{{PlatformReplace}}` | derived from `--platform-path` (bootstrap `replace` line) |

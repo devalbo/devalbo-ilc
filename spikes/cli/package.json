@@ -1,9 +1,0 @@
-{
-  "name": "spike-cli",
-  "private": true,
-  "type": "module",
-  "description": "Spike 4 (T-B1.4) — in-engine CLI interpreter; jco brings preview2-shim transitively.",
-  "devDependencies": {
-    "@bytecodealliance/jco": "^1.25.2"
-  }
-}

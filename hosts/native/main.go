@@ -27,6 +27,7 @@ import (
 // toolchainVerbs never cross into the engine (Decision 30).
 var toolchainVerbs = map[string]func([]string) error{
 	"build": runBuild,
+	"gen":   runGen,
 }
 
 func main() {

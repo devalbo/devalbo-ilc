@@ -1,9 +1,0 @@
-{
-  "name": "spike-options",
-  "private": true,
-  "type": "module",
-  "description": "Spike — go-lite tolerates custom options (method_id / field metadata); Decision 29 gate.",
-  "devDependencies": {
-    "@bytecodealliance/jco": "^1.15.0"
-  }
-}

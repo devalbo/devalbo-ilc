@@ -20,6 +20,11 @@ import (
 
 const version = "dlc 0.0.0-bootstrap"
 
+// initialVersion is what a freshly scaffolded project starts at. It lands in
+// dlc.toml, and every other copy (the engine's version string, the web
+// package) is generated from there rather than typed again.
+const initialVersion = "0.1.0"
+
 // dlc's own method ids, GENERATED from commands.proto and re-exported for
 // callers (tests, the parity runner). They live in the **app band** (10000+);
 // 1–9999 is reserved for ILC itself. `dlc` is an app like any other.
@@ -70,9 +75,9 @@ func handleNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
 // indicate why. Say no instead, and name what is supported.
 func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 	for _, tier := range req.Tiers {
-		if tier != "native" {
+		if !supportedTier(tier) {
 			return errors.New("new: tier " + strconv.Quote(tier) +
-				" is not supported yet; the template emits the native tier only")
+				" is not supported yet (have: " + strings.Join(supportedTiers, ", ") + ")")
 		}
 	}
 	for _, cap := range req.Caps {
@@ -81,9 +86,11 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 				" is not supported yet; only console and filesystem exist")
 		}
 	}
-	if req.Ui != dlcv1.UiKind_UI_KIND_UNSPECIFIED && req.Ui != dlcv1.UiKind_UI_KIND_NONE {
-		return errors.New("new: --ui " + req.Ui.String() +
-			" is not supported yet; the template has no web host, so only UI_KIND_NONE is emitted")
+	// --ui still has one shape per tier: the web tier ships a vanilla-TS UI, and
+	// there is no second UI to choose between yet. Selecting one is a template
+	// variant question, not a tier question.
+	if req.Ui == dlcv1.UiKind_UI_KIND_REACT {
+		return errors.New("new: --ui REACT is not supported yet; the web tier scaffolds a vanilla-TS UI")
 	}
 	if req.Storage != dlcv1.StorageKind_STORAGE_KIND_UNSPECIFIED &&
 		req.Storage != dlcv1.StorageKind_STORAGE_KIND_NONE {
@@ -91,6 +98,63 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 			" is not supported yet; the template emits no storage layer")
 	}
 	return nil
+}
+
+// tierSections renders the [tiers.*] blocks for dlc.toml.
+//
+// Built here rather than in the template because the set is dynamic: the
+// template renders one string, and this decides what that string contains.
+func tierSections(tiers []string) string {
+	var b strings.Builder
+	for _, t := range tiers {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("[tiers." + t + "]\n")
+		b.WriteString(`capabilities = ["console", "filesystem"]` + "\n")
+		if t == "web" {
+			b.WriteString("# Where `dlc build web` writes. The assets MUST sit inside the web root:\n")
+			b.WriteString("# jco's loader fetches the core .wasm at run time, and a dev server will\n")
+			b.WriteString("# not serve a path outside its root.\n")
+			b.WriteString(`root      = "frontend"` + "\n")
+			b.WriteString(`assets    = "frontend/src/wasm"` + "\n")
+			b.WriteString(`component = "build/engine.component.wasm"` + "\n")
+		}
+	}
+	return b.String()
+}
+
+// supportedTiers are the tiers the template can actually emit. Requesting one
+// outside this list is refused by name rather than silently ignored.
+var supportedTiers = []string{"native", "web"}
+
+func supportedTier(name string) bool {
+	for _, t := range supportedTiers {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// requestedTiers is what the project will declare in dlc.toml. Defaulting to
+// BOTH keeps `dlc new myapp` giving you a working web tier without having to
+// know the flag exists — the cross-tier story is the product, so it should be
+// the default rather than an opt-in.
+func requestedTiers(req *dlcv1.NewRequest) []string {
+	if len(req.Tiers) == 0 {
+		return supportedTiers
+	}
+	out := make([]string, 0, len(req.Tiers))
+	for _, t := range supportedTiers { // canonical order, not request order
+		for _, r := range req.Tiers {
+			if r == t {
+				out = append(out, t)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // scaffoldVars maps the COMMAND to the template dictionary.
@@ -109,17 +173,39 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 		module = defaultModule(req.Name)
 	}
 	return map[string]string{
-		"AppName": req.Name,
-		"Module":  module,
-		"PkgName": identifier(req.Name),
+		// The vocabulary is PROJECT, matching dlc.toml — `dlc new` creates a
+		// project, and one word for one thing beats two.
+		"ProjectName":    req.Name,
+		"ProjectVersion": initialVersion,
+		"Module":         module,
+		"PkgName":        identifier(req.Name),
 		// The raw path AND the composed go.mod line. The web tier needs the bare
 		// path for an npm `file:` dependency, which is the TypeScript half of the
 		// same bootstrap: depend on the local checkout until the packages are
 		// published. Empty is legal — the templates then emit instructions
 		// instead of a silently broken dependency.
-		"PlatformPath":    req.PlatformPath,
-		"PlatformReplace": platformReplace(req.PlatformPath),
+		"PlatformPath": req.PlatformPath,
+		// Same location, one directory deeper. `frontend/package.json` needs an
+		// npm `file:` path relative to ITSELF, not to the project root — using
+		// the root-relative one silently resolves to a sibling directory that
+		// does not exist, and npm reports only "package not found".
+		"PlatformPathFrontend": platformPathFrom("frontend", req.PlatformPath),
+		"PlatformReplace":      platformReplace(req.PlatformPath),
+		// The manifest must describe what was actually emitted — a [tiers.web]
+		// section in a project with no frontend/ would be a lie the build would
+		// later trip over.
+		"TierSections": tierSections(requestedTiers(req)),
 	}
+}
+
+// platformPathFrom re-bases a project-root-relative platform path for a file in
+// a subdirectory. Absolute paths are already location-independent and pass
+// through unchanged.
+func platformPathFrom(subdir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join("..", path)
 }
 
 // identifier makes an app name safe for a proto package and a Go import alias:
@@ -182,7 +268,7 @@ func scaffold(req *dlcv1.NewRequest) (root string, files []platform.File, err er
 	if platform.DirIsOccupied(dest) {
 		return "", nil, errors.New("new: " + req.Name + " already exists and is not empty")
 	}
-	files, err = scaffoldFiles(scaffoldVars(req))
+	files, err = scaffoldFiles(scaffoldVars(req), requestedTiers(req))
 	if err != nil {
 		return "", nil, errors.New("new: " + err.Error())
 	}

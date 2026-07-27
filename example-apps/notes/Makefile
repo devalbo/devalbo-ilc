@@ -1,0 +1,42 @@
+# notes — build & verify.
+# Run inside `devbox shell`.
+
+.PHONY: gen
+gen: ## generate proto bindings + command dispatch
+	cd proto && buf lint
+	dlc gen
+
+.PHONY: build
+build: gen ## build the native CLI (engine linked in-process)
+	go build -o notes ./hosts/native
+
+.PHONY: run
+run: build ## build then say hello
+	./notes greet
+
+.PHONY: test
+test: ## unit tests
+	go test ./...
+
+.PHONY: gen-web
+gen-web: gen ## copy generated es-lite messages into the Vite root
+	# Bundlers resolve @aptre/* from the IMPORTING file's tree, and gen/ sits
+	# outside frontend/ — so the messages are copied in rather than aliased.
+	rm -rf frontend/src/gen
+	mkdir -p frontend/src/gen
+	cp -R gen/ts/notes frontend/src/gen/
+
+.PHONY: build-web
+build-web: gen-web ## build the wasm component + jco transpile (needs dlc on PATH)
+	# Puts the component in build/ and the web assets in frontend/src/wasm —
+	# they have different audiences, so dlc writes each where it belongs.
+	dlc build web
+
+.PHONY: dev-web
+dev-web: build-web ## serve the web tier
+	cd frontend && npm install && npm run dev
+
+.PHONY: verify
+verify: build ## the smoke test: the binary exists and answers
+	@./notes version
+	@./notes greet ILC

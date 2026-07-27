@@ -1,10 +1,10 @@
-// {{.AppName}} in a browser — the same engine the CLI links, as a wasip2
+// {{.ProjectName}} in a browser — the same engine the CLI links, as a wasip2
 // component under jco.
 //
 // This test ships WITH your app on purpose. The cross-tier promise ("write it
 // once, run it everywhere") is only worth anything if something checks it, and
 // the check has to live where the code does. If this passes and
-// `./{{.AppName}} greet` passes, the two tiers genuinely agree.
+// `./{{.ProjectName}} greet` passes, the two tiers genuinely agree.
 //
 // Run: make build-web && cd frontend && npm test
 import { expect, test } from "@playwright/test";
@@ -24,7 +24,7 @@ test("greets from the browser, using the same engine as the CLI", async ({
   await expect(page.getByTestId("out")).toContainText("hello, browser", {
     timeout: 30_000,
   });
-  await expect(page.getByTestId("out")).toContainText("{{.AppName}}");
+  await expect(page.getByTestId("out")).toContainText("{{.ProjectName}}");
 
   expect(errors, "no uncaught errors while booting the engine").toEqual([]);
 });

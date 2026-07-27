@@ -1,8 +1,8 @@
 {
-  "name": "{{.AppName}}-web",
+  "name": "{{.ProjectName}}-web",
   "private": true,
   "type": "module",
-  "description": "{{.AppName}}'s web tier — the same engine the CLI links, running as a wasip2 component with its filesystem bound to OPFS.",
+  "description": "{{.ProjectName}}'s web tier — the same engine the CLI links, running as a wasip2 component with its filesystem bound to OPFS.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@aptre/protobuf-es-lite": "^1.1.1",
     "comlink": "^4.4.2",
-    "@devalbo/ilc-web": "file:{{.PlatformPath}}/hosts/web"
+    "@devalbo/ilc-web": "file:{{.PlatformPathFrontend}}/hosts/web"
   },
   "devDependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",
