@@ -15,17 +15,27 @@ import "devalbo/options/v1/options.proto";
 //
 // METHOD IDS — 1–9999 is ILC's; yours start at 10000.
 service NotesService {
+  // Write a new note
   rpc CreateRecord(CreateRecordRequest) returns (CreateRecordResponse) {
     option (devalbo.options.v1.method_id) = 10000;
+    // The CLI says `notes create`; the rpc stays CreateRecord. Cosmetic —
+    // dispatch is on method_id, so this is not a breaking change.
+    option (devalbo.options.v1.cli_name) = "create";
   }
+  // List every note, id and title
   rpc ListRecords(ListRecordsRequest) returns (ListRecordsResponse) {
     option (devalbo.options.v1.method_id) = 10001;
+    option (devalbo.options.v1.cli_name) = "list";
   }
+  // Print one note in full
   rpc OpenRecord(OpenRecordRequest) returns (OpenRecordResponse) {
     option (devalbo.options.v1.method_id) = 10002;
+    option (devalbo.options.v1.cli_name) = "open";
   }
+  // Remove a note
   rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse) {
     option (devalbo.options.v1.method_id) = 10003;
+    option (devalbo.options.v1.cli_name) = "delete";
   }
 
   // Held for the capabilities this app is meant to drive out (§13) — declared,

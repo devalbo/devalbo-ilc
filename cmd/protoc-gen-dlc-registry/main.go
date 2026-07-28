@@ -148,6 +148,29 @@ func run() error {
 			Name:    proto.String(name),
 			Content: proto.String(content),
 		})
+
+		// The CLI surface (Decision 29) — Go only. A TypeScript host builds
+		// requests from a form, not from argv, and the web tier's equivalent of
+		// this would describe a form rather than flags.
+		if lang == "go" {
+			cmds, cerr := cliCommandsOf(file, services, resolver)
+			if cerr != nil {
+				return cerr
+			}
+			cliContent, cerr := renderCLI(file, services, cmds)
+			if cerr != nil {
+				return cerr
+			}
+			formatted, ferr := format.Source([]byte(cliContent))
+			if ferr != nil {
+				return fmt.Errorf("%s: generated invalid Go CLI spec: %w", file.GetName(), ferr)
+			}
+			base := strings.TrimSuffix(file.GetName(), ".proto")
+			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+				Name:    proto.String(base + ".cli.pb.go"),
+				Content: proto.String(string(formatted)),
+			})
+		}
 	}
 
 	if err := checkLock(paramValue(req.GetParameter(), "lock"), locked); err != nil {
@@ -170,6 +193,7 @@ type method struct {
 	input      string // Go type name in this package
 	output     string
 	fieldParam string // lowerCamel param name
+	cliName    string // (cli_name) override; empty means kebab(name)
 }
 
 type service struct {
@@ -226,12 +250,17 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 						svc.GetName(), m.GetName(), id)
 				}
 			}
+			cliName, _ := extString(opts, cliNameExt)
+			if err := checkCLIToken(cliName); err != nil {
+				return nil, fmt.Errorf("%s.%s: cli_name: %w", svc.GetName(), m.GetName(), err)
+			}
 			s.methods = append(s.methods, method{
 				name:       m.GetName(),
 				id:         id,
 				input:      shortName(m.GetInputType()),
 				output:     shortName(m.GetOutputType()),
 				fieldParam: lowerFirst(m.GetName()) + "Fn",
+				cliName:    cliName,
 			})
 		}
 		if len(s.methods) > 0 {

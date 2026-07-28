@@ -12,7 +12,7 @@ build: gen ## build the native CLI (engine linked in-process)
 
 .PHONY: run
 run: build ## build then say hello
-	./{{.ProjectName}} greet
+	./{{.ProjectName}} greet --name ILC
 
 .PHONY: test
 test: ## unit tests
@@ -39,4 +39,4 @@ dev-web: build-web ## serve the web tier
 .PHONY: verify
 verify: build ## the smoke test: the binary exists and answers
 	@./{{.ProjectName}} version
-	@./{{.ProjectName}} greet ILC
+	@./{{.ProjectName}} greet --name ILC

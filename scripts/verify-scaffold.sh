@@ -64,7 +64,7 @@ step "go build"
 
 step "run it"
 version="$( cd "$PROJ" && "./$APP" version )" || fail "$APP version"
-greet="$( cd "$PROJ" && "./$APP" greet ILC )" || fail "$APP greet"
+greet="$( cd "$PROJ" && "./$APP" greet --name ILC )" || fail "$APP greet"
 case "$greet" in *ILC*) ;; *) fail "greet did not echo the name: $greet" ;; esac
 
 # The inherited platform verbs must work in a scaffolded app too — that is the

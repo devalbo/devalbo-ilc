@@ -1,7 +1,12 @@
 # notes — what this project IS.
 #
-# Read by `dlc` (host-side toolchain only). The ENGINE never reads it: anything
-# it needs from here becomes GENERATED code via `dlc gen`.
+# Read by `dlc` (host-side toolchain only). The ENGINE never reads it: it runs
+# in a browser tab and on devices with no config file, so anything the engine
+# needs from here is turned into GENERATED code by `dlc gen` rather than parsed
+# at runtime.
+#
+# This file is the single source for facts that would otherwise be typed twice —
+# the version, the platform path, where build output goes.
 
 [project]
 name    = "notes"
@@ -9,20 +14,29 @@ version = "0.1.0"
 module  = "github.com/devalbo/devalbo-ilc/example-apps/notes"
 
 [platform]
-# BOOTSTRAP: relative, so this works on any machine and in CI.
+# BOOTSTRAP: ilc-platform is not published yet, so builds resolve it from a local
+# checkout. Recorded ONCE here — dlc derives both the go.mod `replace` and the
+# npm `file:` dependency from it, which sit at different depths and are easy to
+# get subtly wrong by hand.
 path = "../.."
 
-# `root` is this tier's SLOT — the directory holding this app's host code for
-# that tier (Decision 34). One slot per tier, and it must exist: a declared tier
-# with no slot is a tier nobody can write host code for, so `dlc` refuses it
-# rather than building something with no front end.
-
+# A tier exists because its section does. Capabilities are declared PER TIER
+# because the hosts genuinely differ — a browser has no serial port, a CLI has no
+# canvas. This is build-time composition: what gets linked in. What the host
+# actually has at run time (a display's resolution, say) arrives separately, in
+# the environment manifest.
 [tiers.native]
 capabilities = ["console", "filesystem"]
+# This tier's HOST code — argv in, a proto request out.
 root      = "hosts/native"
 
 [tiers.web]
 capabilities = ["console", "filesystem"]
+# This tier's HOST code, and where `dlc build web` writes into it.
+# The assets MUST sit inside the slot: jco's loader fetches the core
+# .wasm at run time, and a dev server will not serve a path outside
+# its root.
 root      = "hosts/web"
 assets    = "hosts/web/src/wasm"
 component = "build/engine.component.wasm"
+

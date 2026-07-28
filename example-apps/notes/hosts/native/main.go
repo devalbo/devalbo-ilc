@@ -1,25 +1,35 @@
-// notes — native CLI host.
+// notes — native CLI host (the native tier slot, Decision 34).
 //
-// The host's job is to turn native input into a REQUEST and hand it to the
-// engine; it holds no business logic. That is the ILC inversion: argv is one way
-// to build a request, a React form is another, a serial REPL a third — and all
-// three reach the same handlers.
+// There is no `switch args[0]` here, and that is the point. The command surface
+// — which subcommands exist, what flags they take, which are required, what the
+// help says — is GENERATED from commands.proto (Decision 29), so adding an rpc
+// adds a subcommand and nothing has to be hand-mirrored. The last hand-written
+// `switch` was a second place for the command surface to live and a second place
+// for it to be wrong.
 //
-// The engine is linked in-process here (no wasm runtime in the run path), which
-// is a build seam, not a fork: the same engine package compiles to wasm for the
-// browser tier.
+// What is left in this file is exactly two things, and both are presentation:
 //
-// Parsing lives HERE, not in the engine — so this file may use any parser you
-// like (cobra, kong, huh menus). It is deliberately stdlib-only to start.
+//	Render  how a response is printed
+//	Fill    values the user should not have to type (the clock)
+//
+// A SLOT RENDERS; IT NEVER DECIDES. Nothing here works out what a command means
+// — that lives in engine/, shared with the browser, which is why a note created
+// here reads identically in a tab.
+//
+// The engine is linked in-process (no wasm runtime in the run path), which is a
+// build seam and not a fork: the same engine package compiles to wasm for the
+// web tier.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
+	"github.com/devalbo/devalbo-ilc/engine/platform/cli"
+	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
 	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/notes/engine" // importing the engine registers its commands
@@ -27,120 +37,108 @@ import (
 )
 
 func main() {
-	args := os.Args[1:]
-	if len(args) == 0 {
-		usage()
-		os.Exit(2)
-	}
+	os.Exit(app(platform.Live, os.Stdout, os.Stderr, os.Stdin, time.Now).Run(os.Args[1:]))
+}
 
-	switch args[0] {
-	case "version":
-		var resp ilcv1.VersionResponse
-		must(call(platform.MethodVersion, &ilcv1.VersionRequest{}, &resp))
-		fmt.Println(resp.Version)
+// app builds the command line. Every dependency is an argument so the whole CLI
+// can be run against a fake engine, a buffer, and a fixed clock — a slot is the
+// one part of an ILC app parity cannot check, so it needs its own way to fail.
+func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, now func() time.Time) cli.App {
+	return cli.App{
+		Name:  "notes",
+		Short: "notes — one JSON file per record, the same engine in a terminal and a browser",
 
-	case "create":
-		if len(args) < 2 {
-			fail("create <title> [body]")
-		}
-		body := ""
-		if len(args) > 2 {
-			body = strings.Join(args[2:], " ")
-		}
+		// The app's own commands PLUS the platform's inherited verbs. This is
+		// what an app gets for free by being an ILC app: version, export-fs,
+		// import-fs and reset-fs are not written here, they arrive with the
+		// platform's schema. Previously each was a hand-written case.
+		Commands: append(append([]clispec.Command{}, notesv1.NotesServiceCLI...), ilcv1.PlatformServiceCLI...),
+
+		Port:   port,
+		Stdout: stdout,
+		Stderr: stderr,
+		Stdin:  stdin,
+
 		// The HOST supplies the clock. The engine has no clock capability — it
-		// runs in a browser tab and on a device without an RTC — so "now" is
-		// native input, exactly like argv.
-		req := &notesv1.CreateRecordRequest{
-			Title:     args[1],
-			Body:      body,
-			CreatedAt: time.Now().Unix(),
-		}
-		var resp notesv1.CreateRecordResponse
-		must(call(notesv1.MethodCreateRecord, req, &resp))
-		fmt.Printf("created %s -> %s\n", resp.Record.Id, resp.Path)
+		// runs in a browser tab and on devices without an RTC — so "now" is
+		// native input, exactly like argv. Filled rather than prompted for,
+		// because no user should have to type an epoch.
+		Fill: func(cmd clispec.Command, values map[string][]string) {
+			if cmd.Method == notesv1.MethodCreateRecord && len(values["created-at"]) == 0 {
+				values["created-at"] = []string{fmt.Sprint(now().Unix())}
+			}
+		},
 
-	case "list":
-		var resp notesv1.ListRecordsResponse
-		must(call(notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &resp))
-		if len(resp.Records) == 0 {
-			fmt.Println("(no notes)")
-		}
-		for _, r := range resp.Records {
-			fmt.Printf("%-24s %s\n", r.Id, r.Title)
-		}
+		Render: map[uint32]cli.Renderer{
+			notesv1.MethodCreateRecord: render(func(out io.Writer, r *notesv1.CreateRecordResponse) error {
+				_, err := fmt.Fprintf(out, "created %s -> %s\n", r.Record.GetId(), r.GetPath())
+				return err
+			}),
+			notesv1.MethodListRecords: render(func(out io.Writer, r *notesv1.ListRecordsResponse) error {
+				if len(r.Records) == 0 {
+					_, err := fmt.Fprintln(out, "(no notes)")
+					return err
+				}
+				for _, rec := range r.Records {
+					if _, err := fmt.Fprintf(out, "%-24s %s\n", rec.GetId(), rec.GetTitle()); err != nil {
+						return err
+					}
+				}
+				return nil
+			}),
+			notesv1.MethodOpenRecord: render(func(out io.Writer, r *notesv1.OpenRecordResponse) error {
+				_, err := fmt.Fprintf(out, "# %s\n\n%s\n", r.Record.GetTitle(), r.Record.GetBody())
+				return err
+			}),
+			notesv1.MethodDeleteRecord: render(func(out io.Writer, r *notesv1.DeleteRecordResponse) error {
+				if !r.GetDeleted() {
+					// Not an error: deleting nothing is a legitimate outcome, and
+					// the engine already said so in the response.
+					_, err := fmt.Fprintln(out, "no such note")
+					return err
+				}
+				_, err := fmt.Fprintln(out, "deleted")
+				return err
+			}),
 
-	case "open":
-		if len(args) != 2 {
-			fail("open <id>")
-		}
-		var resp notesv1.OpenRecordResponse
-		must(call(notesv1.MethodOpenRecord, &notesv1.OpenRecordRequest{Id: args[1]}, &resp))
-		fmt.Printf("# %s\n\n%s\n", resp.Record.Title, resp.Record.Body)
-
-	case "delete":
-		if len(args) != 2 {
-			fail("delete <id>")
-		}
-		var resp notesv1.DeleteRecordResponse
-		must(call(notesv1.MethodDeleteRecord, &notesv1.DeleteRecordRequest{Id: args[1]}, &resp))
-		if resp.Deleted {
-			fmt.Println("deleted " + args[1])
-		} else {
-			fmt.Println("no such note: " + args[1])
-		}
-
-	// export-fs / import-fs come from the platform — and because every record is
-	// a plain JSON file, a bundle IS a complete backup of the app's state.
-	case "export-fs":
-		var resp ilcv1.ExportFsResponse
-		must(call(platform.MethodExportFs, &ilcv1.ExportFsRequest{}, &resp))
-		os.Stdout.Write(resp.Bundle)
-
-	case "import-fs":
-		if len(args) != 2 {
-			fail("import-fs <bundle.json>")
-		}
-		bundle, err := os.ReadFile(args[1])
-		if err != nil {
-			fail(err.Error())
-		}
-		var resp ilcv1.ImportFsResponse
-		must(call(platform.MethodImportFs, &ilcv1.ImportFsRequest{Bundle: bundle}, &resp))
-		for _, f := range resp.Files {
-			fmt.Println("  + " + f)
-		}
-
-	default:
-		usage()
-		os.Exit(2)
+			// The inherited verbs. Only their PRINTING is ours — every record is
+			// a plain JSON file, so a bundle is a complete backup of the app.
+			ilcv1.MethodVersion: render(func(out io.Writer, r *ilcv1.VersionResponse) error {
+				_, err := fmt.Fprintln(out, r.GetVersion())
+				return err
+			}),
+			ilcv1.MethodExportFs: render(func(out io.Writer, r *ilcv1.ExportFsResponse) error {
+				_, err := out.Write(r.GetBundle()) // the bundle IS the output; no decoration
+				return err
+			}),
+			ilcv1.MethodImportFs: render(func(out io.Writer, r *ilcv1.ImportFsResponse) error {
+				for _, f := range r.GetFiles() {
+					if _, err := fmt.Fprintln(out, "  + "+f); err != nil {
+						return err
+					}
+				}
+				return nil
+			}),
+			ilcv1.MethodResetFs: render(func(out io.Writer, r *ilcv1.ResetFsResponse) error {
+				_, err := fmt.Fprintf(out, "removed %d file(s)\n", len(r.GetRemoved()))
+				return err
+			}),
+		},
 	}
 }
 
-// call is the whole host↔engine boundary: encode the request, dispatch on the
-// method id, decode the response. Errors arrive in the result envelope.
-func call(method uint32, req interface{ MarshalVT() ([]byte, error) }, resp interface{ UnmarshalVT([]byte) error }) error {
-	request, err := req.MarshalVT()
-	if err != nil {
-		return err
+// render adapts a typed printer to the byte-level Renderer, so each printer
+// above says what it prints and nothing about decoding. Generics, not
+// reflection — the same reason the engine's typed handlers work under TinyGo.
+func render[T any, PT interface {
+	*T
+	UnmarshalVT([]byte) error
+}](print func(io.Writer, PT) error) cli.Renderer {
+	return func(out io.Writer, response []byte) error {
+		msg := PT(new(T))
+		if err := msg.UnmarshalVT(response); err != nil {
+			return err
+		}
+		return print(out, msg)
 	}
-	r := platform.Execute(method, request)
-	if !r.Success {
-		return fmt.Errorf("%s", r.Err)
-	}
-	return resp.UnmarshalVT(r.Output)
-}
-
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: notes <version|create <title> [body]|list|open <id>|delete <id>|export-fs|import-fs <bundle>>")
-}
-
-func must(err error) {
-	if err != nil {
-		fail(err.Error())
-	}
-}
-
-func fail(msg string) {
-	fmt.Fprintln(os.Stderr, "notes: "+msg)
-	os.Exit(1)
 }

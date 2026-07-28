@@ -17,7 +17,7 @@ gen: ## generate WIT + proto bindings (requires devbox shell)
 	cd proto && buf lint && buf generate
 
 .PHONY: sync-template-proto
-sync-template-proto: ## copy the shared options.proto into the scaffold template
+sync-template-proto: ## copy the shared options.proto into the template AND the example apps
 	# A scaffolded app imports devalbo/options/v1/options.proto for `method_id`,
 	# but that file lives HERE — so it travels with the scaffold until it is
 	# published to a schema registry. Kept a pure byte-copy (provenance lives in
@@ -25,6 +25,13 @@ sync-template-proto: ## copy the shared options.proto into the scaffold template
 	# and the eventual swap to a registry dep is a clean delete.
 	@cp proto/devalbo/options/v1/options.proto \
 		templates/component-model/proto/devalbo/options/v1/options.proto.tmpl
+	# The example apps vendor it too, and they went stale the first time this
+	# file gained an option: notes' codegen failed with an error naming neither
+	# the file nor the app, because buf cancels every plugin when one fails.
+	# An example app demonstrates current practice or it teaches the wrong thing.
+	@for app in example-apps/*/proto/devalbo/options/v1/options.proto; do \
+		[ -f "$$app" ] && cp proto/devalbo/options/v1/options.proto "$$app"; \
+	done
 
 .PHONY: build-host
 build-host: sync-template-proto ## native dlc binary — engine linked in-process (Decision 26)

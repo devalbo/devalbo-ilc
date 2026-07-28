@@ -6,6 +6,8 @@
   "description": "ILC web host: jco worker, OPFS-backed WASI root, Comlink adapter. Consumed by scaffolded apps as a dependency \u2014 never copied in, so the preview2-shim pin and the OPFS bridge stay fixable in one place.",
   "exports": {
     "./api": "./api.ts",
+    "./port": "./port.ts",
+    "./testing": "./testing.ts",
     "./worker": "./worker.ts",
     "./opfs": "./opfs.ts",
     "./shim/filesystem": "./shim/filesystem.js",

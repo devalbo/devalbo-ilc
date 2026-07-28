@@ -3,25 +3,26 @@
 # every user gets — review it like source.
 # path                                              bytes  sha256
 .gitignore                                            145  5865828890494c26
-AGENTS.md                                            3834  366f36fdc15884e8
-Makefile                                             1246  2493ed6c493eb662
-README.md                                            1614  05d371a3bf5b52de
+AGENTS.md                                            3931  eb524f7772665b8c
+Makefile                                             1264  44def47a322ca927
+README.md                                            1867  11d2a460986f28e8
 cmd/engine-component/main.go                          806  f1d35c0e07fcd0ff
 devbox.json                                           473  fd10c51393a9e86e
 dlc.toml                                             1683  d84653ce0a76515e
 engine/commands.go                                   2029  7127e5a530c8bbd9
 engine/commands_test.go                               779  081f9b781e4d7dd7
 go.mod                                                680  b3854e856cf82826
-hosts/native/main.go                                 2851  468c8d7ea3acbde8
+hosts/native/main.go                                 3942  fec757b17f4ad7ff
 hosts/web/index.html                                  606  35e4d1bbb1b51a3b
 hosts/web/package.json                                643  65806f4e6a4ba710
 hosts/web/playwright.config.ts                        882  c086f4d353e94e72
-hosts/web/src/main.ts                                1471  738e5278721fa639
+hosts/web/src/main.ts                                1119  8300d4a0ec584f98
+hosts/web/src/view.ts                                3277  c06a9791877bd504
 hosts/web/test/web.spec.ts                           1171  b9d852f434bdd63e
 hosts/web/tsconfig.json                               349  4e3a1a73137f089b
 hosts/web/vite.config.ts                             1232  bc0cac3c4395a28e
 proto/buf.gen.yaml                                   1290  78fec52b3a0339c6
 proto/buf.yaml                                        363  1c9951bd88411837
 proto/devalbo/options/v1/README.md                    760  b3b9831cae334777
-proto/devalbo/options/v1/options.proto               1448  092d70a8a3ab7bd7
-proto/golden_app/v1/commands.proto                    938  2d1c42e584e6e46e
+proto/devalbo/options/v1/options.proto               3496  43a5bf8423b2d64c
+proto/golden_app/v1/commands.proto                    964  3a7685fd539969ca

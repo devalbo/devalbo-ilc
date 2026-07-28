@@ -51,12 +51,15 @@ service PlatformService {
   option (devalbo.options.v1.reserved_method_id) = 2;
   option (devalbo.options.v1.reserved_method_id) = 3;
   // --- filesystem block (100–199) ---
+  // Bundle a subtree into one portable blob
   rpc ExportFs(ExportFsRequest) returns (ExportFsResponse) {
     option (devalbo.options.v1.method_id) = 100;
   }
+  // Write a bundle back into the filesystem
   rpc ImportFs(ImportFsRequest) returns (ImportFsResponse) {
     option (devalbo.options.v1.method_id) = 101;
   }
+  // Delete everything under a prefix
   rpc ResetFs(ResetFsRequest) returns (ResetFsResponse) {
     option (devalbo.options.v1.method_id) = 102;
   }

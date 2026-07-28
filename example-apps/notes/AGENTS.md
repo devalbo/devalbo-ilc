@@ -13,7 +13,7 @@ one command boundary. The framework rules below come from the ILC platform this 
 | Directory | Holds | Never holds |
 | --- | --- | --- |
 | `engine/` | **all** business logic — what a command *means* | platform APIs, argv parsing, UI |
-| `hosts/native/` | argv → request; printing results | decisions about what a command means |
+| `hosts/native/` | this tier's slot: how a response PRINTS. The command surface is generated from the .proto | decisions about what a command means; a hand-written `switch` over subcommands |
 | `hosts/web/` | the browser UI — form state → request | business logic |
 | `cmd/engine-component/` | six lines wiring the wasm exports | anything at all |
 

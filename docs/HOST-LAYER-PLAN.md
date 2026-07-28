@@ -269,6 +269,50 @@ it wants to exist before there is a second renderer, not after.
 
 *Falsification:* break a slot's rendering and confirm its test goes red with no engine in the loop.
 
+**Landed 2026-07-27.** `hosts/web/port.ts` (`EnginePort` + `enginePort`), `hosts/web/testing.ts`
+(`createFakePort`/`ok`/`err`), notes' slot split into `src/view.ts` (takes a port, exports `projection()`)
+and a five-line `src/main.ts` that only chooses one. Six slot tests, riding CI's existing
+`verify-example-apps-web` path.
+
+**Falsified:** truncating the rendered list turns exactly the two projection assertions red and leaves the
+four wiring tests green — the tests discriminate rather than all failing together.
+
+**The seam had to be the port, not the event stream.** The plan said "fake the events"; that cannot work
+for notes, because its slot re-*lists* on an event — the dumb-host pattern — so a faked stream still calls
+an engine that is not there. Faking the whole `EnginePort` (execute + subscribe) is the seam that
+generalizes: it is also what an embedded slot needs, having no Comlink, no worker and no OPFS.
+
+**Three things the harness bought immediately that the live test cannot reach:**
+
+- a **failed** `list-records`, which takes real effort to stage against a real engine, and which caught the
+  distinction worth having: a failed read is not an empty result, and a slot that conflated them would tell
+  a user their notes had vanished
+- a **foreign topic** costing zero commands — the loop-prevention rule, asserted by call count
+- **unmount** actually unsubscribing
+
+**`window.app` — a dev-console handle on the slot, in notes and in the template.** `app.create(…)`,
+`app.remove(…)`, `app.projection()`. The rule that makes it safe rather than a second front end: it exposes
+the **same functions the buttons call**, so the click handler's whole job is to collect two strings and
+call `app.create`. A console API on a different path would be a second implementation free to disagree with
+the first, and the untested one would be the one that drifts — hence a test for it, which incidentally
+proves the point: creating from the console updates the list *by event*, exactly as a click does.
+
+It is deliberately **not** a handle on the engine. Everything it can do, a user can do by clicking. Driving
+the engine *underneath* the UI — a second writer — is a different thing and goes through
+`@devalbo/ilc-web/api`, as `test/driver.ts` does.
+
+**The markup is fetched, not copied.** The harness page loads no app script; the driver fetches
+`/index.html`, parses it, and mounts the view into the real form. A duplicated `<form>` in the test would
+drift from the shipped one silently, and the slot test would then be proving something about markup no user
+sees.
+
+**One unexplained flake, recorded rather than dismissed.** On the first run after the refactor,
+`web.spec.ts`'s OPFS read failed once; it has passed every run since (twice in isolation, three times in
+the full suite, once through `verify-example-apps-web`). It should not be racy — the test waits for
+`count = 1`, which only arrives via an event, and the web host delivers events *after* the OPFS flush. If
+it recurs, it is worth chasing rather than retrying: this project has already been bitten once by a
+write-only flush bug that presented exactly as an intermittent read.
+
 ### Phase 3 — the pilot: tic-tac-toe across two slots
 
 App #3, not a retrofit of notes. Notes' host does the dumb thing correctly today, and the semantic path

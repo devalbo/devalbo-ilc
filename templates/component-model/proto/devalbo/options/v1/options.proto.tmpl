@@ -14,6 +14,17 @@ import "google/protobuf/descriptor.proto";
 extend google.protobuf.MethodOptions {
   // Permanent dispatch key. Rename-safe; buf breaking + id-lock guard stability.
   uint32 method_id = 50000;
+
+  // Subcommand name, overriding the kebab-cased rpc name.
+  //
+  //   rpc CreateRecord … [(cli_name) = "create"]   ->   notes create
+  //
+  // COSMETIC, exactly like the rpc name itself: the wire is `method_id`, so
+  // renaming a command is neither a breaking change nor an id-lock concern. It
+  // lives in the .proto rather than in one host so that every tier agrees on
+  // what the command is called — a host may still override it locally, but then
+  // only that host differs, deliberately.
+  string cli_name = 50006;
 }
 
 extend google.protobuf.ServiceOptions {
@@ -28,6 +39,25 @@ extend google.protobuf.ServiceOptions {
   repeated uint32 reserved_method_id = 50005;
 }
 
+// Where a flag's value comes from, as opposed to what TYPE it is.
+//
+// A command line carries strings, but the value a field wants may be too large
+// or too binary to type: a bundle is a file, a long body may be piped. That is a
+// property of the FIELD, not of the runner, so it is declared here rather than
+// hardcoded in whichever host happens to read it — and it means `bytes` stops
+// being a field the CLI cannot express.
+enum CliSource {
+  CLI_SOURCE_UNSPECIFIED = 0;
+  // The argument IS the value. Default for every scalar.
+  CLI_SOURCE_LITERAL = 1;
+  // The argument is a PATH; the host reads that file. Default for `bytes`,
+  // because a literal bundle on argv is not a thing anyone types.
+  CLI_SOURCE_FILE = 2;
+  // Read standard input. At most one field per command may claim it — two
+  // would fight over one stream — which the generator enforces.
+  CLI_SOURCE_STDIN = 3;
+}
+
 extend google.protobuf.FieldOptions {
   string help = 50001;
   bool required = 50002;
@@ -35,4 +65,16 @@ extend google.protobuf.FieldOptions {
   string default = 50003;
   // Single-letter short flag (e.g. "n" → -n).
   string short = 50004;
+  // Flag name, overriding the kebab-cased field name.
+  //
+  //   int64 created_at = 3 [(cli_flag) = "at"];   ->   --at
+  //
+  // Named cli_flag rather than cli_name because extension names must be unique
+  // within a package, and the method-level override already claims that one.
+  // Cosmetic in the same way: requests are encoded by field NUMBER, so this
+  // changes what a user types and nothing on the wire.
+  string cli_flag = 50007;
+  // Where the value comes from. Unset means the sensible default for the
+  // field's type: FILE for `bytes`, LITERAL for everything else.
+  CliSource cli_source = 50008;
 }

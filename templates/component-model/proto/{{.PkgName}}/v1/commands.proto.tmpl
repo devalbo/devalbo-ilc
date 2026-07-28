@@ -18,6 +18,7 @@ import "devalbo/options/v1/options.proto";
 // build if one ever changes. The rpc *name* is cosmetic, so renaming a command
 // is safe; renumbering it is not.
 service AppService {
+  // Say hello to someone
   rpc Greet(GreetRequest) returns (GreetResponse) {
     option (devalbo.options.v1.method_id) = 10000;
   }

@@ -101,3 +101,34 @@ test("repaints for a write no UI handler made", async ({ page }) => {
 
   expect(errors, "no uncaught errors while driving the engine").toEqual([]);
 });
+
+// `window.app` — the dev-console handle (Decision 34).
+//
+// Worth a test rather than trusting it exists, because its value depends
+// entirely on being the SAME path the buttons take. If the console handle ever
+// became a parallel implementation, this page would have two front ends free to
+// disagree — and the one nobody tests would be the one that drifts.
+test("window.app drives the slot from the console", async ({ page }) => {
+  await expect(page.getByTestId("count")).toHaveText("0");
+
+  // No click, no form: exactly what someone types into devtools.
+  const created = await page.evaluate(() =>
+    (window as any).app.create("From the console", "typed by hand"),
+  );
+  expect(created).toBe(true);
+
+  // The list updated by EVENT, as it does for a click — the console handle gets
+  // the reactivity loop for free precisely because it is not a separate path.
+  await expect(page.getByTestId("count")).toHaveText("1");
+
+  // …and the slot can say what it is showing, which is what makes two slots on
+  // different tiers comparable at all.
+  const projection = await page.evaluate(() => (window as any).app.projection());
+  expect(projection).toBe("records: 1\n- from-the-console — From the console");
+
+  const removed = await page.evaluate(() =>
+    (window as any).app.remove("from-the-console"),
+  );
+  expect(removed).toBe(true);
+  await expect(page.getByTestId("count")).toHaveText("0");
+});

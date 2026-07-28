@@ -103,6 +103,29 @@ func TestTemplateOptionsProtoInSync(t *testing.T) {
 	if string(source) != string(vendored) {
 		t.Error("templates/…/options.proto has drifted — run `make sync-template-proto`")
 	}
+
+	// The EXAMPLE APPS vendor the same file, and until now nothing checked them.
+	// Adding `cli_name` to the platform's copy broke notes' codegen with an error
+	// that named neither this file nor the app — buf cancels every plugin when
+	// one fails, so the real cause was three layers down. An example app is a
+	// worked demonstration of current practice; one built against a stale copy of
+	// the platform's own schema teaches the wrong thing.
+	apps, err := filepath.Glob("../example-apps/*/" + rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) == 0 {
+		t.Error("no example app vendors options.proto — if that is deliberate, delete this check")
+	}
+	for _, path := range apps {
+		appCopy, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(source) != string(appCopy) {
+			t.Errorf("%s has drifted from the platform's options.proto — run `make sync-template-proto`", path)
+		}
+	}
 }
 
 // Every file under templates/ must declare its intent with a suffix: `.tmpl`

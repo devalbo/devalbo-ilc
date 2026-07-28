@@ -1,0 +1,227 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/peterbourgon/ff/v3/ffcli"
+
+	"github.com/devalbo/devalbo-ilc/engine/platform"
+	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
+)
+
+// Renderer prints one response. Nil means the command prints nothing.
+//
+// This is the ONLY hand-written part of a command, and deliberately so: how a
+// `ListRecordsResponse` should look is a presentation decision, which belongs to
+// the tier slot (Decision 34). Everything above it — which subcommands exist,
+// which flags they take, what is required — comes from the schema.
+type Renderer func(out io.Writer, response []byte) error
+
+// App is a native tier slot's command line, built from a generated surface.
+type App struct {
+	// Name is the program name, used in usage.
+	Name  string
+	Short string
+
+	// Commands is the generated surface, usually one or more `…ServiceCLI`
+	// slices concatenated — an app's own plus the platform's inherited verbs.
+	Commands []clispec.Command
+
+	// Port is the engine. Injected rather than reached for, so a test can run
+	// the whole command line against a fake (Decision 34).
+	Port platform.EnginePort
+
+	// Render maps a method id to its printer. A command with no entry is an
+	// ERROR at run time, not a silent no-op: forgetting to print a response is
+	// a bug, and it should not look like a command that succeeded quietly.
+	Render map[uint32]Renderer
+
+	// Fill supplies values the user should not have to type. The standing case
+	// is the clock: the engine has no clock capability, because a browser tab
+	// and an MCU disagree about what one is, so "now" is native input exactly
+	// like argv.
+	Fill func(cmd clispec.Command, values map[string][]string)
+
+	Stdout io.Writer
+	Stderr io.Writer
+	// Stdin backs fields declared CLI_SOURCE_STDIN (and `--flag -`). Optional:
+	// a host that supplies none turns such a flag into a named error rather
+	// than a hang on a stream nobody is writing to.
+	Stdin io.Reader
+}
+
+// Run parses args, dispatches, and returns a process exit code.
+func (a App) Run(args []string) int {
+	root, err := a.build()
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "%s: %v\n", a.Name, err)
+		return 2
+	}
+	if err := root.ParseAndRun(context.Background(), args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0 // -h is what the user asked for, not a failure
+		}
+		fmt.Fprintf(a.Stderr, "%s: %v\n", a.Name, err)
+		return 1
+	}
+	return 0
+}
+
+func (a App) build() (*ffcli.Command, error) {
+	commands := append([]clispec.Command(nil), a.Commands...)
+	sort.Slice(commands, func(i, j int) bool { return commands[i].Name < commands[j].Name })
+
+	subs := make([]*ffcli.Command, 0, len(commands))
+	for _, cmd := range commands {
+		sub, err := a.subcommand(cmd)
+		if err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+
+	return &ffcli.Command{
+		Name:        a.Name,
+		ShortHelp:   a.Short,
+		ShortUsage:  a.Name + " <command> [flags]",
+		Subcommands: subs,
+		FlagSet:     flag.NewFlagSet(a.Name, flag.ContinueOnError),
+		Exec: func(_ context.Context, args []string) error {
+			// ffcli routes anything it does not recognise to the ROOT Exec, so
+			// without this a typo'd subcommand printed the help and exited 0 —
+			// success, as far as any script calling it could tell.
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q (try `%s -h`)", args[0], a.Name)
+			}
+			return flag.ErrHelp // bare invocation: show the command list
+		},
+	}, nil
+}
+
+func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
+	renderer, ok := a.Render[cmd.Method]
+	if !ok {
+		return nil, fmt.Errorf("command %q (method %d) has no renderer registered", cmd.Name, cmd.Method)
+	}
+
+	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
+	values := map[string][]string{}
+
+	for _, f := range cmd.Flags {
+		// flag.Func appends rather than assigns, which gives repeated fields
+		// their natural command-line form (--tier native --tier web) with no
+		// extra machinery.
+		collect := func(s string) error {
+			values[f.Name] = append(values[f.Name], s)
+			return nil
+		}
+		fs.Func(f.Name, usageFor(f), collect)
+		if f.Short != "" {
+			// Registered as a second name on the same target. stdlib flag has no
+			// separate short/long concept — which is the point: it accepts
+			// `-title` as well as `--title`, where pflag would read that as a
+			// cluster of shorthands (Spike 4, case 3).
+			fs.Func(f.Short, usageFor(f)+" (short for --"+f.Name+")", collect)
+		}
+	}
+
+	return &ffcli.Command{
+		Name:       cmd.Name,
+		ShortHelp:  shortHelp(cmd),
+		ShortUsage: a.Name + " " + cmd.Name + usageSuffix(cmd),
+		FlagSet:    fs,
+		Exec: func(_ context.Context, rest []string) error {
+			if len(rest) > 0 {
+				return fmt.Errorf("%s takes flags, not positional arguments (got %q)", cmd.Name, strings.Join(rest, " "))
+			}
+			return a.exec(cmd, values, renderer)
+		},
+	}, nil
+}
+
+func (a App) exec(cmd clispec.Command, values map[string][]string, render Renderer) error {
+	// Defaults first, so Fill and the user both override them.
+	for _, f := range cmd.Flags {
+		if f.Default != "" && len(values[f.Name]) == 0 {
+			values[f.Name] = []string{f.Default}
+		}
+	}
+	if a.Fill != nil {
+		a.Fill(cmd, values)
+	}
+	// Required is checked AFTER Fill: a host that supplies the clock has
+	// satisfied a required `created_at`, and the user should not be told to
+	// pass something the host is going to overwrite.
+	for _, f := range cmd.Flags {
+		if f.Required && len(values[f.Name]) == 0 {
+			return fmt.Errorf("%s: --%s is required", cmd.Name, f.Name)
+		}
+	}
+
+	request, err := encodeRequest(cmd, values, a.Stdin)
+	if err != nil {
+		return err
+	}
+
+	result := a.Port.Execute(cmd.Method, request)
+	if !result.Success {
+		// Errors ride the envelope, not exceptions — the same on every tier.
+		return errors.New(result.Err)
+	}
+	if render == nil {
+		return nil
+	}
+	return render(a.Stdout, result.Output)
+}
+
+func usageFor(f clispec.Flag) string {
+	parts := []string{}
+	if f.Help != "" {
+		parts = append(parts, f.Help)
+	}
+	if len(f.EnumValues) > 0 {
+		parts = append(parts, "one of: "+strings.Join(f.EnumValues, ", "))
+	}
+	if f.Required {
+		parts = append(parts, "(required)")
+	}
+	if f.Repeated {
+		parts = append(parts, "(repeatable)")
+	}
+	if len(parts) == 0 {
+		return "(no help declared — add (devalbo.options.v1.help) in the .proto)"
+	}
+	return strings.Join(parts, " ")
+}
+
+func shortHelp(cmd clispec.Command) string {
+	if len(cmd.Unsupported) == 0 {
+		return cmd.Summary
+	}
+	// Said out loud rather than dropped: a command that silently ignores part of
+	// its request is worse than one that admits it cannot set it here.
+	note := "(" + strings.Join(cmd.Unsupported, ", ") + " cannot be set from the command line)"
+	if cmd.Summary == "" {
+		return note
+	}
+	return cmd.Summary + " " + note
+}
+
+func usageSuffix(cmd clispec.Command) string {
+	var required []string
+	for _, f := range cmd.Flags {
+		if f.Required {
+			required = append(required, "--"+f.Name+" <"+f.Name+">")
+		}
+	}
+	if len(required) == 0 {
+		return " [flags]"
+	}
+	return " " + strings.Join(required, " ") + " [flags]"
+}

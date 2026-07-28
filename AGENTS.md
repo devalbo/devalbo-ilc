@@ -66,6 +66,13 @@ one deliberate exception is `options.proto`, vendored because a generated projec
 **`dlc` is an app like any other.** If `dlc` needs special treatment, the template is teaching something
 `dlc` does not do.
 
+**Dogfood drift is one-directional and invisible**, so it is reviewed rather than assumed: a capability
+lands, the example app and the template adopt it, and `dlc` quietly keeps the old shape — leaving the tool
+that teaches the pattern as the one app not following it, with every check still green. **When a capability
+or a plan phase lands, run the dogfood checklist** in the tasks doc (does `dlc` use the generated CLI
+surface, a `dlc.toml`, `hosts/<tier>/` slots, a port seam?) and either fix the gap or record it as
+deliberate debt, as `hosts/README.md` does for `frontend/`.
+
 **Events (`platform.Emit`) — three rules, each of which fails far from its cause:**
 - **A host must never call `Execute` from inside a sink.** The engine is on the stack; re-entering it
   mid-command is how you get corrupt state or a deadlock. The web host is safe by construction (Comlink is
@@ -99,6 +106,37 @@ engine decides `winner`; a slot may highlight the line the engine named and may 
 **`frontend/` at the repo root is `dlc`'s own web slot**, not runtime, and keeps that name only until the
 runtime is extracted (§16.4) and frees `hosts/web/`. Apps have no such collision — see
 `example-apps/notes/`.
+
+## 3b. The command surface is generated, not hand-written
+
+**A native host does not `switch args[0]`.** `protoc-gen-dlc-registry` emits a `clispec` surface from the
+`.proto` — rpcs become subcommands, request fields become flags — and `platform/cli` turns that into a
+parser. A hand-written switch is a second place for the command surface to live and a second place for it
+to be wrong.
+
+**What a host still writes is presentation only:** a `Render` per method, and `Fill` for values the user
+should not type (the clock). Both are the tier slot's business (§3a).
+
+**The CLI spelling is declarable in the schema** — `(cli_name)` on an rpc, `(cli_flag)` / `(cli_source)` /
+`help` / `required` / `default` / `short` on a field, and an rpc's **doc comment becomes its `-h`
+summary**. All cosmetic: dispatch is on `method_id` and encoding is by field *number*, so renaming a
+command or flag is not a breaking change and never touches the id lock.
+
+**`cli_source` exists because a value's SOURCE is not its type.** `bytes` is almost always a file, a long
+string may be piped; declaring it means every host resolves values identically instead of each inventing
+an `@file` convention. It is why an inherited `import-fs` is usable from a command line without the app
+hand-writing a file read.
+
+**Parsing divergence is invisible to parity.** Parity compares command results, written filesystems and
+event streams — all *downstream* of a request that already exists. Two tiers that turn the same argv into
+different requests are each internally consistent and every check stays green. So the invariant to protect
+is **`argv → request bytes`**, not "one parser": keep the semantic half (`cli/encode.go` — required,
+defaults, enum names, sources, encoding) portable and shared, and let only argv tokenizing differ.
+
+**Generated code may only import leaf packages.** It lives in the message package, which `platform`
+imports, so anything it references must not reach back — hence `clispec` (data, no imports) being separate
+from `platform/cli` (the runner, which pulls in ffcli and `google.golang.org/protobuf` and must never
+enter the engine's TinyGo build).
 
 ## 4. Templates
 

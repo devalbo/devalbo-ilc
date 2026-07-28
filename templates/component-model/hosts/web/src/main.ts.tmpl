@@ -1,38 +1,30 @@
-// {{.ProjectName}}'s web UI.
+// {{.ProjectName}}'s web tier slot — the entry point.
 //
-// The form IS this tier's command parser (Decision 28): it collects fields,
-// encodes a typed request, and hands the bytes to the engine through the ILC web
-// adapter. What `greet` MEANS lives in engine/ — shared with the CLI — which is
-// why the browser and the terminal cannot disagree.
+// Everything this file does is choose an engine and publish a handle. The view
+// lives in `view.ts` and takes an `EnginePort` (Decision 34), so the only
+// difference between the real app and a slot test is which port gets passed here
+// versus there — no build flag, no mock injection, no branch inside the view.
+import { enginePort } from "@devalbo/ilc-web/port";
+
+import { mountApp } from "./view";
+import type { AppView } from "./view";
+
+const view = mountApp(enginePort);
+
+// `window.app` — drive the app from the dev console:
 //
-// No business logic here. If you find yourself deciding something in this file,
-// it belongs in engine/.
-import { execute } from "@devalbo/ilc-web/api";
-
-// Two generated files, two generators: es-lite emits the MESSAGES, and
-// protoc-gen-dlc-registry emits the permanent method IDS. Neither is hand-written.
-import { GreetRequest, GreetResponse } from "@gen/{{.PkgName}}/v1/commands.pb";
-import { MethodGreet } from "@gen/{{.PkgName}}/v1/commands.registry.pb";
-
-const out = document.getElementById("out") as HTMLPreElement;
-const nameInput = document.getElementById("name") as HTMLInputElement;
-
-function say(line: string) {
-  out.textContent += line + "\n";
-}
-
-document.getElementById("greet")!.addEventListener("click", async () => {
-  try {
-    const request = GreetRequest.toBinary({ name: nameInput.value });
-    const r = await execute(MethodGreet, request);
-    if (!r.success) {
-      say(`greet failed: ${r.error ?? "(no message)"}`);
-      return;
-    }
-    say(GreetResponse.fromBinary(r.output).text ?? "");
-  } catch (e) {
-    say(`ERROR: ${(e as Error).message}`);
+//	await app.greet("world")
+//	app.projection()
+//
+// These are the SAME functions the buttons call, not a parallel back door: the
+// click handler collects a string and calls `app.greet`. A console API that took
+// a different path would be a second front end able to disagree with the first.
+declare global {
+  interface Window {
+    app: AppView;
   }
-});
+}
+window.app = view;
 
-say("ready — the engine boots on the first command");
+document.getElementById("out")!.textContent +=
+  "ready — the engine boots on the first command. `app` is on window: try app.greet(\"world\")\n";

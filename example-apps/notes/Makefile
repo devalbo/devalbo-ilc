@@ -2,7 +2,7 @@
 # Run inside `devbox shell`.
 
 .PHONY: gen
-gen: ## generate proto bindings + command dispatch
+gen: ## generate proto bindings, command dispatch, and dlcconfig from dlc.toml
 	cd proto && buf lint
 	dlc gen
 
@@ -11,8 +11,8 @@ build: gen ## build the native CLI (engine linked in-process)
 	go build -o notes ./hosts/native
 
 .PHONY: run
-run: build ## build then say hello
-	./notes greet
+run: build ## build, then show the generated command surface
+	./notes
 
 .PHONY: test
 test: ## unit tests
@@ -38,5 +38,11 @@ dev-web: build-web ## serve the web tier
 
 .PHONY: verify
 verify: build ## the smoke test: the binary exists and answers
+	# Exercised in a temp dir because the native filesystem root IS the working
+	# directory — `reset-fs` here would delete the checkout's own files.
 	@./notes version
-	@./notes greet ILC
+	@tmp=$$(mktemp -d) && cd $$tmp && \
+		"$(CURDIR)/notes" create --title "Smoke test" --body "written by make verify" >/dev/null && \
+		"$(CURDIR)/notes" list && \
+		"$(CURDIR)/notes" delete --id smoke-test >/dev/null && \
+		rm -rf $$tmp
