@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
@@ -79,8 +80,15 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 					_, err := fmt.Fprintln(out, "(no notes)")
 					return err
 				}
+				// A HEADER, and a body excerpt — matching the terminal. Printing
+				// bare id and title read as a duplicated column, because the id
+				// is slugged from the title and the two are usually identical.
+				if _, err := fmt.Fprintf(out, "%-24s %-24s %s\n", "ID", "TITLE", "BODY"); err != nil {
+					return err
+				}
 				for _, rec := range r.Records {
-					if _, err := fmt.Fprintf(out, "%-24s %s\n", rec.GetId(), rec.GetTitle()); err != nil {
+					if _, err := fmt.Fprintf(out, "%-24s %-24s %s\n",
+						rec.GetId(), rec.GetTitle(), excerpt(rec.GetBody())); err != nil {
 						return err
 					}
 				}
@@ -125,6 +133,17 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 			}),
 		},
 	}
+}
+
+// excerpt is the first line of a body, shortened — a list is an index, not the
+// content. `open <id>` is what shows the whole thing.
+func excerpt(body string) string {
+	line, _, _ := strings.Cut(body, "\n")
+	const max = 40
+	if len(line) > max {
+		return line[:max-1] + "…"
+	}
+	return line
 }
 
 // render adapts a typed printer to the byte-level Renderer, so each printer

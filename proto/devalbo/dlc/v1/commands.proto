@@ -29,9 +29,11 @@ import "devalbo/options/v1/options.proto";
 // (Decision 31). There is no oneof envelope; the discriminator is the scalar
 // method_id parameter.
 service DlcService {
+  // Scaffold a new ILC project
   rpc New(NewRequest) returns (NewResponse) {
     option (devalbo.options.v1.method_id) = 10000;
   }
+  // Echo the words back, through the engine
   rpc Echo(EchoRequest) returns (EchoResponse) {
     option (devalbo.options.v1.method_id) = 10001;
   }
@@ -44,7 +46,10 @@ service DlcService {
 message NewRequest {
   string name = 1 [
     (devalbo.options.v1.help) = "project/app name",
-    (devalbo.options.v1.required) = true
+    (devalbo.options.v1.required) = true,
+    // `dlc new myapp`, not `dlc new --name myapp`. The flag spelling still
+    // works, so existing scripts keep parsing.
+    (devalbo.options.v1.cli_positional) = 1
   ];
   string module = 2 [
     (devalbo.options.v1.help) = "Go module path (default github.com/you/<app>)",
@@ -59,13 +64,19 @@ message NewRequest {
   repeated string tiers = 4 [
     (devalbo.options.v1.help) = "tier opt-ins (native, web)"
   ];
+  // NO DEFAULT, deliberately. This declared `UI_KIND_REACT` while the engine
+  // rejected anything but UNSPECIFIED — the template scaffolds a vanilla-TS UI.
+  // The hand-written host never sent the field, so the claim was decorative and
+  // stayed false for free; the generated CLI applies declared defaults, so
+  // `dlc new myapp` failed outright the moment dlc ate its own surface. Restore
+  // a default when there is a UI kind the engine actually accepts.
   UiKind ui = 5 [
-    (devalbo.options.v1.help) = "UI to scaffold",
-    (devalbo.options.v1.default) = "UI_KIND_REACT"
+    (devalbo.options.v1.help) = "UI to scaffold"
   ];
+  // Same story as `ui` above: declared STORAGE_KIND_SPLIT, engine accepts only
+  // UNSPECIFIED.
   StorageKind storage = 6 [
-    (devalbo.options.v1.help) = "storage layout",
-    (devalbo.options.v1.default) = "STORAGE_KIND_SPLIT"
+    (devalbo.options.v1.help) = "storage layout"
   ];
   // BOOTSTRAP: path to a local devalbo-ilc checkout, written into the generated
   // go.mod as a `replace`. Needed only until ilc-platform is published — see
@@ -81,7 +92,9 @@ message NewResponse {
 
 message EchoRequest {
   repeated string args = 1 [
-    (devalbo.options.v1.help) = "words to echo back"
+    (devalbo.options.v1.help) = "words to echo back",
+    // Repeated AND positional, so it takes the remainder: `dlc echo one two`.
+    (devalbo.options.v1.cli_positional) = 1
   ];
 }
 message EchoResponse {

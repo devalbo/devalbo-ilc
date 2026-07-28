@@ -1,0 +1,25 @@
+// {{.ProjectName}}'s OPFS browser route.
+//
+// Reads the filesystem DIRECTLY, not through the engine — which is the point: if
+// the store were only readable via the app, "the files are the truth" (§7.1)
+// would be a claim about an implementation detail rather than about the store.
+import { onFlush } from "@devalbo/ilc-web/api";
+import { filesStyles, mountFiles } from "@devalbo/ilc-web/files";
+
+document.head.appendChild(document.createElement("style")).textContent =
+  filesStyles();
+
+// `onFlush`, not `subscribe`. This page watches the FILESYSTEM and knows nothing
+// about what a command means — someone watching the store infers what happened
+// rather than being told by the app. A flush is a HOST fact ("the tree is
+// persisted"); an engine event is an APP fact ("a record changed"). A flush
+// happens after every command; an event only when a handler emits one.
+const files = mountFiles(document.getElementById("files")!, { onFlush });
+void files.refresh();
+
+declare global {
+  interface Window {
+    files: typeof files;
+  }
+}
+window.files = files;

@@ -39,7 +39,74 @@ func runGen(args []string) error {
 		return fmt.Errorf("gen: buf generate: %w", err)
 	}
 
+	if err := copyPlatformTS(m); err != nil {
+		return err
+	}
 	return writeConfigPackage(m)
+}
+
+// copyPlatformTS puts the platform's generated TypeScript into the app's gen
+// tree, so a browser front end can reach the INHERITED commands.
+//
+// WHY THIS IS NEEDED AT ALL. On the Go side an app imports the platform's
+// generated code straight from the platform module, so `version`, `export-fs`,
+// `import-fs` and `reset-fs` are one import away. TypeScript has no equivalent:
+// an app's `buf generate` sees only the app's own protos, so before this the
+// inherited verbs were simply unreachable from any browser front end — the web
+// terminal could not run `version` at all.
+//
+// WHY NOT IN THE TEMPLATE. `AGENTS.md` §3: templates depend on the platform,
+// they never inline it, because code copied into a scaffold is frozen there
+// forever. A platform message vendored at scaffold time could never be fixed
+// upstream. Copying at GENERATE time is the same relationship the Go module
+// dependency has — the app tracks whatever platform it is built against.
+//
+// This mirrors `dlc build web` supplying the WIT world: the app does not own it,
+// carry it, or go stale on it.
+func copyPlatformTS(m *Manifest) error {
+	if m.PlatformPath == "" {
+		// No local platform checkout: nothing to copy, and nothing to say. When
+		// ilc-platform is published this becomes a package dependency instead.
+		return nil
+	}
+	// `devalbo/ilc` ONLY — the inherited platform surface. The platform's tree
+	// also holds `devalbo/dlc` (dlc's own commands) and leftover spike packages,
+	// and an app has no business carrying either: dlc is an app like any other,
+	// and its command surface is not part of what other apps inherit.
+	src := filepath.Join(m.PlatformPath, "gen", "ts", "devalbo", "ilc")
+	if _, err := os.Stat(src); err != nil {
+		// The platform has not generated its own TS yet. Not fatal: an app that
+		// never touches an inherited command still builds.
+		return nil
+	}
+	dst := filepath.Join("gen", "ts", "devalbo", "ilc")
+	return copyTree(src, dst)
+}
+
+// copyTree copies a directory recursively, skipping anything the app generates
+// for itself.
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 // writeConfigPackage emits gen/go/dlcconfig from the manifest.

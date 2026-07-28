@@ -167,3 +167,54 @@ function revive(node: any): FileDataEntry {
   }
   return { dir: {} };
 }
+
+/** One entry in the store: its path and how big it is. */
+export interface OPFSEntry {
+  path: string;
+  size: number;
+}
+
+/**
+ * Every file in OPFS with its size, sorted.
+ *
+ * Separate from `listOPFS` rather than replacing it: the flush path only needs
+ * names, and opening every file to stat it is work that path should not pay.
+ */
+export async function listOPFSEntries(
+  root?: FileSystemDirectoryHandle,
+  prefix = "",
+): Promise<OPFSEntry[]> {
+  const dir = root ?? (await opfsRoot());
+  const out: OPFSEntry[] = [];
+  for await (const [name, child] of (dir as any).entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (child.kind === "directory") {
+      out.push(...(await listOPFSEntries(child as FileSystemDirectoryHandle, path)));
+    } else {
+      const file = await (child as FileSystemFileHandle).getFile();
+      out.push({ path, size: file.size });
+    }
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Raw bytes of one file.
+ *
+ * The store is "one JSON file per record" today, but a bundle can carry binary
+ * (BFT base64-encodes it precisely because some files are not text), so a
+ * viewer that assumed UTF-8 would render mojibake and call it content.
+ */
+export async function readOPFSBytes(
+  path: string,
+  root?: FileSystemDirectoryHandle,
+): Promise<Uint8Array> {
+  const dir = root ?? (await opfsRoot());
+  const parts = path.replace(/^\/+/, "").split("/").filter(Boolean);
+  let handle: FileSystemDirectoryHandle = dir;
+  for (let i = 0; i < parts.length - 1; i++) {
+    handle = await handle.getDirectoryHandle(parts[i]);
+  }
+  const file = await handle.getFileHandle(parts[parts.length - 1]);
+  return new Uint8Array(await (await file.getFile()).arrayBuffer());
+}

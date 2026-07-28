@@ -83,6 +83,24 @@ deliberate debt, as `hosts/README.md` does for `frontend/`.
 - **Emit AFTER the write, once per command.** A subscriber re-reads on the event and must find the new
   state there. Once per command, never per record — a 1000-file import must not become 1000 messages.
 
+**Host facts and app facts are different signals, and neither side learns the other's vocabulary.**
+`subscribe` carries what the ENGINE announces about its own domain — `notes.record-changed` means something
+only if you know notes. `onFlush` carries a HOST fact: the tree is persisted. Which one to use follows from
+what the listener is watching:
+
+- watching the **application** (a record list, a view of app state) → `subscribe`. The payload says *which*
+  record and *why* (the causing `method_id`), which is enough to ignore your own writes or update one row.
+- watching the **filesystem** (a file browser, a future sync) → `onFlush`. It knows nothing about what a
+  command means, and should not have to: the host publishes that something persisted, and the watcher
+  infers what that implies for it.
+
+**They are not interchangeable, in both directions.** A filesystem watcher driven by events is inferring
+"files moved" from "the app said something happened" — app-coupled reasoning that misses a command which
+writes without emitting, since a flush happens after *every* `execute` while an event fires only when a
+handler chooses. And a view of app state driven by flushes has to re-read everything on every command,
+including reads, because a flush carries no payload — tolerable while the store is small and wrong once the
+SQLite index lands.
+
 **A capability's absence is a no-op, never an error** (Decision 33). App code must not be able to tell
 whether anyone is listening, because on some tier nobody is, and code that branches on it behaves
 differently per tier — the divergence this architecture exists to prevent.

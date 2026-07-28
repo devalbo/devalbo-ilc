@@ -77,4 +77,19 @@ extend google.protobuf.FieldOptions {
   // Where the value comes from. Unset means the sensible default for the
   // field's type: FILE for `bytes`, LITERAL for everything else.
   CliSource cli_source = 50008;
+
+  // Take this field POSITIONALLY, at this 1-based position:
+  //
+  //   string name = 1 [(cli_positional) = 1];   ->   dlc new myapp
+  //
+  // Without this every command is flags-only, which reads worse than the
+  // hand-written CLIs this replaces — `dlc new --name myapp` is a regression,
+  // not a migration. The flag spelling keeps working either way, so
+  // `--name myapp` remains valid and scripts have both.
+  //
+  // Rules the generator enforces, because each fails confusingly at run time:
+  // positions are unique and contiguous from 1; a REPEATED positional takes
+  // everything remaining and so must be last; and there can be only one of
+  // those.
+  uint32 cli_positional = 50009;
 }

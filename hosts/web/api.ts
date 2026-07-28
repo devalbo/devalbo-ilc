@@ -96,6 +96,44 @@ const listeners = new Set<(topic: string, payload: Uint8Array) => void>();
 let attached: Promise<void> | null = null;
 
 /**
+ * Hear about every OPFS flush. Returns an unsubscribe.
+ *
+ * NOT an engine event, and the distinction is the point. `subscribe` carries
+ * what the ENGINE announces about its own domain (Decision 33) — an app's topic,
+ * an app's payload, meaningful only if you know the app. This carries a HOST
+ * fact: the tree has been persisted.
+ *
+ * Anything watching the FILESYSTEM rather than the application wants this one. A
+ * flush happens after every `execute`; an event fires only when a handler
+ * chooses to emit. So a file browser driven by events is really inferring "the
+ * filesystem may have moved" from "the app said something happened" — which is
+ * app-coupled reasoning, and misses a command that writes without emitting.
+ *
+ * Fires AFTER the write is durable, same ordering guarantee as events.
+ */
+export async function onFlush(fn: () => void): Promise<() => void> {
+  flushListeners.add(fn);
+  flushAttached ??= connect().onFlush(
+    Comlink.proxy(() => {
+      for (const listener of [...flushListeners]) {
+        try {
+          listener();
+        } catch (e) {
+          console.error("ilc: flush listener threw", e);
+        }
+      }
+    }),
+  );
+  await flushAttached;
+  return () => {
+    flushListeners.delete(fn);
+  };
+}
+
+const flushListeners = new Set<() => void>();
+let flushAttached: Promise<void> | null = null;
+
+/**
  * The platform's own topic — emitted by the inherited filesystem verbs
  * (`import-fs`, `reset-fs`) with a `DataChangedEvent` payload.
  *

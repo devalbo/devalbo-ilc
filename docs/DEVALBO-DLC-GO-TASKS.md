@@ -193,12 +193,209 @@ cost a re-bless (`make scaffold-golden`) and not a migration story.
 - [ ] `open` / `update` / `rebuild-index` — wait on split-storage and the SQLite index
 - [x] Drove out Events and the `caps_*` seam; now driving out the host layer
 
+### In-page terminal (web tier) — the CLI surface, in the browser
+
+A terminal widget in the page: type `create --title "Buy milk"`, see it run against the same engine the
+buttons drive. **Scaffolded on a route by default** so every app has one without wiring it up.
+
+**Why this is more than a convenience.**
+- **It is the second consumer of `clispec`.** The generated surface claims to be tier-neutral, and today
+  exactly one host (Go) reads it. A TypeScript consumer is what turns that claim into something checked.
+- **It makes the divergence hazard concrete and testable.** The moment two parsers exist, `argv → request
+  bytes` stops being a thought experiment: the **parse vectors** item under the CLI-location task becomes
+  runnable — same vectors, Go runner and TS runner, diff the bytes. Right now nothing forces that.
+- **It rehearses the serial REPL.** The embedded tier's REPL is the same shape — a line of text in, a
+  rendered response out — and iterating on it in a browser is far cheaper than on an ESP32.
+- **It is a real debugging surface.** `window.app` reaches the *slot's* operations; a terminal reaches the
+  *command surface*, including inherited verbs a UI never exposes (`export-fs`, `reset-fs`).
+
+**Shape — mirror `cli.App`, don't invent a second model.** `hosts/web/terminal.ts` in the RUNTIME (every app
+inherits it, like `subscribe`), taking the same three things the Go runner takes: an `EnginePort`, a
+`clispec` surface, and per-method renderers. The app supplies the surface and the renderers; the runtime
+owns parsing and history. A slot renders, it never decides (Decision 34).
+
+- [x] **Phase 1 — a TS `clispec` + encoder.** ✅ Plugin emits the surface for `lang=ts` (it currently emits ids
+      only — this is the concrete driver for the Decision 29 web follow-up above). Encode with es-lite's
+      `writeScalar(writer, type, fieldNo, value)` from `@aptre/protobuf-es-lite/binary` — **checked: it is
+      exported**, so no hand-rolled wire encoder. Falsify against the Go runner: same command line, same
+      bytes.
+- [x] **Phase 2 — the terminal itself.** ✅ Plain `<pre>` + input line, not xterm.js: the value is the command
+      surface, not terminal emulation, and a dependency that renders ANSI buys nothing here yet. Parse a
+      line into argv (quoting is the only fiddly bit), dispatch, render.
+- [x] **Phase 3 — on a route by default.** ✅ A separate Vite entry (`terminal.html`) rather than a router
+      dependency — Vite does multi-page natively, and the scaffold's UI is vanilla TS with no router today.
+      If a real path (`/terminal`, no `.html`) is wanted, that is a dev-server rewrite plus a build config,
+      not a library.
+- [x] **Phase 4 — scaffold it** ✅ template ships `terminal.html`, `src/terminal.ts` and a shipped browser test; notes has one too. Golden re-blessed.
+- [x] **Phase 5 — tab completion from the spec.** ✅ Cheap, and the payoff for having the surface as DATA:
+      complete subcommands, then flags, then enum values, with no extra source of truth. Do it last — it is
+      the reward, not the point.
+
+**Framework: a plain core, with an optional React wrapper — not React in the runtime.** It is tempting to
+say "we already use React", but that is only true of **`dlc`'s own `frontend/`**: the template and notes are
+vanilla TS, and `dlc new --ui REACT` is unimplemented (the engine rejects `UI_KIND_REACT` — the web tier
+scaffolds vanilla TS). Putting React in `@devalbo/ilc-web` would push it onto every scaffolded app that
+deliberately has none, and make the runtime's dependency set depend on a UI choice apps have not made.
+
+So: the terminal core is framework-free — it is parse → dispatch → render text, which needs no framework —
+and `hosts/web/terminal-react.tsx` is a thin optional wrapper for hosts that already have React, `dlc`'s own
+UI being the first consumer. That way dlc's React frontend gets a component, a scaffolded vanilla-TS app
+gets a mount function, and neither pays for the other. If **`UI_KIND_REACT` scaffolding** lands later, the
+wrapper is already there and the terminal is not what forced the decision.
+
+**The wrinkle worth deciding early: `cli_source` FILE and STDIN are native concepts.** A browser has no cwd
+and no stdin, so `import-fs backup.json` needs a meaning. The good answer is probably **OPFS**: the engine's
+filesystem on this tier *is* OPFS, so a path resolves there and `import-fs` works the way it reads. Stdin
+has no analogue and should be a named refusal, not a hang. Decide it in Phase 1 — it changes what the TS
+runner does with a resolved value, and getting it wrong means the same command line means different things
+per tier, which is the whole hazard.
+
+**Explicitly out of scope:** ANSI/colour, curses, job control, piping between commands, and a shell
+language. If any of those start to feel necessary, the terminal has stopped being a command surface and
+become an emulator.
+
+**Landed 2026-07-28.** `hosts/web/{clispec,encode,terminal,terminal-ui}.ts`, the plugin emitting
+`.cli.pb.ts`, and a `terminal.html` route in notes and the template. 26 browser tests in notes.
+
+**The encoder imports NOTHING, and that was a correction.** It first borrowed es-lite's wire writer, which
+meant a bare specifier — and this package is consumed by `file:` symlink with no `node_modules` of its own,
+so Vite resolved from the real path and failed. The first fix was a Vite alias onto `dist/binary.js`, which
+reaches past the package's exports map into internals we do not control and would break on a version bump
+with "file not found" nowhere near the cause. Hand-writing the ~40 lines of varint and length-delimited
+encoding removes the whole problem class: the runtime package needs nothing from the app's `node_modules`.
+The argument for borrowing it ("don't implement a varint twice in two languages") was circular anyway —
+**the parse vectors are that argument's answer.**
+
+**The parse vectors are real and they work.** `hosts/native/parsevector_test.go` and
+`test/terminal.spec.ts` assert the same five command lines produce the same bytes, from two independently
+written encoders (Go via `protowire`, TypeScript by hand). The duplication is deliberate: generating both
+sides from one source would prove only that the generator agrees with itself. The vector that earns its
+keep is **negative int64** — signed ints are 64-bit two's complement varints, so `-1` is *ten* bytes and an
+int32 is sign-extended first, which is the one genuinely non-obvious rule in protobuf scalar encoding.
+
+**Two hazards found while building:**
+- **Vite's dev server serves any `.html`, but `vite build` only builds declared entries** — so a missing
+  entry breaks nothing until production, then silently omits the route. Green tests, missing page. The
+  preset now DISCOVERS `*.html` at the root, so adding a route is adding a file.
+- **The prompt is disabled while a command runs** (one engine instance; a second command would interleave
+  its output). Correct, and it made a test that pressed Up mid-command fail against nothing.
+
+**Left deliberately:** `stdin` is refused by name in the browser rather than hanging, and `file` sources
+read from OPFS — the right answer on this tier, since the engine's filesystem *is* OPFS, so
+`import-fs backup.json` resolves against the tree the command writes into.
+
+### "The files are the truth" is weaker on the web tier than §7.1 claims
+
+**Found while building the OPFS browser (2026-07-28), and it is a real cross-tier divergence in a core
+claim, not a bug in a page.**
+
+Natively the engine reads and writes the actual filesystem (`Root()` is the process cwd), so an external
+edit is seen on the next read and §7.1 holds literally: the files *are* the truth, and anything may write
+them.
+
+On the web tier they are not. `worker.ts` hydrates the whole OPFS tree into an in-memory `FileData`
+structure **before** instantiating the component — the guest snapshots its preopen, so a later
+`_setFileData` is invisible — and flushes that tree back after **every** `execute`. `writeDir` prunes as it
+flushes: anything OPFS holds that the in-memory tree lacks is removed. So on this tier:
+
+- the in-memory tree is the truth between flushes; **OPFS is a snapshot the engine overwrites**
+- a write made directly to OPFS is invisible to the running engine, **and is deleted by the next command** —
+  any command, including a read like `list`, because the flush is unconditional
+
+The prune is correct and load-bearing (`import-fs --replace` and `reset-fs` must be able to delete), so
+this is not fixed by merging instead.
+
+**Consequences already absorbed:** the OPFS browser is read-only for this reason, and `api.ts`'s `reset()`
+reloads the page rather than merely clearing storage.
+
+**What would close the gap, roughly in order of cost:**
+- [ ] **Granular file verbs through the engine** (§7.3 already lists these as open). A `write-file` command
+      makes the in-memory tree the thing that changes, the flush persists it, and the write announces itself
+      like any other. This is the honest answer, and it makes an editable file browser possible.
+- [ ] **Flush only when the engine wrote.** `worker.ts` says it flushes always because "the engine cannot
+      yet signal that it wrote anything — revisit when Events can report a write." Events now can. This
+      would not fix external writes, but it shrinks the window in which one gets clobbered.
+- [ ] **Re-hydrate on external change.** A `BroadcastChannel` or storage observer could reboot the engine
+      when OPFS moves underneath it — this is the same machinery the cross-tab Events follow-up needs, so
+      the two should be designed together.
+
+**Until then, say it plainly in the docs rather than letting §7.1 imply something the web tier does not
+do.** The store is inspectable on both tiers; it is externally *writable* only on native.
+
+### Commands inspector (web tier) — the surface, explorable
+
+A route that shows every command the app has: subcommands, their flags, types, which are required, defaults,
+enum choices, positions — with a form per command that builds and runs the request. Third route alongside
+the terminal and the file browser.
+
+**Why it is more than a nicer terminal.** The terminal makes the surface *usable*; this makes it *visible*.
+Three things follow from that:
+
+- **It is the app's API documentation, generated rather than written.** Every fact on the page comes from
+  `commands.proto` — `help`, `required`, `default`, `short`, `cli_name`, `cli_flag`, `cli_source`,
+  `cli_positional`, enum values, and the rpc's doc comment. Documentation that cannot go stale, because
+  there is nothing to keep in sync.
+- **It shows what a command line CANNOT express.** `Unsupported` is already carried per command (nested
+  messages, maps, floats). A terminal can only mention it; a form can render those fields as "not settable
+  here" and make the gap in the CLI surface obvious rather than folkloric.
+- **A FORM is the honest web front end** (Decision 28: each tier builds requests its own way). The terminal
+  borrows the CLI's idiom because it is a terminal; a browser's native idiom is a form. Building one from
+  the same `clispec` is the strongest evidence yet that the surface is genuinely tier-neutral — flags on
+  one tier, fields on another, one schema.
+
+- [ ] `hosts/web/inspector.ts` — render `clispec` as a browsable list plus a per-command form; reuse
+      `encode.ts` so a submitted form and a typed command line produce the **same bytes**
+- [ ] `commands.html` route in the template and notes
+- [ ] Show `method_id`, request message name, and the `Unsupported` list per command — the things a
+      developer debugging a request actually wants
+- [ ] Enum fields become `<select>`s from `enumValues`; required marked; defaults pre-filled — all already
+      in the surface, none of it hand-written
+- [ ] "Copy as command line" — turn the filled form into the equivalent terminal line, which makes the two
+      front ends visibly the same surface
+- [ ] Extend the **parse vectors** to a third front end: form input → request bytes must equal what the CLI
+      and the terminal build. That is the check that keeps three parsers honest, and it costs one more
+      assertion per vector
+
+**Careful about:** `cli_source` file/stdin fields (a form should offer a file picker or an OPFS path, not a
+text box pretending to be one), and running a mutating command by accident — a form that submits on Enter
+next to a `reset-fs` button deserves a confirmation.
+
+### OPFS file browser (web tier) — a route that shows the store
+
+A page listing what is actually in OPFS, with file contents viewable. Same reasoning as the terminal, and
+the same shape: a route the scaffold ships, `hosts/web/` runtime code an app mounts.
+
+**Why it belongs in the platform rather than in one app.** §7.1's whole claim is *the files are the truth* —
+one JSON file per record, readable without the app. On the terminal tier you can `cat` them; on the web
+tier that claim has been **unverifiable by eye** so far, because OPFS has no Finder. A browser makes the
+architecture's central promise inspectable, which is worth more here than it would be in a normal app.
+
+It also covers the debugging case the terminal does not: after `import-fs --replace`, "what is in there
+now?" is a filesystem question, not a command question.
+
+- [ ] `hosts/web/files.ts` — mount a tree from `listOPFS`, read with `readOPFSText`; both already exist in
+      `hosts/web/opfs.ts`, so this is presentation over an existing API
+- [ ] `files.html` route in the template and notes; the preset already discovers `*.html`, so a route is a
+      file
+- [ ] Read-only first. **Editing is a trap worth naming:** the engine holds a preopen captured at
+      instantiation and OPFS changes made behind its back are invisible to it until a reboot — which is why
+      `api.ts`'s `reset()` reloads the page rather than just clearing storage. A file editor would be a
+      second writer to the engine's own filesystem, and the events work has already established that a
+      second writer must announce itself. If editing is wanted, it should go through `import-fs` (which
+      emits `ilc.data-changed`) rather than writing OPFS directly.
+- [ ] Show byte sizes and let a file be downloaded — the inverse of the existing `export-fs` bundle path
+- [ ] A browser test asserting the tree matches what a command just wrote
+
+**Not a filesystem editor, and not a replacement for `export-fs`.** A bundle is the portable artifact; this
+is a window.
+
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
 - [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/ilc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes
   - [ ] follow-up: no desktop tier to wire `runtime.EventsEmit` into yet (§6.3)
+- [ ] **An app cannot ask whether it HAS a filesystem, and absence is not survivable.** §6.5 promises graceful degradation when a capability is missing, and for the filesystem there is no degradation path at all: `engine/platform` exposes no availability API — no `Available()`, no `unavailable` — so an app calls `WriteTree` and either it works or it returns an error it had no way to anticipate. `dlc.toml`'s `capabilities = ["console", "filesystem"]` does not help; it has one writer and zero readers. Today apps *assume*. The **query/verify** half is exactly what the manifest below is for, and it is the first concrete demand on it that is not about Display — which matters, since Decision 34 removed the Display argument for building it.
 - [ ] **Environment manifest** (§6.4a, Decision 32) — `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change; how `unavailable` stops being a linking problem and becomes a data one. **Re-justified by Decision 34:** its original headline reason was so a handler could branch on display facts, and a host-rendered app never learns there is a screen. What remains load-bearing is the non-display half — is there an index, what kind of FS root — which is also where the strict/lenient knob was already headed (`EVENTS-PLAN.md` §3, Phase 5)
 - [ ] **Display** capability (§6.4) — **now OPTIONAL, and the app author's call** (Decision 34). Three paths, chosen per app or per event: draw-command list · retained widget tree · **semantic events the host renders**. The first two put presentation in the app and are what this capability builds; the third costs one small tier slot and no capability at all, so it goes first. Build draw-list/widget-tree when an app genuinely wants to write presentation **once** and have it work everywhere — not before
 - [ ] **Network** (deferred): `wasi:http` when needed

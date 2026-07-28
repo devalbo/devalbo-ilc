@@ -47,7 +47,14 @@ test("creates, lists, and deletes notes through the shared engine", async ({
     const file = await (await dir.getFileHandle("buy-milk.json")).getFile();
     return file.text();
   });
-  expect(JSON.parse(stored)).toMatchObject({ id: "buy-milk", title: "Buy milk" });
+  // BODY included deliberately: this asserted only {id, title} for a long time,
+  // so a body that never reached the engine would have passed. Every field the
+  // form collects should appear here, or the form is only half checked.
+  expect(JSON.parse(stored)).toMatchObject({
+    id: "buy-milk",
+    title: "Buy milk",
+    body: "two litres",
+  });
 
   // Listing after a reload exercises the directory scan on a cold engine —
   // the fallback path that exists because the index capability does not.
@@ -124,11 +131,24 @@ test("window.app drives the slot from the console", async ({ page }) => {
   // …and the slot can say what it is showing, which is what makes two slots on
   // different tiers comparable at all.
   const projection = await page.evaluate(() => (window as any).app.projection());
-  expect(projection).toBe("records: 1\n- from-the-console — From the console");
+  // Body included: the list shows it now, and a projection must say what is
+  // actually on screen or it is not a projection.
+  expect(projection).toBe(
+    "records: 1\n- from-the-console — From the console — typed by hand",
+  );
 
   const removed = await page.evaluate(() =>
     (window as any).app.remove("from-the-console"),
   );
   expect(removed).toBe(true);
   await expect(page.getByTestId("count")).toHaveText("0");
+});
+
+// The link is worth a test, not because a link is hard, but because the
+// terminal is the only way to reach inherited commands from the browser — an
+// app whose terminal is unreachable has them in name only.
+test("the main page links to the terminal", async ({ page }) => {
+  await page.getByTestId("terminal-link").click();
+  await expect(page).toHaveURL(/terminal\.html$/);
+  await expect(page.getByTestId("terminal-input")).toBeFocused();
 });

@@ -1,0 +1,309 @@
+// The commands inspector: the app's command surface, browsable and runnable.
+//
+// The terminal makes the surface USABLE; this makes it VISIBLE. Every fact on
+// the page — subcommands, flags, types, required, defaults, enum choices,
+// positions, method ids, and the summary text — comes from `commands.proto`. It
+// is API documentation that cannot go stale, because there is nothing to keep in
+// sync: delete an rpc and its entry disappears.
+//
+// A FORM IS THE HONEST WEB FRONT END. Decision 28 says each tier builds requests
+// its own way; the terminal borrows the CLI's idiom because it is a terminal,
+// and a browser's native idiom is a form. Building one from the same `clispec`
+// is the strongest evidence the surface is genuinely tier-neutral — flags on one
+// tier, fields on another, one schema.
+//
+// It also shows what a command line CANNOT express. `Unsupported` is carried per
+// command (nested messages, maps, floats); a terminal can only mention it, a
+// form can render those fields as unsettable and make the gap explicit rather
+// than folkloric.
+//
+// EVERYTHING AFTER "here are the values" IS SHARED with the terminal, via
+// `executeCommand` — defaults, fill, required, source resolution, encoding. That
+// is what keeps three front ends building identical request bytes, and the parse
+// vectors assert it.
+import type { Command, Flag } from "./clispec";
+import { positionals } from "./clispec";
+import type { Values } from "./encode";
+import { encodeRequest } from "./encode";
+import { executeCommand, type Renderer } from "./terminal";
+import type { EnginePort } from "./port";
+
+export type InspectorOptions = {
+  port: EnginePort;
+  commands: readonly Command[];
+  render: Record<number, Renderer | undefined>;
+  fill?: (cmd: Command, values: Values) => void;
+  readFile?: (path: string) => Promise<string>;
+};
+
+export type Inspector = {
+  /** Select a command by name, as clicking it would. */
+  select(name: string): void;
+  /** Set one field's value, as typing into it would. */
+  set(flag: string, value: string): void;
+  /** Run the selected command with what the form currently holds. */
+  run(): Promise<string>;
+  /** The request the form would send right now, as hex — for parse vectors. */
+  requestHex(): string;
+  /** The equivalent command line for what the form holds. */
+  commandLine(): string;
+  destroy(): void;
+};
+
+export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspector {
+  let current: Command | null = null;
+  const inputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
+
+  const list = document.createElement("ul");
+  list.className = "ilc-insp-list";
+  // NOT "command-list": a command named `list` produces `command-list` for its
+  // own button, and two elements answering one testid is a test that silently
+  // asserts about whichever it found first.
+  list.dataset.testid = "command-index";
+
+  const detail = document.createElement("div");
+  detail.className = "ilc-insp-detail";
+  detail.dataset.testid = "command-detail";
+
+  const output = document.createElement("pre");
+  output.className = "ilc-insp-output";
+  output.dataset.testid = "command-output";
+
+  root.append(list, detail, output);
+
+  list.replaceChildren(
+    ...[...opts.commands]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((cmd) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.textContent = cmd.name;
+        b.dataset.testid = `command-${cmd.name}`;
+        b.className = "ilc-insp-name";
+        b.addEventListener("click", () => select(cmd.name));
+        const s = document.createElement("span");
+        s.className = "ilc-insp-summary";
+        s.textContent = cmd.summary ?? "";
+        li.append(b, " ", s);
+        return li;
+      }),
+  );
+
+  function select(name: string) {
+    const cmd = opts.commands.find((c) => c.name === name);
+    if (!cmd) throw new Error(`no such command: ${name}`);
+    current = cmd;
+    inputs.clear();
+    output.textContent = "";
+
+    const parts: HTMLElement[] = [];
+
+    const h = document.createElement("h2");
+    h.textContent = cmd.name;
+    h.dataset.testid = "detail-name";
+    parts.push(h);
+
+    if (cmd.summary) {
+      const p = document.createElement("p");
+      p.textContent = cmd.summary;
+      parts.push(p);
+    }
+
+    // The facts a developer debugging a request actually wants, and which no
+    // other view shows: the permanent wire id and the message it decodes as.
+    const meta = document.createElement("p");
+    meta.className = "ilc-insp-meta";
+    meta.dataset.testid = "detail-meta";
+    meta.textContent = `method_id ${cmd.method} · ${cmd.request}`;
+    parts.push(meta);
+
+    const positional = new Set(positionals(cmd).map((f) => f.name));
+    for (const f of cmd.flags ?? []) {
+      parts.push(field(f, positional.has(f.name)));
+    }
+
+    if (cmd.unsupported?.length) {
+      // Stated, not hidden: a command whose request has fields no front end can
+      // set is a gap in the surface, and pretending otherwise is how it stays
+      // folklore.
+      const warn = document.createElement("p");
+      warn.className = "ilc-insp-unsupported";
+      warn.dataset.testid = "detail-unsupported";
+      warn.textContent = `cannot be set here: ${cmd.unsupported.join(", ")}`;
+      parts.push(warn);
+    }
+
+    const line = document.createElement("code");
+    line.dataset.testid = "detail-commandline";
+    line.className = "ilc-insp-cmdline";
+
+    const copy = document.createElement("button");
+    copy.textContent = "copy as command line";
+    copy.dataset.testid = "detail-copy";
+    copy.addEventListener("click", () => {
+      void navigator.clipboard?.writeText(commandLine()).catch(() => {});
+    });
+
+    const go = document.createElement("button");
+    go.textContent = "run";
+    go.dataset.testid = "detail-run";
+    go.addEventListener("click", () => {
+      run().catch(() => {}); // run() already reports into the output pane
+    });
+
+    const bar = document.createElement("div");
+    bar.className = "ilc-insp-bar";
+    bar.append(go, " ", copy, " ", line);
+    parts.push(bar);
+
+    detail.replaceChildren(...parts);
+    refreshCommandLine();
+  }
+
+  function field(f: Flag, isPositional: boolean): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "ilc-insp-field";
+
+    const label = document.createElement("label");
+    label.textContent = f.name;
+    label.htmlFor = `f-${f.name}`;
+
+    let input: HTMLInputElement | HTMLSelectElement;
+    if (f.enumValues?.length) {
+      // A select, from the schema's own values — the same list the terminal
+      // completes with and the CLI validates against.
+      const sel = document.createElement("select");
+      for (const v of f.enumValues) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        sel.append(o);
+      }
+      sel.value = f.default ?? f.enumValues[0];
+      input = sel;
+    } else {
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.value = f.default ?? "";
+      inp.placeholder = placeholderFor(f);
+      input = inp;
+    }
+    input.id = `f-${f.name}`;
+    input.dataset.testid = `field-${f.name}`;
+    input.addEventListener("input", refreshCommandLine);
+    input.addEventListener("change", refreshCommandLine);
+    inputs.set(f.name, input);
+
+    const note = document.createElement("span");
+    note.className = "ilc-insp-note";
+    note.textContent = [
+      f.kind,
+      isPositional ? `positional ${f.positional}` : null,
+      f.required ? "required" : null,
+      f.repeated ? "repeatable" : null,
+      f.source && f.source !== "literal" ? `from ${f.source}` : null,
+      f.short ? `-${f.short}` : null,
+      f.help ?? null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    wrap.append(label, " ", input, " ", note);
+    return wrap;
+  }
+
+  function placeholderFor(f: Flag): string {
+    if (f.source === "file") return "path in OPFS";
+    if (f.source === "stdin") return "(stdin — not available in a browser)";
+    return f.kind;
+  }
+
+  /** What the form currently holds, in the shape every front end produces. */
+  function currentValues(): Values {
+    const values: Values = {};
+    for (const [name, el] of inputs) {
+      const v = el.value;
+      if (v !== "") values[name] = [v];
+    }
+    return values;
+  }
+
+  function commandLine(): string {
+    if (!current) return "";
+    const values = currentValues();
+    const parts = [current.name];
+    for (const f of current.flags ?? []) {
+      for (const v of values[f.name] ?? []) {
+        parts.push(`--${f.name}`, /\s/.test(v) ? JSON.stringify(v) : v);
+      }
+    }
+    return parts.join(" ");
+  }
+
+  function refreshCommandLine() {
+    const el = detail.querySelector<HTMLElement>('[data-testid="detail-commandline"]');
+    if (el) el.textContent = commandLine();
+  }
+
+  async function run(): Promise<string> {
+    if (!current) throw new Error("no command selected");
+    try {
+      // The SAME path the terminal takes. A form that encoded its own request
+      // would be a third implementation of the mapping, free to disagree.
+      const text = await executeCommand(current, currentValues(), opts);
+      output.textContent = text;
+      return text;
+    } catch (e) {
+      const text = `error: ${(e as Error).message}`;
+      output.textContent = text;
+      return text;
+    }
+  }
+
+  return {
+    select,
+    set(flag, value) {
+      const el = inputs.get(flag);
+      if (!el) throw new Error(`no field ${flag} on ${current?.name ?? "(nothing)"}`);
+      el.value = value;
+      refreshCommandLine();
+    },
+    run,
+    requestHex() {
+      if (!current) return "";
+      // NOTE: encodes what the form holds, WITHOUT fill/defaults — those are
+      // applied by executeCommand. A vector comparing this to the CLI must
+      // therefore supply the same values explicitly, which is the honest
+      // comparison anyway.
+      const bytes = encodeRequest(current, currentValues());
+      return Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    },
+    commandLine,
+    destroy() {
+      list.remove();
+      detail.remove();
+      output.remove();
+    },
+  };
+}
+
+/** Minimal styling, shipped with the widget. Overridable by an app's own CSS. */
+export function inspectorStyles(): string {
+  return `
+.ilc-insp { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.ilc-insp-list { list-style: none; margin: 0 0 1rem; padding: 0; }
+.ilc-insp-list li { padding: .15rem 0; }
+.ilc-insp-name { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-decoration: underline; padding: 0; }
+.ilc-insp-summary { opacity: .7; }
+.ilc-insp-meta { opacity: .7; }
+.ilc-insp-field { padding: .2rem 0; }
+.ilc-insp-field label { display: inline-block; min-width: 10em; }
+.ilc-insp-note { opacity: .6; }
+.ilc-insp-unsupported { opacity: .8; font-style: italic; }
+.ilc-insp-bar { padding: .5rem 0; }
+.ilc-insp-cmdline { opacity: .8; }
+.ilc-insp-output { margin: .5rem 0 0; padding: .5rem; white-space: pre-wrap; border-top: 1px solid currentColor; min-height: 2em; }
+`.trim();
+}

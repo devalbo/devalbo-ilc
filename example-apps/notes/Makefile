@@ -25,6 +25,11 @@ gen-web: gen ## copy generated es-lite messages into the Vite root
 	rm -rf hosts/web/src/gen
 	mkdir -p hosts/web/src/gen
 	cp -R gen/ts/notes hosts/web/src/gen/
+	# The INHERITED platform messages, put here by `dlc gen`. Without them a
+	# browser front end cannot invoke version/export-fs/import-fs/reset-fs at
+	# all — the Go host gets them from the platform module; TypeScript has no
+	# equivalent, so dlc supplies them the same way it supplies the WIT world.
+	@test -d gen/ts/devalbo/ilc && mkdir -p hosts/web/src/gen/devalbo && cp -R gen/ts/devalbo/ilc hosts/web/src/gen/devalbo/ || true
 
 .PHONY: build-web
 build-web: gen-web ## build the wasm component + jco transpile (needs dlc on PATH)

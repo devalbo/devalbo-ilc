@@ -72,8 +72,12 @@ type Flag struct {
 	Source Source
 	// Repeated fields accept the flag more than once.
 	Repeated bool
-	Help     string
-	Required bool
+	// Positional is a 1-based argument position, or 0 for flag-only. A
+	// positional field also keeps its flag spelling, so `dlc new myapp` and
+	// `dlc new --name myapp` are the same command.
+	Positional uint32
+	Help       string
+	Required   bool
 	// Default in string form, parsed by the runner to the field's wire type.
 	Default string
 	// EnumValues are the permitted names for a KindEnum flag — also the menu a
@@ -96,6 +100,22 @@ type Command struct {
 	// command that silently ignores a field is worse than one that says it
 	// cannot set it.
 	Unsupported []string
+}
+
+// Positionals returns a command's positional fields, in position order.
+func (c Command) Positionals() []Flag {
+	var out []Flag
+	for _, f := range c.Flags {
+		if f.Positional > 0 {
+			out = append(out, f)
+		}
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].Positional < out[j-1].Positional; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
 }
 
 // Find returns the command with the given name.

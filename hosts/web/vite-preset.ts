@@ -18,6 +18,7 @@
 //
 // A scaffolded app spreads this into its own config, so a fix here arrives on a
 // version bump rather than needing an edit in every generated project.
+import { readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +42,18 @@ export function ilcVite(opts: IlcViteOptions) {
     "node_modules/@bytecodealliance/preview2-shim/dist/browser",
   );
 
+  // Every .html at the root is a page. Vite's DEV server serves them all with no
+  // configuration, so a missing entry here breaks nothing until `vite build`,
+  // which then silently omits the page — green tests, missing route. Discovered
+  // rather than listed so adding `terminal.html` is all adding a route takes.
+  const pages = Object.fromEntries(
+    readdirSync(root)
+      .filter((f: string) => f.endsWith(".html"))
+      .map((f: string) => [f.replace(/\.html$/, ""), resolve(root, f)]),
+  );
+
   return {
+    build: { rollupOptions: { input: pages } },
     resolve: {
       conditions: ["browser", "import", "module", "default"],
       alias: {

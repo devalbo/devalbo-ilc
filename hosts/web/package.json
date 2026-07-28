@@ -12,7 +12,13 @@
     "./opfs": "./opfs.ts",
     "./shim/filesystem": "./shim/filesystem.js",
     "./vite": "./vite-preset.ts",
-    "./events": "./events.ts"
+    "./events": "./events.ts",
+    "./clispec": "./clispec.ts",
+    "./encode": "./encode.ts",
+    "./terminal": "./terminal.ts",
+    "./terminal-ui": "./terminal-ui.ts",
+    "./files": "./files.ts",
+    "./inspector": "./inspector.ts"
   },
   "peerDependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",

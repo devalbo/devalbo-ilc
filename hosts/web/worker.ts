@@ -52,6 +52,19 @@ let engine: EngineModule | null = null;
 type Listener = (topic: string, payload: Uint8Array) => void;
 let listener: Listener | null = null;
 
+/**
+ * The main thread's FLUSH listener, installed by `onFlush`.
+ *
+ * Deliberately NOT an engine event. Events are what the ENGINE announces about
+ * its own domain (Decision 33); this is the HOST reporting that it has persisted
+ * the tree to OPFS. Anything watching the FILESYSTEM — a file browser, a future
+ * sync — wants this one, because a flush happens after every `execute` whereas
+ * an event fires only when a handler chooses to emit. Inferring "the filesystem
+ * moved" from "the app said something happened" is app-coupled reasoning, and a
+ * command that writes without emitting would slip past it.
+ */
+let flushListener: (() => void) | null = null;
+
 // Non-null only while a command is on the engine's stack — see `execute`.
 let duringCommand: Array<[string, Uint8Array]> | null = null;
 
@@ -123,12 +136,26 @@ const api = {
     const events = duringCommand;
     duringCommand = null;
     await flush();
+    // Flush signal first: a watcher told "the filesystem moved" must find it
+    // moved, and the same ordering argument applies here as to events below.
+    if (flushListener) {
+      void Promise.resolve(flushListener()).catch(() => {});
+    }
     for (const [topic, payload] of events) deliver(topic, payload);
     return {
       success: r.success === true,
       output: Uint8Array.from(r.output ?? []),
       error: r.error ?? undefined,
     };
+  },
+
+  /**
+   * Hear about every OPFS flush — a host fact, not an app one.
+   *
+   * One listener, like `subscribe`: the main thread fans out.
+   */
+  async onFlush(fn: () => void): Promise<void> {
+    flushListener = fn;
   },
 
   /** Flat list of every file in OPFS — how the UI shows the scaffolded tree. */

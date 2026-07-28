@@ -400,3 +400,102 @@ func TestUnknownSubcommand(t *testing.T) {
 		t.Error("an unknown subcommand must not reach the engine")
 	}
 }
+
+// Positionals — without them every command is flags-only, which reads worse
+// than the hand-written CLIs this replaces (`dlc new --name myapp` is a
+// regression, not a migration).
+func TestPositionalArguments(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "new", Method: methodTest,
+		Flags: []clispec.Flag{
+			{Name: "name", Field: 1, Kind: clispec.KindString, Required: true, Positional: 1},
+			{Name: "module", Field: 2, Kind: clispec.KindString},
+		},
+	}
+	port := &fakePort{}
+	app, _, errOut := testApp(t, cmd, port, "")
+	if code := app.Run([]string{"new", "-module", "example.com/x", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, _ := field(t, port.request, 1); s != "myapp" {
+		t.Errorf("positional not encoded: %q", s)
+	}
+	if s, _, _ := field(t, port.request, 2); s != "example.com/x" {
+		t.Errorf("flag alongside positional: %q", s)
+	}
+}
+
+// The flag spelling keeps working, so scripts have both forms.
+func TestPositionalAlsoAcceptsItsFlag(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "new", Method: methodTest,
+		Flags: []clispec.Flag{{Name: "name", Field: 1, Kind: clispec.KindString, Positional: 1}},
+	}
+	port := &fakePort{}
+	app, _, errOut := testApp(t, cmd, port, "")
+	if code := app.Run([]string{"new", "-name", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, _ := field(t, port.request, 1); s != "myapp" {
+		t.Errorf("flag form not encoded: %q", s)
+	}
+}
+
+// Giving both is a mistake worth naming rather than resolving silently in
+// whichever order the parser happened to run.
+func TestPositionalAndFlagTogetherIsRefused(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "new", Method: methodTest,
+		Flags: []clispec.Flag{{Name: "name", Field: 1, Kind: clispec.KindString, Positional: 1}},
+	}
+	port := &fakePort{}
+	app, _, errOut := testApp(t, cmd, port, "")
+	if code := app.Run([]string{"new", "-name", "a", "b"}); code == 0 {
+		t.Fatal("both spellings at once must not silently pick one")
+	}
+	if !strings.Contains(errOut.String(), "unexpected argument") {
+		t.Errorf("error should name the surplus argument: %q", errOut.String())
+	}
+}
+
+// A repeated positional takes the remainder — `dlc echo one two three`.
+func TestRepeatedPositionalTakesTheRest(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "echo", Method: methodTest,
+		Flags: []clispec.Flag{{Name: "args", Field: 1, Kind: clispec.KindString, Repeated: true, Positional: 1}},
+	}
+	port := &fakePort{}
+	app, _, errOut := testApp(t, cmd, port, "")
+	if code := app.Run([]string{"echo", "one", "two", "three"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	count := 0
+	rest := port.request
+	for len(rest) > 0 {
+		_, _, taglen := protowire.ConsumeTag(rest)
+		rest = rest[taglen:]
+		_, l := protowire.ConsumeBytes(rest)
+		rest = rest[l:]
+		count++
+	}
+	if count != 3 {
+		t.Errorf("encoded %d values, want 3", count)
+	}
+}
+
+// A missing required positional reports the FLAG name, which is the only name a
+// user can act on.
+func TestMissingRequiredPositional(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "new", Method: methodTest,
+		Flags: []clispec.Flag{{Name: "name", Field: 1, Kind: clispec.KindString, Required: true, Positional: 1}},
+	}
+	port := &fakePort{}
+	app, _, errOut := testApp(t, cmd, port, "")
+	if code := app.Run([]string{"new"}); code == 0 {
+		t.Fatal("a missing required positional must not succeed")
+	}
+	if !strings.Contains(errOut.String(), "--name is required") {
+		t.Errorf("error should name it: %q", errOut.String())
+	}
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  notes' terminal route.
+
+  A separate Vite ENTRY rather than a router: Vite serves multiple HTML entries
+  natively, the scaffold's UI is vanilla TS with no router today, and a route
+  that costs a dependency is a poor trade for one extra page.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>notes — terminal</title>
+  </head>
+  <body>
+    <h1>notes — terminal</h1>
+    <p>
+      The same command surface the CLI has, generated from
+      <code>commands.proto</code>. Try <code>help</code>.
+      <a href="/files.html">files</a> · <a href="/">back to the app</a>
+    </p>
+    <div id="terminal" class="ilc-terminal"></div>
+    <script type="module" src="/src/terminal.ts"></script>
+  </body>
+</html>

@@ -43,8 +43,7 @@ func main() {
 		}
 	}
 
-	if err := runCommand(args); err != nil {
-		os.Stderr.WriteString("dlc: " + err.Error() + "\n")
-		os.Exit(1)
-	}
+	// In-engine verbs go through the GENERATED command surface (Decision 29):
+	// no switch, no usage string, just the renderers in commands.go.
+	os.Exit(runCommand(args))
 }

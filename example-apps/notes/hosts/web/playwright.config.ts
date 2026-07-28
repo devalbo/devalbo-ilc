@@ -12,17 +12,22 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: "http://127.0.0.1:5273",
     headless: !watch,
     launchOptions: { slowMo: watch ? 300 : 0 },
   },
   webServer: {
-    // --strictPort: fail loud if 5173 is taken rather than binding elsewhere
-    // while Playwright still waits on this URL (CI sets CI=true, so we never
-    // reuse an existing server).
-    command: "npx vite --host 127.0.0.1 --port 5173 --strictPort",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
+    // A DIFFERENT PORT from `npm run dev` (5173), and no reuse.
+    //
+    // Both halves are load-bearing. `reuseExistingServer` plus the dev port
+    // means that if any Vite is running — your own dev server, another app's —
+    // the tests silently run against THAT app and report on it. That happened:
+    // a scaffolded app's suite ran entirely against `notes`, and one test even
+    // passed, because the terminal echoes what you type and the assertion
+    // matched the echo. A port clash now fails loudly instead.
+    command: "npx vite --host 127.0.0.1 --port 5273 --strictPort",
+    url: "http://127.0.0.1:5273",
+    reuseExistingServer: false,
     timeout: 90_000,
   },
 });

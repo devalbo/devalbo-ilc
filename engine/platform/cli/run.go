@@ -137,8 +137,8 @@ func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
 		ShortUsage: a.Name + " " + cmd.Name + usageSuffix(cmd),
 		FlagSet:    fs,
 		Exec: func(_ context.Context, rest []string) error {
-			if len(rest) > 0 {
-				return fmt.Errorf("%s takes flags, not positional arguments (got %q)", cmd.Name, strings.Join(rest, " "))
+			if err := assignPositionals(cmd, rest, values); err != nil {
+				return err
 			}
 			return a.exec(cmd, values, renderer)
 		},
@@ -180,6 +180,46 @@ func (a App) exec(cmd clispec.Command, values map[string][]string, render Render
 	return render(a.Stdout, result.Output)
 }
 
+// assignPositionals maps bare arguments onto the fields that declared a
+// position, so `dlc new myapp` works as well as `dlc new --name myapp`.
+//
+// A value already given as a FLAG wins and does not consume a positional slot:
+// `dlc new --name a b` is a mistake worth naming, not a silent overwrite in
+// whichever order the parser happened to run.
+func assignPositionals(cmd clispec.Command, rest []string, values map[string][]string) error {
+	positionals := cmd.Positionals()
+	if len(positionals) == 0 {
+		if len(rest) > 0 {
+			return fmt.Errorf("%s takes flags, not positional arguments (got %q)", cmd.Name, strings.Join(rest, " "))
+		}
+		return nil
+	}
+
+	i := 0
+	for _, f := range positionals {
+		if len(values[f.Name]) > 0 {
+			continue // supplied as a flag
+		}
+		if i >= len(rest) {
+			break // absent; `required` decides whether that is an error
+		}
+		if f.Repeated {
+			// Last by construction (the generator enforces it), so it takes
+			// everything remaining — `dlc echo one two three`.
+			values[f.Name] = append(values[f.Name], rest[i:]...)
+			i = len(rest)
+			break
+		}
+		values[f.Name] = []string{rest[i]}
+		i++
+	}
+
+	if i < len(rest) {
+		return fmt.Errorf("%s: unexpected argument %q", cmd.Name, rest[i])
+	}
+	return nil
+}
+
 func usageFor(f clispec.Flag) string {
 	parts := []string{}
 	if f.Help != "" {
@@ -214,14 +254,25 @@ func shortHelp(cmd clispec.Command) string {
 }
 
 func usageSuffix(cmd clispec.Command) string {
-	var required []string
+	var parts []string
+	positional := map[string]bool{}
+	for _, f := range cmd.Positionals() {
+		positional[f.Name] = true
+		token := "<" + f.Name + ">"
+		if f.Repeated {
+			token = "[" + f.Name + "...]"
+		} else if !f.Required {
+			token = "[" + f.Name + "]"
+		}
+		parts = append(parts, token)
+	}
 	for _, f := range cmd.Flags {
-		if f.Required {
-			required = append(required, "--"+f.Name+" <"+f.Name+">")
+		if f.Required && !positional[f.Name] {
+			parts = append(parts, "--"+f.Name+" <"+f.Name+">")
 		}
 	}
-	if len(required) == 0 {
+	if len(parts) == 0 {
 		return " [flags]"
 	}
-	return " " + strings.Join(required, " ") + " [flags]"
+	return " " + strings.Join(parts, " ") + " [flags]"
 }

@@ -149,14 +149,17 @@ func run() error {
 			Content: proto.String(content),
 		})
 
-		// The CLI surface (Decision 29) — Go only. A TypeScript host builds
-		// requests from a form, not from argv, and the web tier's equivalent of
-		// this would describe a form rather than flags.
+		// The CLI surface (Decision 29), emitted for BOTH languages. The web tier
+		// reads the same data as the native host — that is what keeps an in-page
+		// terminal and the CLI from drifting apart, and it is the only way the
+		// "tier-neutral surface" claim gets tested rather than asserted.
+		cmds, cerr := cliCommandsOf(file, services, resolver)
+		if cerr != nil {
+			return cerr
+		}
+		base := strings.TrimSuffix(file.GetName(), ".proto")
+
 		if lang == "go" {
-			cmds, cerr := cliCommandsOf(file, services, resolver)
-			if cerr != nil {
-				return cerr
-			}
 			cliContent, cerr := renderCLI(file, services, cmds)
 			if cerr != nil {
 				return cerr
@@ -165,10 +168,18 @@ func run() error {
 			if ferr != nil {
 				return fmt.Errorf("%s: generated invalid Go CLI spec: %w", file.GetName(), ferr)
 			}
-			base := strings.TrimSuffix(file.GetName(), ".proto")
 			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 				Name:    proto.String(base + ".cli.pb.go"),
 				Content: proto.String(string(formatted)),
+			})
+		} else {
+			cliContent, cerr := renderCLITS(file, services, cmds)
+			if cerr != nil {
+				return cerr
+			}
+			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+				Name:    proto.String(base + ".cli.pb.ts"),
+				Content: proto.String(cliContent),
 			})
 		}
 	}

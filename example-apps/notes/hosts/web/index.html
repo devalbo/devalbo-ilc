@@ -10,8 +10,16 @@
       <h1>notes</h1>
       <p>
         The same engine the CLI links, running here as a wasip2 component. Each
-        note is one JSON file in OPFS — split storage (§7.1), so the browser and
-        the terminal keep the store the same way.
+        note is one JSON file in OPFS — split storage (§7.1), so the browser,
+        the CLI, and the
+        <a href="/terminal.html" data-testid="terminal-link">in-page terminal</a>
+        all keep the store the same way. The terminal also reaches commands this
+        page has no button for, like <code>export-fs</code> and
+        <code>reset-fs</code>.
+        The <a href="/files.html" data-testid="files-link">files</a> page shows
+        what is actually in OPFS.
+        <a href="/commands.html" data-testid="commands-link">commands</a> lists
+        every command with its flags, straight from the schema.
       </p>
 
       <input id="title" placeholder="title" data-testid="title" />
@@ -22,6 +30,7 @@
       <ul id="list" data-testid="list"></ul>
 
       <pre id="out" data-testid="out"></pre>
+
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

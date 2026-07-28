@@ -4,7 +4,7 @@
 # path                                              bytes  sha256
 .gitignore                                            145  5865828890494c26
 AGENTS.md                                            3931  eb524f7772665b8c
-Makefile                                             1264  44def47a322ca927
+Makefile                                             1696  16b2b6b50d826c3f
 README.md                                            1867  11d2a460986f28e8
 cmd/engine-component/main.go                          806  f1d35c0e07fcd0ff
 devbox.json                                           473  fd10c51393a9e86e
@@ -13,16 +13,24 @@ engine/commands.go                                   2029  7127e5a530c8bbd9
 engine/commands_test.go                               779  081f9b781e4d7dd7
 go.mod                                                680  b3854e856cf82826
 hosts/native/main.go                                 3942  fec757b17f4ad7ff
-hosts/web/index.html                                  606  35e4d1bbb1b51a3b
+hosts/web/commands.html                               793  e8a9ac3548976c8f
+hosts/web/files.html                                  802  9f020f72437f6ea7
+hosts/web/index.html                                 1150  09e1f94ed0aef63d
 hosts/web/package.json                                643  65806f4e6a4ba710
-hosts/web/playwright.config.ts                        882  c086f4d353e94e72
+hosts/web/playwright.config.ts                       1214  04cf3af9c6af133f
+hosts/web/src/commands.ts                             897  8ee7afca369ada5e
+hosts/web/src/files.ts                               1064  23a6bd57840dbea2
 hosts/web/src/main.ts                                1119  8300d4a0ec584f98
+hosts/web/src/renderers.ts                           2019  e3482749c0e0bb8a
+hosts/web/src/terminal.ts                            1529  83bc292939be5928
 hosts/web/src/view.ts                                3277  c06a9791877bd504
+hosts/web/terminal.html                               803  d7c672fd19fa04e1
+hosts/web/test/terminal.spec.ts                      1197  8ef7c79746d0ca0f
 hosts/web/test/web.spec.ts                           1171  b9d852f434bdd63e
 hosts/web/tsconfig.json                               349  4e3a1a73137f089b
 hosts/web/vite.config.ts                             1232  bc0cac3c4395a28e
 proto/buf.gen.yaml                                   1290  78fec52b3a0339c6
 proto/buf.yaml                                        363  1c9951bd88411837
 proto/devalbo/options/v1/README.md                    760  b3b9831cae334777
-proto/devalbo/options/v1/options.proto               3496  43a5bf8423b2d64c
+proto/devalbo/options/v1/options.proto               4199  0cf9ec336beecbf0
 proto/golden_app/v1/commands.proto                    964  3a7685fd539969ca

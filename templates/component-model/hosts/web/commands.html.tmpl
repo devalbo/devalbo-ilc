@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  {{.ProjectName}}'s command inspector.
+
+  Everything here comes from commands.proto — API documentation that cannot go
+  stale, because there is nothing to keep in sync.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{.ProjectName}} — commands</title>
+  </head>
+  <body>
+    <h1>{{.ProjectName}} — commands</h1>
+    <p>
+      Every command this app has, generated from <code>commands.proto</code> —
+      the same surface the CLI parses and the
+      <a href="/terminal.html">terminal</a> runs, shown as forms because that is
+      a browser's idiom. <a href="/files.html">files</a> ·
+      <a href="/">back to the app</a>
+    </p>
+    <div id="commands" class="ilc-insp"></div>
+    <script type="module" src="/src/commands.ts"></script>
+  </body>
+</html>

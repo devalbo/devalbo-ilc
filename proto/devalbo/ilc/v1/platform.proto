@@ -107,7 +107,10 @@ message ExportFsResponse {
 message ImportFsRequest {
   bytes bundle = 1 [
     (devalbo.options.v1.help) = "bundle bytes to import",
-    (devalbo.options.v1.required) = true
+    (devalbo.options.v1.required) = true,
+    // A path, or `-` for stdin. Positional so `import-fs backup.json` reads
+    // the way it always has.
+    (devalbo.options.v1.cli_positional) = 1
   ];
   string prefix = 2 [
     (devalbo.options.v1.help) = "destination subtree",

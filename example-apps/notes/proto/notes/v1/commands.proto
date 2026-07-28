@@ -61,9 +61,15 @@ message Record {
 message CreateRecordRequest {
   string title = 1 [
     (devalbo.options.v1.help) = "note title",
-    (devalbo.options.v1.required) = true
+    (devalbo.options.v1.required) = true,
+    // Positional, so `create "Buy milk" "two litres"` works the way the
+    // hand-written CLI did. `--title` still works too.
+    (devalbo.options.v1.cli_positional) = 1
   ];
-  string body = 2 [(devalbo.options.v1.help) = "note body"];
+  string body = 2 [
+    (devalbo.options.v1.help) = "note body",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
   int64 created_at = 3 [(devalbo.options.v1.help) = "seconds since epoch (host-supplied)"];
 }
 message CreateRecordResponse {
@@ -79,7 +85,8 @@ message ListRecordsResponse {
 message OpenRecordRequest {
   string id = 1 [
     (devalbo.options.v1.help) = "record id",
-    (devalbo.options.v1.required) = true
+    (devalbo.options.v1.required) = true,
+    (devalbo.options.v1.cli_positional) = 1
   ];
 }
 message OpenRecordResponse {
@@ -89,7 +96,8 @@ message OpenRecordResponse {
 message DeleteRecordRequest {
   string id = 1 [
     (devalbo.options.v1.help) = "record id",
-    (devalbo.options.v1.required) = true
+    (devalbo.options.v1.required) = true,
+    (devalbo.options.v1.cli_positional) = 1
   ];
 }
 message DeleteRecordResponse {

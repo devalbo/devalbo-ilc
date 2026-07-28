@@ -71,6 +71,12 @@ export type NotesDom = {
   create: HTMLElement;
 };
 
+/** First line of a body, shortened — a list is an index, not the content. */
+function excerpt(body: string, max = 60): string {
+  const line = body.split("\n")[0] ?? "";
+  return line.length > max ? line.slice(0, max - 1) + "…" : line;
+}
+
 /** Find the slot's elements in a document (or any fragment, for tests). */
 export function notesDom(scope: ParentNode = document): NotesDom {
   const need = <T extends Element>(sel: string): T => {
@@ -102,7 +108,7 @@ export function mountNotes(
   now: () => number = () => Math.floor(Date.now() / 1000),
 ): NotesView {
   const log: string[] = [];
-  let records: { id: string; title: string }[] = [];
+  let records: { id: string; title: string; body: string }[] = [];
 
   function say(line: string) {
     log.push(line);
@@ -122,13 +128,31 @@ export function mountNotes(
     records = (decoded.records ?? []).map((rec) => ({
       id: rec.id ?? "",
       title: rec.title ?? "",
+      body: rec.body ?? "",
     }));
     dom.count.textContent = String(records.length);
     dom.list.replaceChildren(
       ...records.map((rec) => {
         const li = document.createElement("li");
         li.dataset.id = rec.id;
-        li.textContent = `${rec.id} — ${rec.title}`;
+
+        // TITLE and BODY, not id and title. Showing the id next to the title
+        // read as a duplicated column, because the id is slugged from the title
+        // and the two are usually identical — which looked like the title being
+        // copied into the body. The id stays available as a data attribute and
+        // on the delete button, where it is what a test and a click need.
+        const title = document.createElement("strong");
+        title.textContent = rec.title;
+        title.dataset.testid = `title-${rec.id}`;
+        li.append(title);
+
+        if (rec.body !== "") {
+          const body = document.createElement("span");
+          body.textContent = " — " + excerpt(rec.body);
+          body.dataset.testid = `body-${rec.id}`;
+          li.append(body);
+        }
+
         const del = document.createElement("button");
         del.textContent = "delete";
         del.dataset.testid = `delete-${rec.id}`;
@@ -229,7 +253,9 @@ export function mountNotes(
       // no ordering the engine did not give us, nothing derived.
       return [
         `records: ${records.length}`,
-        ...records.map((r) => `- ${r.id} — ${r.title}`),
+        ...records.map((r) =>
+          r.body === "" ? `- ${r.id} — ${r.title}` : `- ${r.id} — ${r.title} — ${excerpt(r.body)}`,
+        ),
       ].join("\n");
     },
     refresh,

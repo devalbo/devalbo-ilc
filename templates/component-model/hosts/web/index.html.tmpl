@@ -10,7 +10,15 @@
       <h1>{{.ProjectName}}</h1>
       <p>
         The same engine the CLI links, running here as a wasip2 component with
-        its filesystem bound to OPFS.
+        its filesystem bound to OPFS — so this page, the CLI, and the
+        <a href="/terminal.html" data-testid="terminal-link">in-page terminal</a>
+        all drive the same handlers. The terminal has every command in
+        <code>commands.proto</code>, including inherited ones this page has no
+        button for.
+        The <a href="/files.html" data-testid="files-link">files</a> page shows
+        what is actually in OPFS.
+        <a href="/commands.html" data-testid="commands-link">commands</a> lists
+        every command with its flags, straight from the schema.
       </p>
       <input id="name" value="ILC" />
       <button id="greet" data-testid="greet">greet</button>

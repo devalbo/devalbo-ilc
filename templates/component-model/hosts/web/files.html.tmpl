@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  {{.ProjectName}}'s OPFS browser.
+
+  §7.1 says the files are the truth. In a terminal you check that with `ls` and
+  `cat`; in a browser OPFS has no Finder, so this page is how that claim gets
+  checked by eye on this tier.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{.ProjectName}} — files</title>
+  </head>
+  <body>
+    <h1>{{.ProjectName}} — files</h1>
+    <p>
+      Everything the engine has written to OPFS. Read-only — see the note in
+      <code>@devalbo/ilc-web/files</code> for why writing here directly would be
+      undone by the next command. <a href="/terminal.html">terminal</a> ·
+      <a href="/">back to the app</a>
+    </p>
+    <div id="files" class="ilc-files"></div>
+    <script type="module" src="/src/files.ts"></script>
+  </body>
+</html>
