@@ -6,12 +6,9 @@
 // the CLI; this only collects fields and renders what came back.
 import { DataChangedEventTopic } from "@gen/devalbo/ilc/v1/platform.events.pb";
 import { useCallback, useEffect, useState } from "react";
-import {
-  execute,
-  listFiles,
-  reset,
-  subscribe,
-} from "@devalbo/ilc-web/api";
+import { listFiles, reset } from "@devalbo/ilc-web/api";
+import { enginePort } from "@devalbo/ilc-web/port";
+import type { EnginePort } from "@devalbo/ilc-web/port";
 // Ids are generated, never typed by hand — see the note in the host's api.ts.
 import { MethodNew } from "@gen/devalbo/dlc/v1/commands.registry.pb";
 import {
@@ -30,7 +27,22 @@ import {
   ImportMode,
 } from "@gen/devalbo/ilc/v1/platform.pb";
 
-export function App() {
+export type AppProps = {
+  /**
+   * The engine, as an argument rather than an import (Decision 34).
+   *
+   * dlc's own UI is a tier slot like any other, and a slot is the one part of an
+   * ILC app parity cannot check — parity compares command results, the written
+   * filesystem and the event stream, all engine-side. Taking the port means this
+   * screen can be mounted against `createFakePort` with no worker, no wasm and
+   * no OPFS, the way notes' and the template's slots already can.
+   */
+  port?: EnginePort;
+};
+
+export function App({ port = enginePort }: AppProps = {}) {
+  const execute = port.execute;
+  const subscribe = port.subscribe;
   const [name, setName] = useState("myapp");
   const [module, setModule] = useState("");
   // TIER SELECTION, this tier's way of asking. The engine has no default — an
@@ -91,6 +103,43 @@ export function App() {
       unsubscribe?.();
     };
   }, [refresh, say]);
+
+  // `window.app` — drive dlc from the dev console, the same handle notes and the
+  // template expose.
+  //
+  // These are the SAME functions the buttons call, not a parallel path: a
+  // console API taking a different route would be a second front end able to
+  // disagree with the first, and the untested one is the one that drifts.
+  useEffect(() => {
+    (window as unknown as { app: unknown }).app = {
+      new: (n: string, m?: string) => runNewWith(n, m),
+      files: () => listFiles(),
+      reset,
+    };
+  });
+
+  /** The operation, taking its arguments — so the form, a test and the console
+   *  all reach the engine the same way. */
+  async function runNewWith(n: string, m?: string) {
+    setBusy(true);
+    try {
+      const request = NewRequest.toBinary({ name: n, module: m ?? "", tiers });
+      const r = await execute(MethodNew, request);
+      if (!r.success) {
+        say(`new failed: ${r.error ?? "(no message)"}`);
+        return false;
+      }
+      const resp = NewResponse.fromBinary(r.output);
+      say(`scaffolded ${resp.path} — ${resp.files?.length ?? 0} files`);
+      await refresh();
+      return true;
+    } catch (e) {
+      say(`ERROR: ${(e as Error).message}`);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function runNew() {
     setBusy(true);

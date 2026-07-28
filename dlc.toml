@@ -1,0 +1,33 @@
+# dlc — what this project IS.
+#
+# dlc is an app like any other (AGENTS.md §3), so it declares itself the way a
+# scaffolded app does. It had no manifest until now, which meant the ONE app
+# exempt from the rules `dlc` enforces on everyone else was `dlc`.
+#
+# Read by the host-side toolchain only. The ENGINE never reads it.
+
+[project]
+name    = "dlc"
+version = "0.0.0-bootstrap"
+module  = "github.com/devalbo/devalbo-ilc"
+
+# No [platform] path: dlc IS the platform. A scaffolded app points back here.
+
+[tiers.native]
+capabilities = ["console", "filesystem"]
+# NOTE THE COLLISION, and that it is deliberate. For an app, `hosts/native/` is
+# the tier slot. Here it is BOTH the slot (dlc's own commands.go, build.go,
+# gen.go) and the not-yet-extracted native runtime. Splitting them is the
+# "lift-ready package" task; until then this root names a directory doing two
+# jobs, which `hosts/README.md` records as debt rather than design.
+root      = "hosts/native"
+
+[tiers.web]
+capabilities = ["console", "filesystem"]
+# `frontend/`, not `hosts/web/` — the other half of the same debt. `hosts/web/`
+# is the inherited RUNTIME (published as @devalbo/ilc-web), so dlc's own web slot
+# cannot take that name until the runtime is extracted (§16.4). Every app uses
+# `hosts/web/`; dlc is the exception, and it is a temporary one.
+root      = "frontend"
+assets    = "frontend/src/wasm"
+component = "engine.component.wasm"

@@ -51,7 +51,10 @@ func handleExportFs(req *ilcv1.ExportFsRequest) (*ilcv1.ExportFsResponse, error)
 	}
 	tree, err := ReadTree(dir)
 	if err != nil {
-		return nil, errors.New("export-fs: " + err.Error())
+		// The caller's spelling of the path, and OUR wording — the raw OS error
+		// carries the joined absolute path and a runtime-specific phrase, and
+		// both differ between native and wasm. See FSError.
+		return nil, FSError("export-fs", req.Prefix, err)
 	}
 	return &ilcv1.ExportFsResponse{Bundle: encodeBFT(tree)}, nil
 }
@@ -77,12 +80,12 @@ func handleImportFs(req *ilcv1.ImportFsRequest) (*ilcv1.ImportFsResponse, error)
 	// first, so the destination ends up as exactly what the bundle says.
 	if req.Mode == ilcv1.ImportMode_IMPORT_MODE_REPLACE {
 		if _, err := removeTree(dir); err != nil {
-			return nil, errors.New("import-fs: " + err.Error())
+			return nil, FSError("import-fs", req.Prefix, err)
 		}
 	}
 	files, err := writeBFTTree(dir, tree)
 	if err != nil {
-		return nil, errors.New("import-fs: " + err.Error())
+		return nil, FSError("import-fs", req.Prefix, err)
 	}
 	// ONE event per command, not one per file: a 1000-file bundle must not become
 	// 1000 messages. The subscriber re-reads what it cares about (§7.1) — the
@@ -100,7 +103,7 @@ func handleResetFs(req *ilcv1.ResetFsRequest) (*ilcv1.ResetFsResponse, error) {
 	}
 	removed, err := removeTree(dir)
 	if err != nil {
-		return nil, errors.New("reset-fs: " + err.Error())
+		return nil, FSError("reset-fs", req.Prefix, err)
 	}
 	emitDataChanged(req.Prefix, MethodResetFs)
 	return &ilcv1.ResetFsResponse{Removed: removed}, nil

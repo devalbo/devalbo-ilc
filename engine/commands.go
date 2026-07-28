@@ -18,6 +18,20 @@ import (
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 )
 
+// dlc's version, HARDCODED — and the one dogfood gap that is a real constraint
+// rather than neglect.
+//
+// Every scaffolded app does `platform.SetVersion(dlcconfig.Display())`, reading
+// the value from its dlc.toml. dlc now has a dlc.toml too, and `dlc gen` writes
+// the same `gen/go/dlcconfig` for it. But dlc cannot IMPORT it: dlcconfig is
+// written by the dlc binary, and the dlc binary is built from this package — so
+// depending on it makes the build depend on its own output.
+//
+// Breaking the cycle needs a standalone generator (the manifest parser lives in
+// `hosts/native`, package main, so it would have to move first). Recorded in the
+// dogfood checklist rather than papered over; until then this string and
+// dlc.toml's `version` are two places, and the dogfood review is what catches
+// them disagreeing.
 const version = "dlc 0.0.0-bootstrap"
 
 // initialVersion is what a freshly scaffolded project starts at. It lands in

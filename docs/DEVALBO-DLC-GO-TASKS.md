@@ -463,12 +463,23 @@ but it means this is a trip-wire rather than a guarded boundary.
 
 It is also user-visible: `notes open nonexistent` prints different text in a terminal and in a browser.
 
-- [ ] Wrap OS errors at the platform boundary so the ENGINE words them, not the runtime — e.g. a
-      `platform.ErrNotFound` mapped once per tier, with `fs.go` already owning the `os.IsNotExist` /
-      TinyGo-errno mismatch that `AGENTS.md` §2 warns about. The engine already refuses to let
-      `errors.Is(err, fs.ErrNotExist)` be trusted; wording is the same problem one layer out.
-- [ ] Add a parity vector that DELIBERATELY hits a missing path, so the boundary is guarded rather than
-      merely unexercised. It should be red until the wrapping lands — which is the honest state.
+- [x] **DONE 2026-07-28.** `platform.FSError(op, rel, err)` words filesystem failures itself, from the
+      path the CALLER named rather than the joined absolute one:
+      `export-fs: no-such-tree: does not exist` on both tiers. Wired into export-fs, import-fs and
+      reset-fs — the three that wrapped an OS error.
+- [x] **The boundary is guarded, not merely unexercised.** A parity vector now hits a missing prefix on
+      purpose (21 vectors, native == component), and it was falsified: restoring the raw wrapping reddens
+      exactly that vector with both divergences visible —
+      `open no-such-tree: no such file or directory` against `open /no-such-tree: file does not exist`.
+- [x] Three unit tests pin the rules, including that the runtime's phrasing and the absolute path cannot
+      leak back in.
+
+**One honest imprecision, documented in `FSError` rather than hidden:** a permission failure is reported as
+"does not exist", because the two cannot be told apart portably — `AGENTS.md` §2 records that
+`os.IsNotExist` and `errors.Is(err, fs.ErrNotExist)` do not match TinyGo's WASI errno, so classifying by
+inspecting the error is the trap this package already paid for once. Probing with `Stat` and parsing nothing
+is the portable option. Being occasionally coarse beats being tier-dependent: a coarse message is a
+usability cost, a tier-dependent one is a parity failure.
 
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan
@@ -509,7 +520,19 @@ It is also user-visible: `notes open nonexistent` prints different text in a ter
   - `window.app` on the web tier
   - the inherited platform verbs, rather than re-implementing them
 
-  **Known gaps as of 2026-07-28** (the first review's starting list, all real today):
+  **First review run, 2026-07-28 — most of the list is now closed.** dlc gained the three text routes
+  (terminal, files, commands inspector), an `EnginePort` seam on its React slot, `window.app`, and a
+  `dlc.toml`. Four browser tests cover them. What that leaves:
+  - [ ] **dlc's version is hardcoded** while every app reads `dlcconfig.Display()` from its manifest. A real
+        cycle, not neglect: dlcconfig is written by the dlc binary, which is built from the package that
+        would import it. Needs a standalone generator, which needs the manifest parser out of
+        `hosts/native` (package main). Until then the version lives in two places and this review is what
+        catches them diverging.
+  - [ ] **`hosts/native/` is still both the slot and the un-extracted runtime**, and `frontend/` is still
+        dlc's web slot rather than `hosts/web/` — the two halves of the §16.4 extraction debt, now written
+        into `dlc.toml` where they are visible rather than implied.
+
+  **Original gap list (2026-07-28), kept for the record:**
   - `hosts/native/commands.go` still hand-writes argv parsing while notes and the template use the generated surface — `dlc` is now the *only* app not eating this
   - the repo root has **no `dlc.toml`**, so `dlc` alone escapes the slot gate
   - `dlc`'s web slot is `frontend/`, not `hosts/web/` — *deliberate*, blocked on the §16.4 runtime extraction, and already recorded as debt in `hosts/README.md`

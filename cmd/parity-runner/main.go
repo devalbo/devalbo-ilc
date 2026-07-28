@@ -86,6 +86,15 @@ var fixtures = []struct {
 	{name: "export-fs whole root (BFT)", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{}},
 	{name: "export-fs subtree", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{Prefix: "app-default"}},
 	{name: "export-fs unimplemented format", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{Format: ilcv1.BundleFormat_BUNDLE_FORMAT_ZIP}},
+	// DELIBERATELY hits a path that does not exist — the case that used to be
+	// un-parity-able. A raw OS error carries the joined absolute path and the
+	// runtime's own phrasing, and those differ between native and wasm
+	// ("no such file or directory" vs "file does not exist", "app-x" vs "/app-x").
+	// The platform words it now, from the caller's spelling, so the two agree.
+	// This vector exists so that boundary is GUARDED rather than merely
+	// untouched: it reached the missing-path case by accident once and failed
+	// instantly.
+	{name: "export-fs missing prefix (portable wording)", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{Prefix: "no-such-tree"}},
 	{name: "import-fs a hand-written bundle", method: platform.MethodImportFs, request: &ilcv1.ImportFsRequest{
 		Prefix: "imported",
 		Bundle: []byte("{\n  \"type\": \"directory\",\n  \"entries\": {\n    \"hello.txt\": {\n      \"type\": \"text\",\n      \"content\": \"hi \\u00e9\\n\"\n    },\n    \"data.bin\": {\n      \"type\": \"binary\",\n      \"encoding\": \"base64\",\n      \"content\": \"AAECAwQF\"\n    }\n  }\n}\n"),
