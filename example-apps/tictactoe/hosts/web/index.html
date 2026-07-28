@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tictactoe — web</title>
+  </head>
+  <body>
+    <main>
+      <h1>tic-tac-toe</h1>
+      <p>
+        The same engine the CLI links. The board below and the ASCII board in
+        <code>tictactoe state</code> render the same events — the engine emits
+        what is <em>true</em>, and each tier decides what that looks like.
+        <a href="/terminal.html" data-testid="terminal-link">terminal</a> ·
+        <a href="/files.html" data-testid="files-link">files</a> ·
+        <a href="/commands.html" data-testid="commands-link">commands</a>
+      </p>
+      <div id="game"></div>
+      <p id="status" data-testid="status"></p>
+      <button id="new-game" data-testid="new-game">new game</button>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package devalbo.options.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/options/v1;optionsv1";
+
+import "google/protobuf/descriptor.proto";
+
+// Registry metadata (Decision 29). Host-side tooling (protoreflect / FileDescriptorSet)
+// reads these; the TinyGo engine never looks at them at runtime.
+//
+// Extension numbers: private/experimental range 50000–99999.
+
+extend google.protobuf.MethodOptions {
+  // Permanent dispatch key. Rename-safe; buf breaking + id-lock guard stability.
+  uint32 method_id = 50000;
+
+  // Subcommand name, overriding the kebab-cased rpc name.
+  //
+  //   rpc CreateRecord … [(cli_name) = "create"]   ->   notes create
+  //
+  // COSMETIC, exactly like the rpc name itself: the wire is `method_id`, so
+  // renaming a command is neither a breaking change nor an id-lock concern. It
+  // lives in the .proto rather than in one host so that every tier agrees on
+  // what the command is called — a host may still override it locally, but then
+  // only that host differs, deliberately.
+  string cli_name = 50006;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Method ids this service will NOT hand out — the `method_id` analogue of
+  // proto's own `reserved` for field numbers, which does not cover custom-option
+  // values. Use it to hold an id for a command that is designed but unbuilt, so
+  // the number cannot be claimed twice in the meantime.
+  //
+  // protoc-gen-dlc-registry enforces it: an rpc whose method_id is reserved
+  // fails the build, and reservations are recorded in the committed id lock, so
+  // "reserved" is a checkable declaration rather than a comment nobody reads.
+  repeated uint32 reserved_method_id = 50005;
+}
+
+// Where a flag's value comes from, as opposed to what TYPE it is.
+//
+// A command line carries strings, but the value a field wants may be too large
+// or too binary to type: a bundle is a file, a long body may be piped. That is a
+// property of the FIELD, not of the runner, so it is declared here rather than
+// hardcoded in whichever host happens to read it — and it means `bytes` stops
+// being a field the CLI cannot express.
+enum CliSource {
+  CLI_SOURCE_UNSPECIFIED = 0;
+  // The argument IS the value. Default for every scalar.
+  CLI_SOURCE_LITERAL = 1;
+  // The argument is a PATH; the host reads that file. Default for `bytes`,
+  // because a literal bundle on argv is not a thing anyone types.
+  CLI_SOURCE_FILE = 2;
+  // Read standard input. At most one field per command may claim it — two
+  // would fight over one stream — which the generator enforces.
+  CLI_SOURCE_STDIN = 3;
+}
+
+extend google.protobuf.FieldOptions {
+  string help = 50001;
+  bool required = 50002;
+  // String form of the default (host parses to the field's wire type).
+  string default = 50003;
+  // Single-letter short flag (e.g. "n" → -n).
+  string short = 50004;
+  // Flag name, overriding the kebab-cased field name.
+  //
+  //   int64 created_at = 3 [(cli_flag) = "at"];   ->   --at
+  //
+  // Named cli_flag rather than cli_name because extension names must be unique
+  // within a package, and the method-level override already claims that one.
+  // Cosmetic in the same way: requests are encoded by field NUMBER, so this
+  // changes what a user types and nothing on the wire.
+  string cli_flag = 50007;
+  // Where the value comes from. Unset means the sensible default for the
+  // field's type: FILE for `bytes`, LITERAL for everything else.
+  CliSource cli_source = 50008;
+
+  // Take this field POSITIONALLY, at this 1-based position:
+  //
+  //   string name = 1 [(cli_positional) = 1];   ->   dlc new myapp
+  //
+  // Without this every command is flags-only, which reads worse than the
+  // hand-written CLIs this replaces — `dlc new --name myapp` is a regression,
+  // not a migration. The flag spelling keeps working either way, so
+  // `--name myapp` remains valid and scripts have both.
+  //
+  // Rules the generator enforces, because each fails confusingly at run time:
+  // positions are unique and contiguous from 1; a REPEATED positional takes
+  // everything remaining and so must be last; and there can be only one of
+  // those.
+  uint32 cli_positional = 50009;
+}

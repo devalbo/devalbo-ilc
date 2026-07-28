@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package tictactoe.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/tictactoe/v1;tictactoev1";
+
+import "devalbo/options/v1/options.proto";
+
+// tic-tac-toe — App #3, the pilot for the SEMANTIC RENDER PATH (Decision 34).
+//
+// Its job is to be an app whose state is small, fixed, and visually specific to
+// each tier. A 3×3 grid as DOM, as terminal ASCII, and eventually on a TFT share
+// no visual structure at all — but the state that produces them is identical
+// everywhere and tiny. So the app ships no presentation: it emits what is TRUE,
+// and every host draws it however that tier likes.
+//
+// THE RULE THIS APP EXISTS TO MAKE TESTABLE: a slot renders, it never decides.
+// Every judgement below — is that square free, whose turn is it, has someone won
+// — happens HERE, in code both tiers share. A host that worked out the winner
+// for itself would be a second implementation, and two of them eventually
+// disagree on one tier only with every check green: parity compares command
+// results, the written filesystem, and the event stream, all engine-side, so a
+// slot is invisible to it by construction.
+//
+// METHOD IDS — 1–9999 is ILC's; yours start at 10000.
+service GameService {
+  // Show the board
+  rpc GetState(GetStateRequest) returns (GetStateResponse) {
+    option (devalbo.options.v1.method_id) = 10000;
+    option (devalbo.options.v1.cli_name) = "state";
+  }
+  // Play a mark in a square
+  rpc Play(PlayRequest) returns (PlayResponse) {
+    option (devalbo.options.v1.method_id) = 10001;
+    option (devalbo.options.v1.cli_name) = "play";
+  }
+  // Start a new game
+  rpc NewGame(NewGameRequest) returns (NewGameResponse) {
+    option (devalbo.options.v1.method_id) = 10002;
+    option (devalbo.options.v1.cli_name) = "new-game";
+  }
+}
+
+// What is in a square, or whose turn it is.
+//
+// ONE representation of "nothing", and it is the zero value. An earlier version
+// had both UNSPECIFIED and EMPTY, which is the same fault as a separate `winner`
+// and `draw`: proto3 defaults to zero, so an unset square said UNSPECIFIED while
+// the engine wrote EMPTY, and every reader had to know the two meant the same
+// thing. An empty square is now simply a square nobody has set.
+enum Mark {
+  MARK_UNSPECIFIED = 0; // empty
+  MARK_X = 1;
+  MARK_O = 2;
+}
+
+// How the game stands, as ONE value the engine computed.
+//
+// Replaces a `winner` mark plus a `draw` bool, and the reason is D3 rather than
+// tidiness. Two fields make every host interpret a COMBINATION — "winner set?
+// else draw? else in progress" — which is a small decision, repeated in every
+// slot, that two of them can make differently. It also let nonsense exist on
+// the wire: a winner AND a draw was representable, and nothing rejected it.
+//
+// One enum makes the illegal states unrepresentable and leaves a slot with a
+// switch over values the engine named.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_IN_PROGRESS = 1;
+  OUTCOME_WINNER_X = 2;
+  OUTCOME_WINNER_O = 3;
+  OUTCOME_DRAW = 4;
+}
+
+// One move, in order.
+//
+// Carries the MARK as well as the square, so nothing has to derive it from
+// "X moves first, so odd moves are X". That rule belongs to the engine, and a
+// client inferring it would break the day a variant lets O start.
+message Move {
+  uint32 square = 1; // 1-9
+  Mark mark = 2;
+}
+
+// The whole game, as the engine sees it.
+//
+// SEMANTIC, not presentational: no coordinates, no colours, no draw commands.
+// This is what is TRUE, which is what makes it renderable three different ways
+// without the app knowing how any of them look.
+message GameState {
+  // Nine squares, row-major from the top left. One value each — the smallest
+  // thing that can carry a board.
+  //
+  // An earlier version wrapped each square in a message so it could carry the
+  // move it was played on. Neither renderer ever read it: both use `last_move`
+  // and `moves` below, which is where game time is actually consumed. It was
+  // speculative structure, and it cost a wrapper object per cell — nine of them
+  // in a file §7.1 says a human should be able to read.
+  //
+  // `repeated Mark` rather than `bytes`: canonical JSON renders it as
+  // [1,2,0,...] where bytes would be base64, and the file being legible is the
+  // whole point of storing it this way.
+  repeated Mark board = 1;
+  // Whose turn it is. MARK_UNSPECIFIED once the game is over.
+  Mark turn = 2;
+
+  // How the game stands. The engine's judgement, stated once.
+  Outcome outcome = 3;
+  // The three squares that won it, so a host can HIGHLIGHT the line without
+  // working out which line it was. This is the whole difference between "a host
+  // may draw what the engine named" and "a host may find one itself".
+  repeated uint32 winning_line = 4;
+  // Every move, in order — the raw record, and the only thing here that is not
+  // a judgement.
+  //
+  // `moves` and `last_move` used to sit alongside it and are gone: they were
+  // `len(history)` and `history[last].square`. The rule is that a host must not
+  // apply the RULES — which is why `outcome`, `turn`, `winning_line` and
+  // `Move.mark` are named, since each needs the eight lines, or win/draw
+  // precedence, or "X goes first". The length of a list is not a rule, and two
+  // implementations cannot disagree about it.
+  //
+  // Note what this deliberately does NOT invite: replaying it to reconstruct an
+  // earlier board. That is derivation, and two clients doing it would be two
+  // implementations of the rules. Ask instead — `GetState` takes an `at` move
+  // number and the ENGINE reconstructs.
+  repeated Move history = 5;
+}
+
+message GetStateRequest {
+  // Which move to show the board AS OF. 0 (or absent) means the current board.
+  //
+  // Reviewing an earlier state is a QUERY, not something a client replays. The
+  // engine owns the rules, so the engine reconstructs — which also means every
+  // tier gets time travel for free through the generated command surface, with
+  // no per-slot code at all. The browser terminal answers `state 1` without a
+  // line of TypeScript having been written for it.
+  //
+  // THE ASSUMPTION THIS RESTS ON, worth naming because it will expire: one
+  // authoritative engine, which both players share. This app hosts both, so a
+  // round trip per reviewed state is free and always right.
+  //
+  // It stops being free when the game is distributed (§9, file LWW sync): two
+  // peers each hold an engine, "as of move 3" needs a shared notion of which
+  // move 3, and a query answers only for the asker's own copy. At that point
+  // the history stops being a display convenience and becomes the sync unit —
+  // and replaying it client-side stops being derivation, because a peer
+  // reconciling with another peer IS applying the rules. That is the trigger to
+  // revisit this, not before.
+  uint32 at = 1 [
+    (devalbo.options.v1.help) = "show the board as of this move (default: now)",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+}
+message GetStateResponse {
+  GameState state = 1;
+}
+
+message PlayRequest {
+  // 1–9, row-major. One-based because someone typing `play 5` means the middle,
+  // and an off-by-one at a prompt is a worse trade than one inside the engine.
+  uint32 square = 1 [
+    (devalbo.options.v1.help) = "square to play, 1-9 (row-major from top left)",
+    (devalbo.options.v1.required) = true,
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+}
+message PlayResponse {
+  GameState state = 1;
+}
+
+message NewGameRequest {}
+message NewGameResponse {
+  GameState state = 1;
+}
+
+// The semantic event: the game changed, and here is what it now IS.
+//
+// Carries the whole state rather than a diff — the deliberate difference from
+// `ilc.data-changed`, which is NOT a diff precisely so nobody acts on it without
+// re-reading the files. A host on the semantic path RENDERS this, and §7.1 still
+// holds: rendering is not a mutation, a stale render is corrected by the next
+// event, and writing back from a payload is what would make the event a second
+// source of truth.
+message StateChangedEvent {
+  GameState state = 1;
+}

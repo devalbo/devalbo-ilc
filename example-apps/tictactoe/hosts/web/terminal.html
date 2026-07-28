@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  tictactoe's terminal route.
+
+  A separate Vite ENTRY rather than a router: Vite serves multiple HTML entries
+  natively, and the preset picks up every .html at the root, so adding a route is
+  adding a file. A router would be a dependency bought for one extra page.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tictactoe — terminal</title>
+  </head>
+  <body>
+    <h1>tictactoe — terminal</h1>
+    <p>
+      The same command surface the CLI has, generated from
+      <code>commands.proto</code>. Try <code>help</code>, or Tab to complete.
+      <a href="/files.html">files</a> · <a href="/">back to the app</a>
+    </p>
+    <div id="terminal" class="ilc-terminal"></div>
+    <script type="module" src="/src/terminal.ts"></script>
+  </body>
+</html>

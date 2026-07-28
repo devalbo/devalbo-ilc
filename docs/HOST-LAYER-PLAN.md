@@ -332,6 +332,26 @@ as the consumer that says what the codegen should emit.
 *Falsification:* comment out the engine's `winner` computation and confirm **both** slots go wrong
 identically (not one) — that is the proof presentation carries no logic.
 
+**Landed 2026-07-28.** `example-apps/tictactoe`, **scaffolded with `dlc new`** — the first app actually
+produced by the tool (notes predates the template), so it also served as a real test of the scaffolder and
+arrived with the terminal, files and commands routes for free.
+
+**Falsified, and the SHAPE of the failure is the proof.** With `decide()`'s win detection disabled:
+the native board prints `X | X | X` and still says *"O to play"*; the browser test for the highlighted line
+fails; two engine tests fail. **Neither slot invents a winner** — they render a game that is wrong in
+exactly the way the engine is wrong. A slot that had its own win logic would have covered for the engine on
+one tier and not the other, which is the divergence nothing else could see.
+
+**Two findings:**
+
+- **`platform.RegisterAll()` is easy to lose and fails at RUN time.** Rewriting the scaffolded
+  `engine/commands.go` dropped it, and the symptom was `unknown method_id 1` when the smoke test ran
+  `version` — not a compile error, and nothing near the deleted line. Explicit registration is right (an
+  app should see what it inherits), but its absence should be louder than a runtime "unknown method".
+- **The semantic path needed no capability.** Two tiers render the same game from `game.state-changed`
+  with no Display capability, no draw list and no widget tree — which is the Decision 34 claim, now
+  exercised rather than asserted.
+
 ### Phase 4 — host parity
 
 | File | Change |
@@ -346,6 +366,19 @@ subscribes to nothing. That was an assumption this plan made and Phase 1 correct
 *Falsification:* make one slot compute something the engine did not send and confirm the check reddens.
 This is the one that matters — it is the only mechanical enforcement D3 will ever have, and until it has
 been watched to fail, D3 is a sentence rather than a rule.
+
+**Landed 2026-07-28**, as vectors rather than a script: `hosts/native/projection_test.go` and
+`hosts/web/test/parity.spec.ts` hold the same four states and the same expected renderings, in two
+languages sharing no code. The duplication is the check — generating both from one source would prove only
+that the generator agrees with itself.
+
+**It caught a real mismatch on its first run.** Both slots added a leading space on top of each cell's own
+padding, so rows sat one column right of their separators — and the two disagreed about it. A cosmetic bug,
+but exactly the class parity cannot see, found by the first check that could see it.
+
+**Worth noting what these vectors deliberately do NOT cover:** they are pure state → text, so they stayed
+green while the engine's win detection was disabled. That is correct. Rendering parity and engine
+correctness are different claims, and a check that conflated them would fail for two unrelated reasons.
 
 ### Phase 5 — the published interface: typed and locked events
 
