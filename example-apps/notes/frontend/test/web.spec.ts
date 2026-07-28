@@ -59,3 +59,45 @@ test("creates, lists, and deletes notes through the shared engine", async ({
 
   expect(errors, "no uncaught errors while driving the engine").toEqual([]);
 });
+
+// Events (§6.3) — the UI stops asking what changed.
+//
+// `main.ts` has no refresh() after create or delete: the engine emits
+// `notes.record-changed`, the host forwards it, and the subscription re-lists.
+// So the test above already depends on the event path. This one isolates the
+// claim that path exists FOR: a write this UI did not make still repaints it.
+test("repaints for a write no UI handler made", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await expect(page.getByTestId("count")).toHaveText("0");
+
+  // Boot the engine through the UI first, so this measures the event and not a
+  // cold start (the worker instantiates on the first command either way).
+  await page.getByTestId("title").fill("First");
+  await page.getByTestId("create").click();
+  await expect(page.getByTestId("count")).toHaveText("1", { timeout: 30_000 });
+
+  // No click, no handler, no `main.ts` code on the stack — a different module
+  // calls the engine directly. Nothing here touches the DOM.
+  await page.evaluate(async () => {
+    // A URL, not a bare specifier: this code runs in the BROWSER, which Vite
+    // never transformed — the dev server resolves and transforms driver.ts when
+    // the browser fetches it. Held in a variable so TypeScript type-checks the
+    // shape below without trying to resolve a path that only exists at run time.
+    const url = "/test/driver.ts";
+    const { createDirect } = (await import(
+      /* @vite-ignore */ url
+    )) as typeof import("./driver");
+    await createDirect("From nowhere");
+  });
+
+  // The list can only have learned about it from the event.
+  await expect(page.getByTestId("count")).toHaveText("2");
+  await expect(page.getByTestId("list")).toContainText("From nowhere");
+  // …carrying which record changed, and what changed it: 10000 = CreateRecord.
+  await expect(page.getByTestId("out")).toContainText(
+    "event notes.record-changed — from-nowhere (method 10000)",
+  );
+
+  expect(errors, "no uncaught errors while driving the engine").toEqual([]);
+});

@@ -1,14 +1,19 @@
 # Events — implementation plan (§6.3)
 
-**Status:** Phase 1 landed. Supersedes the outline in `EVENTS-PLAN-PROMPT.md`.
+**Status: complete.** Settled as **Decision 33**; the rules that outlive this document are in `AGENTS.md`.
+Supersedes the outline in `EVENTS-PLAN-PROMPT.md`. Kept for the findings, not as a work list.
 
 | Phase | State |
 | --- | --- |
 | 1 — seam + platform API | ✅ **done** |
 | 2 — parity records + compares events | ✅ **done** |
-| 3 — web host | ⬜ next |
-| 4 — notes uses it | ⬜ |
-| 5 — declare + document | ⬜ |
+| 3 — web host | ✅ **done** |
+| 4 — notes uses it | ✅ **done** |
+| 5 — document it (and **not** declare it) | ✅ **done** |
+
+**Follow-ups, deliberately out of scope** (also in the tasks doc): cross-tab delivery via
+`BroadcastChannel` — a second tab does not see this one's writes; and the desktop tier's
+`runtime.EventsEmit`, which has no host to wire into yet.
 
 Events is the first **custom capability import**. Console and Filesystem are standard WASI, so the engine
 has never imported anything a *host* must provide. Whatever shape this takes is inherited by Display, the
@@ -208,26 +213,59 @@ a probe that breaks all three dimensions at once proves only that *something* is
 The second scenario is the one that matters: same commands, same responses, same files — one extra event.
 If it goes red, the event comparison is demonstrably what caught it.
 
-### Phase 3 — the web host
+### Phase 3 — the web host ✅
 
 | File | Change |
 | --- | --- |
-| `hosts/web/worker.ts` | supply the `events` import at instantiation; forward via `Comlink.proxy`; **never `await` inside the import** |
-| `hosts/web/api.ts` | `subscribe(fn): () => void` — returns an unsubscribe |
-| `hosts/web/README.md` | the no-re-entrancy rule, and why the import must stay synchronous |
+| `hosts/web/events.ts` | the mapped `devalbo:ilc/events` module — synchronous, non-throwing, copies the payload out of linear memory |
+| `hosts/web/worker.ts` | install the forwarder once; batch a command's events; forward via `Comlink.proxy` |
+| `hosts/web/api.ts` | `subscribe(fn): () => void`, main-thread fan-out, `TopicDataChanged` |
+| `hosts/web/README.md` | the three rules, the flush ordering, and the transpile `--map` |
+| `frontend/src/App.tsx` | subscribe → re-list; **`runImport` no longer calls `refresh()`** |
+| `frontend/test/web.spec.ts` | an event repaints the UI with no `refresh()` call |
 
 **The jco detail that will bite:** Spike 5 established that a host import returning a Promise requires
 `--async-imports`, which we deliberately do not use (Decision 22 / `WASI-UPGRADES.md`). `emit` returns
 nothing and must stay synchronous — the worker fires the proxied callback and returns immediately. If
 someone makes it `async`, the failure surfaces as a jco type error far from the edit.
 
-### Phase 4 — notes uses it, and the UI stops asking
+**Landed, with one hazard the plan did not see and two corrections to code written ahead of it.**
+
+**The hazard: an event can outrun the write it announces.** The engine emits *mid-command*; the worker
+flushes to OPFS *after* `execute` returns. Forwarding immediately means a listener told `ilc.data-changed`
+can call `listFiles` and read a half-flushed tree — a race that would surface as a flaky list, not as an
+error. The worker therefore **batches a command's events and delivers them after the flush**, so the host
+can promise that *an event never arrives before the change it announces is durable*. Events with no command
+in flight (a future watcher or sync) still go out immediately. This is a host-side ordering guarantee, not
+a change to D2: `emit` is still synchronous and fire-and-forget from the engine's side.
+
+**Correction 1 — `subscribe` supported exactly one subscriber, and its unsubscribe did nothing.** The
+worker called `setForwarder` per subscription (so a second subscriber evicted the first), and `api.ts`
+returned a closure that filtered a list nothing dispatched from. Now: the worker holds one listener, the
+forwarder is installed once at module load, and `api.ts` keeps the subscriber set and fans out on the main
+thread. A React app mounting three subscribing components is the normal case, not an edge one.
+
+**Correction 2 — one relay proxy, registered lazily.** Each `Comlink.proxy` retains a `MessagePort`; one
+per subscriber would leak on every mount/unmount cycle.
+
+**Falsification (observed, not assumed).** Dropping the forward in `worker.ts` turns the new test red
+*with the file list still stale after an import* — and it also reddens `exports a BFT bundle and re-imports
+it` and `import --replace really deletes what the bundle omits`, because deleting `runImport`'s manual
+`refresh()` put those two on the event path as well. That is the point of deleting it: the UI is now wrong
+if events stop working, so the capability cannot rot unnoticed.
+
+**Left for Phase 4/5:** `new` still refreshes by hand — it does not emit yet. The scaffold template's web
+UI is untouched.
+
+### Phase 4 — notes uses it, and the UI stops asking ✅
 
 | File | Change |
 | --- | --- |
-| `example-apps/notes/proto/notes/v1/commands.proto` | `RecordChangedEvent` |
-| `example-apps/notes/engine/commands.go` | emit `notes.record-changed` on create + delete |
-| `example-apps/notes/frontend/src/main.ts` | `subscribe(...)` → re-render; **delete the manual `refresh()` calls** |
+| `example-apps/notes/proto/notes/v1/commands.proto` | `RecordChangedEvent{id, method}` |
+| `example-apps/notes/engine/commands.go` | `emitRecordChanged` on create + delete |
+| `example-apps/notes/engine/commands_test.go` | the emitted stream, and that the write lands first |
+| `example-apps/notes/frontend/src/main.ts` | `subscribe(...)` → re-list; **both manual `refresh()` calls deleted** |
+| `example-apps/notes/frontend/test/driver.ts` | a second writer, outside the UI (not part of the app) |
 | `example-apps/notes/frontend/test/web.spec.ts` | the test below |
 
 **The test that makes this meaningful.** Asserting "click create, list updates" would still pass with the
@@ -236,22 +274,77 @@ manual refresh, so it proves nothing. Drive the engine *directly*, bypassing the
 ```ts
 // No UI handler runs here — if the list updates, an EVENT updated it.
 await page.evaluate(async () => {
-  const { execute } = await import("@devalbo/ilc-web/api");
-  await execute(MethodCreateRecord, CreateRecordRequest.toBinary({ title: "From nowhere" }));
+  const { createDirect } = await import("/test/driver.ts");
+  await createDirect("From nowhere");
 });
-await expect(page.getByTestId("count")).toHaveText("1");
+await expect(page.getByTestId("count")).toHaveText("2");
 ```
 
-### Phase 5 — declare it, document it
+**Landed. One deviation, from a constraint the plan's snippet could not satisfy.**
+
+**The driver is a module, not an inline import.** `page.evaluate` runs in the BROWSER, which Vite never
+transformed — so `import("@devalbo/ilc-web/api")` inside it cannot resolve a bare specifier. The write
+therefore comes from `test/driver.ts`, imported by URL (`/test/driver.ts`), which the dev server transforms
+on fetch. Nothing in the app imports it, so a production build never sees it; it shares the page's engine
+because both modules import the same api URL and ES modules are singletons per graph. This is a stronger
+setup than the sketch anyway — a real second writer in the same page, not a call spliced into the test.
+
+**What notes proves that the platform verbs could not.** `ilc.data-changed` is emitted by inherited code;
+`notes.record-changed` is an APP's own topic and an app's own payload, defined in the app's own `.proto`
+with no registration anywhere — which is the D3 claim ("`notes.` is notes' to spend") actually exercised.
+
+**Two engine-side rules the plan did not state, now tested:** a delete that removed nothing emits nothing
+(a no-op is not a change, and counting events would say otherwise), and reads emit nothing at all — an
+event per `list` would loop any subscriber that re-lists on an event.
+
+**Falsification (observed).** Commenting out the create emit turns it red in both directions:
+`TestMutationsEmitRecordChanged` reports 1 event instead of 2 and `TestEventArrivesAfterTheWrite` finds no
+file; after `make build-web`, BOTH browser tests hang at `count = 0`, because with the manual refresh gone
+the UI has no other way to learn anything. Reverted, rebuilt, green.
+
+**Note for Phase 5:** notes' `dlc.toml` still declares only `console` + `filesystem`, and events already
+work — nothing enforces the declaration yet. That gap is Phase 5's job.
+
+### Phase 5 — document it ✅ (and do NOT declare it)
 
 | File | Change |
 | --- | --- |
-| `templates/component-model/dlc.toml.tmpl` | `capabilities = [..., "events"]` |
-| `engine/commands.go` | accept `events` in `--caps` |
-| `docs/DEVALBO-ILC-GO-PLAN.md` | Decision entry: shape, no re-entrancy, parity inclusion |
-| `AGENTS.md` | never call `execute` from an event callback; `emit` stays synchronous |
-| `README.md` | events 📋 → ✅ |
-| `verify/scaffold/golden.txt` | re-bless |
+| `docs/DEVALBO-ILC-GO-PLAN.md` | **Decision 33** — the import shape, no-op absence, reach-vs-announce, parity inclusion |
+| `AGENTS.md` | the three emit rules, absence-is-a-no-op, and what `dlc.toml` capabilities mean |
+| `README.md` | events 📋 → ✅, plus the cross-tab gap stated as a gap |
+| `docs/DEVALBO-DLC-GO-TASKS.md` | Events ticked, with its two follow-ups |
+| ~~`templates/component-model/dlc.toml.tmpl`~~ | **dropped** — see below |
+| ~~`engine/commands.go` (`--caps`)~~ | **dropped** |
+| ~~`verify/scaffold/golden.txt`~~ | **not needed** — nothing the scaffold emits changed |
+
+**The plan said declare `events` in `dlc.toml`. We are not going to, and the reason generalizes.**
+
+Two findings forced it. Empirically, `Tier.Capabilities` is parsed by `hosts/native/manifest.go` and read
+by **nothing** — one write, zero consumers. It is already decorative for `console` and `filesystem`, so
+adding a third entry would have made the list *look* more authoritative while gating exactly as much as
+before: nothing. (A related inconsistency, left alone: `engine/commands.go` validates `--caps` and rejects
+anything outside console/filesystem, then writes a hardcoded `capabilities = [...]` into the generated
+`dlc.toml` regardless of what was passed.)
+
+And in principle: **capabilities declare what an app can REACH, not what it can ANNOUNCE.** Console,
+filesystem, display, the index, network are each inbound data or an effect on something the app does not
+own — privileges a host could refuse. `emit` has no return value (D1), so it carries nothing back and
+grants nothing; D4 says absence must degrade to a no-op, so it cannot be refused either. **A manifest entry
+that gates nothing and can be denied by no one is a comment, not a permission.** That line is now in
+`AGENTS.md`, which is the point — it tells the *next* capability which side it is on.
+
+**The strict/lenient knob, considered and deferred with a trigger.** Should a tier lacking a capability
+error instead of no-op'ing, configurably? Two reasons not to, here. It contradicts D4 and the first rule in
+`events.go`: an app that can tell whether anyone is listening behaves differently per tier, which is the
+divergence the architecture exists to prevent. And events cannot exercise the knob anyway — **"absent" is
+not a state this capability can be in**: natively, no sink *is* the no-op; on wasm the import is satisfied
+at instantiation or the component does not load. There is no third outcome to switch on.
+
+It gets teeth at the **SQLite index**, which §7.1 already says must survive `unavailable` — a capability
+genuinely missing at runtime, where strict mode would catch a fallback path quietly becoming the only path.
+Build it there, **host-side**, never observable by app code. The hazard it aims at is real and already bit
+us once (Phase 1's dead-code-eliminated import looked like a working one); the cheap interim version is a
+host-set debug switch that panics on an emit with no sink.
 
 ---
 
@@ -281,12 +374,22 @@ await expect(page.getByTestId("count")).toHaveText("1");
 
 ---
 
-## 6. Definition of done
+## 6. Definition of done — all met
 
-1. `./scripts/ci.sh all` green.
-2. Parity compares three dimensions, and the event dimension has been **watched to fail** on an injected
-   divergence.
-3. notes' browser test updates its list from an engine call no UI handler observed.
-4. No `refresh()` call remains after a mutating command in notes' UI.
-5. `AGENTS.md` carries the re-entrancy and synchronous-emit rules.
-6. The `caps_native` / `caps_wasip2` seam exists and is used, closing the §5.3 task.
+1. ✅ `./scripts/ci.sh all` green.
+2. ✅ Parity compares three dimensions (events **interleaved** into the result stream, which catches *which
+   command* emitted), and the `events` probe in `verify-parity-selftest.sh` has been watched to fail on an
+   injected divergence — reddening the event comparison **without** a `TREE MISMATCH`, so it is
+   demonstrably the event dimension doing the catching.
+3. ✅ `repaints for a write no UI handler made` — `test/driver.ts` calls the engine, no handler runs, the
+   list updates.
+4. ✅ No `refresh()` after a mutating command in notes' UI. The three that remain are the initial load, the
+   event handler itself, and the function's own definition.
+5. ✅ `AGENTS.md` §3 carries re-entrancy, synchronous-emit, emit-after-the-write, absence-is-a-no-op, and
+   the reach-vs-announce rule.
+6. ✅ `engine/platform/caps_native.go` + `caps_wasip2.go` exist and are the live path on both tiers,
+   closing the §5.3 seam task.
+
+**Falsified at every phase, not just asserted:** the parity `events` probe (Phase 2), dropping the web
+host's forward (Phase 3 — the browser list goes stale), and commenting out notes' create emit (Phase 4 —
+two native tests red, both browser tests hung at `count = 0`). Each was reverted and re-verified green.

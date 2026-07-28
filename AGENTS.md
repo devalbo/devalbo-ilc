@@ -66,6 +66,24 @@ one deliberate exception is `options.proto`, vendored because a generated projec
 **`dlc` is an app like any other.** If `dlc` needs special treatment, the template is teaching something
 `dlc` does not do.
 
+**Events (`platform.Emit`) — three rules, each of which fails far from its cause:**
+- **A host must never call `Execute` from inside a sink.** The engine is on the stack; re-entering it
+  mid-command is how you get corrupt state or a deadlock. The web host is safe by construction (Comlink is
+  a message boundary); a native host must defer explicitly.
+- **`emit` stays synchronous and returns nothing.** An `async` web-side import returns a Promise, and jco
+  only supports that under `--async-imports`, which we refuse (Decision 22). The failure surfaces as a jco
+  type error nowhere near the edit.
+- **Emit AFTER the write, once per command.** A subscriber re-reads on the event and must find the new
+  state there. Once per command, never per record — a 1000-file import must not become 1000 messages.
+
+**A capability's absence is a no-op, never an error** (Decision 33). App code must not be able to tell
+whether anyone is listening, because on some tier nobody is, and code that branches on it behaves
+differently per tier — the divergence this architecture exists to prevent.
+
+**`dlc.toml` capabilities declare what an app can REACH, not what it can ANNOUNCE.** Console, filesystem,
+display, index, network are privileges a host could refuse. Emitting carries nothing back and cannot be
+refused, so it is not declared. See Decision 33 before adding the next capability to that list.
+
 ## 4. Templates
 
 **Every file under `templates/` ends in `.tmpl` (substituted) or `.raw` (verbatim).** Without a suffix:

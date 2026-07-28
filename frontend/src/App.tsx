@@ -5,7 +5,13 @@
 // No business logic lives here. What `new` *means* is in engine/, shared with
 // the CLI; this only collects fields and renders what came back.
 import { useCallback, useEffect, useState } from "react";
-import { execute, listFiles, reset } from "@devalbo/ilc-web/api";
+import {
+  execute,
+  listFiles,
+  reset,
+  subscribe,
+  TopicDataChanged,
+} from "@devalbo/ilc-web/api";
 // Ids are generated, never typed by hand — see the note in the host's api.ts.
 import { MethodNew } from "@gen/devalbo/dlc/v1/commands.registry.pb";
 import {
@@ -16,6 +22,7 @@ import { NewRequest, NewResponse } from "@gen/devalbo/dlc/v1/commands.pb";
 // The filesystem/bundle verbs are the PLATFORM's, not dlc's — every app gets
 // this same download/import UI for free.
 import {
+  DataChangedEvent,
   ExportFsRequest,
   ExportFsResponse,
   ImportFsRequest,
@@ -42,6 +49,37 @@ export function App() {
   // persistence claim, visible rather than asserted.
   useEffect(() => {
     refresh().catch((e) => say(`ERROR listing OPFS: ${e.message}`));
+  }, [refresh, say]);
+
+  // The reactivity loop (§6.3): the engine announces that the filesystem
+  // changed, and the view re-reads. This is not a nicety over calling refresh()
+  // after our own commands — it is the only thing that works when the writer is
+  // NOT this component: another tab on the same OPFS origin, a future sync, or
+  // an `execute` from anywhere else in the app.
+  //
+  // The callback runs on the main thread (the worker reaches it by message), so
+  // calling back into the engine from here would be legal. Inside the worker it
+  // would be re-entrancy — see hosts/web/README.md.
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let dropped = false;
+    subscribe((topic, payload) => {
+      if (topic !== TopicDataChanged) return;
+      const { prefix, method } = DataChangedEvent.fromBinary(payload);
+      say(`event ${topic} — prefix "${prefix ?? ""}", method ${method ?? 0}`);
+      refresh().catch((e) => say(`ERROR listing OPFS: ${e.message}`));
+    })
+      .then((off) => {
+        // StrictMode double-mounts in dev: if the cleanup already ran, drop the
+        // subscription the moment it resolves rather than leaking it.
+        if (dropped) off();
+        else unsubscribe = off;
+      })
+      .catch((e) => say(`ERROR subscribing: ${e.message}`));
+    return () => {
+      dropped = true;
+      unsubscribe?.();
+    };
   }, [refresh, say]);
 
   async function runNew() {
@@ -125,7 +163,13 @@ export function App() {
       }
       const resp = ImportFsResponse.fromBinary(r.output);
       say(`imported ${resp.files?.length ?? 0} files from ${file.name}`);
-      await refresh();
+      // NO refresh() here, deliberately. `import-fs` emits `ilc.data-changed`,
+      // and the subscription above re-lists. If the tree stops updating after an
+      // import, the event path is broken — which is the point: a manual refresh
+      // here would keep the UI correct while the capability rotted unnoticed.
+      //
+      // `new` still refreshes by hand: it does not emit yet (the platform verbs
+      // that touch the whole store do). It will lose that call when it does.
     } catch (e) {
       say(`ERROR: ${(e as Error).message}`);
     } finally {

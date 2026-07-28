@@ -99,7 +99,8 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 | **`dlc build web`** — supplies the WIT world from `dlc` itself, so apps carry none and cannot be stranded on a stale one | ✅ |
 | **Console** — stdio natively; browser stdio → `console.*` | 🚧 native works; the web wiring is not done |
 | **Host-side arg parsing** (Decision 28) | ✅ every tier builds requests — argv in `hosts/native`, a form on the web. The engine has **one** entry, `execute(method, request)` |
-| SQLite index · Events · Display · Network · sync | 📋 |
+| **Events** (§6.3) — the engine's first custom capability *import*: `platform.Emit(topic, payload)` → host subscription → UI re-reads | ✅ same code both tiers; parity compares the emitted stream; the browser repaints for a write no UI handler made |
+| SQLite index · Display · Network · sync | 📋 |
 
 ## Repository layout
 
@@ -165,8 +166,12 @@ The honest gaps, in the order they matter:
 1. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
-2. 📋 **Desktop, embedded, and the richer capabilities** (SQLite index, events, display, sync) are
-   designed and unbuilt — see the tasks doc.
+2. 📋 **Desktop, embedded, and the remaining capabilities** (SQLite index, display, sync) are
+   designed and unbuilt — see the tasks doc. Events is the one that landed, and it built the
+   `caps_native` / `caps_wasip2` seam the rest of them inherit.
+3. 📋 **Events do not cross a tab or a process.** Same graph only — worker → main thread, or native
+   in-process. A second tab on the same OPFS origin does not see this one's writes; that needs a
+   `BroadcastChannel` and is the natural follow-up.
 
 ## License
 

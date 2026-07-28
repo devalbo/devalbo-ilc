@@ -115,6 +115,73 @@ func TestListOpenDelete(t *testing.T) {
 	}
 }
 
+// Events (§6.3) — what the engine ANNOUNCES is part of what a command does.
+//
+// Tested here rather than only in the browser because the emission is engine
+// code: every tier inherits whatever this asserts. The web test covers the other
+// half, that a host can actually receive it.
+func TestMutationsEmitRecordChanged(t *testing.T) {
+	inTempRoot(t)
+
+	type event struct {
+		topic   string
+		payload notesv1.RecordChangedEvent
+	}
+	var got []event
+	platform.SetEventSink(func(topic string, payload []byte) {
+		var e notesv1.RecordChangedEvent
+		if err := e.UnmarshalVT(payload); err != nil {
+			t.Errorf("event %q carried an undecodable payload: %v", topic, err)
+			return
+		}
+		got = append(got, event{topic, e})
+	})
+	t.Cleanup(func() { platform.SetEventSink(nil) })
+
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: "Buy milk"}, nil)
+	// Reads announce nothing. An event per list would make every subscriber that
+	// re-lists on an event loop forever.
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, nil)
+	call(t, notesv1.MethodDeleteRecord, &notesv1.DeleteRecordRequest{Id: "buy-milk"}, nil)
+	// A delete that removed nothing is not a change.
+	call(t, notesv1.MethodDeleteRecord, &notesv1.DeleteRecordRequest{Id: "buy-milk"}, nil)
+
+	want := []event{
+		{"notes.record-changed", notesv1.RecordChangedEvent{Id: "buy-milk", Method: notesv1.MethodCreateRecord}},
+		{"notes.record-changed", notesv1.RecordChangedEvent{Id: "buy-milk", Method: notesv1.MethodDeleteRecord}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("emitted %d events, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].topic != want[i].topic ||
+			got[i].payload.Id != want[i].payload.Id ||
+			got[i].payload.Method != want[i].payload.Method {
+			t.Errorf("event %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// The record must be on disk BEFORE the event goes out, or a subscriber that
+// re-reads on it finds nothing there — the failure that makes an event worse
+// than no event at all.
+func TestEventArrivesAfterTheWrite(t *testing.T) {
+	root := inTempRoot(t)
+
+	var seenAtEmit []byte
+	platform.SetEventSink(func(string, []byte) {
+		// Read the store from INSIDE the sink: this is the moment a host would
+		// forward, and whatever is on disk now is what a subscriber can see.
+		seenAtEmit, _ = os.ReadFile(filepath.Join(root, "records", "buy-milk.json"))
+	})
+	t.Cleanup(func() { platform.SetEventSink(nil) })
+
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: "Buy milk"}, nil)
+	if !strings.Contains(string(seenAtEmit), `"Buy milk"`) {
+		t.Fatalf("the record was not readable when the event fired: %q", seenAtEmit)
+	}
+}
+
 func TestCreateRequiresTitle(t *testing.T) {
 	inTempRoot(t)
 	body, err := (&notesv1.CreateRecordRequest{Body: "no title"}).MarshalVT()

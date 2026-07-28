@@ -60,16 +60,51 @@ export async function execute(
 export async function subscribe(
   fn: (topic: string, payload: Uint8Array) => void,
 ): Promise<() => void> {
-  const remote = connect();
-  await remote.subscribe(Comlink.proxy(fn));
+  listeners.add(fn);
+  // ONE relay proxy for the worker, however many subscribers there are, because
+  // the worker holds a single listener: handing it each `fn` directly would mean
+  // the second subscriber silently evicted the first. Fan-out happens here, on
+  // the main thread, where a listener is just a function call.
+  //
+  // Registered lazily and only once — a React app mounting three components that
+  // each subscribe must not open three proxies (each is a retained MessagePort).
+  attached ??= connect().subscribe(
+    Comlink.proxy((topic: string, payload: Uint8Array) => {
+      // Snapshot: a listener may unsubscribe (or subscribe) from inside its own
+      // callback, and mutating the set mid-iteration would skip a sibling.
+      for (const listener of [...listeners]) {
+        try {
+          listener(topic, payload);
+        } catch (e) {
+          // One broken subscriber must not silence the others. Logged rather
+          // than swallowed — this is main-thread application code, where a
+          // thrown error is a bug someone can fix, not an engine hazard.
+          console.error(`ilc: event listener for "${topic}" threw`, e);
+        }
+      }
+    }),
+  );
+  await attached;
   return () => {
-    // Detach locally. The worker keeps its forwarder, which then calls a proxy
-    // whose port is gone — harmless, because worker.ts swallows that rejection.
-    active = active.filter((f) => f !== fn);
+    listeners.delete(fn);
+    // The relay stays registered even at zero listeners: re-subscribing later
+    // is then free, and an idle relay costs one no-op call per event.
   };
 }
 
-let active: Array<(topic: string, payload: Uint8Array) => void> = [];
+const listeners = new Set<(topic: string, payload: Uint8Array) => void>();
+let attached: Promise<void> | null = null;
+
+/**
+ * The platform's own topic — emitted by the inherited filesystem verbs
+ * (`import-fs`, `reset-fs`) with a `DataChangedEvent` payload.
+ *
+ * Mirrors `platform.TopicDataChanged` in `engine/platform/events.go`. Topics are
+ * strings by design (they are not a wire contract the way method ids are), and
+ * the cost of that is exactly this: a typo matches nothing, silently. Import the
+ * constant, never retype the string.
+ */
+export const TopicDataChanged = "ilc.data-changed";
 
 /** Every file currently in OPFS, sorted. */
 export async function listFiles(): Promise<string[]> {

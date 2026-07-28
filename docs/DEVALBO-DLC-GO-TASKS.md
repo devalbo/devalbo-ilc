@@ -159,7 +159,9 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
-- [ ] **Events** capability + reactivity loop (§6.3): `data-changed` → UI invalidate/refetch (`useEngineEvent`)
+- [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/ilc-web/api` was enough, and notes' UI is not React
+  - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes
+  - [ ] follow-up: no desktop tier to wire `runtime.EventsEmit` into yet (§6.3)
 - [ ] **Environment manifest** (§6.4a, Decision 32) — `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change. Prerequisite for Display; also how `unavailable` stops being a linking problem and becomes a data one
 - [ ] **Display** capability (§6.4): draw-command list + retained widget tree, branching on the manifest
 - [ ] **Network** (deferred): `wasi:http` when needed

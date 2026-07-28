@@ -85,3 +85,25 @@ message DeleteRecordRequest {
 message DeleteRecordResponse {
   bool deleted = 1;
 }
+
+// ---- events (§6.3) --------------------------------------------------------
+
+// RecordChangedEvent is the payload of notes' own `notes.record-changed` topic:
+// "a record appeared or vanished, re-read the list".
+//
+// An APP-DEFINED topic and an app-defined payload, in the app's own .proto —
+// that is the pattern the platform's `ilc.data-changed` establishes and this
+// inherits. Nothing had to be registered to say it: topics are namespaced
+// strings, so `notes.` is notes' to spend (whereas method ids come from a band).
+//
+// Deliberately NOT a diff, for the same reason DataChangedEvent is not: the file
+// is the truth (§7.1). Carrying the record itself would let a subscriber render
+// state it never read from the store, and the two would drift.
+message RecordChangedEvent {
+  // The record that changed. Present even for a delete — a subscriber watching
+  // one note wants to know it is gone.
+  string id = 1;
+  // The command that caused it, as a method_id: create and delete are told
+  // apart by the number, not by a second enum that could disagree with it.
+  uint32 method = 2;
+}

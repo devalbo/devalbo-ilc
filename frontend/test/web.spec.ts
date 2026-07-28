@@ -195,6 +195,48 @@ test("exports a BFT bundle and re-imports it", async ({ page }) => {
   }
 });
 
+// Events, Phase 3 — the engine's `emit` reaches the main thread (§6.3).
+//
+// The whole path is under test here and nowhere else: the engine calls
+// `platform.Emit` inside wasm → jco routes the `devalbo:ilc/events` import to
+// hosts/web/events.ts → the worker forwards over Comlink → api.ts fans out → the
+// UI re-lists. Parity already proves the engine EMITS on both tiers; what it
+// cannot see is whether a browser host receives it.
+//
+// This test is only meaningful because `runImport` no longer calls refresh():
+// the file list below can be updated by nothing but the event.
+test("an engine event repaints the UI with no refresh() call", async ({
+  page,
+}) => {
+  await page.getByTestId("name").fill("myapp");
+  await page.getByTestId("new").click();
+  await expectScaffolded(page, "myapp");
+
+  const bundle = JSON.stringify({
+    type: "directory",
+    entries: {
+      "from-the-event.txt": { type: "text", content: "arrived\n" },
+    },
+  });
+  await page.getByTestId("import").setInputFiles({
+    name: "events.bft.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(bundle),
+  });
+
+  // The event itself, with its decoded payload — so a failure distinguishes
+  // "no event arrived" from "an event arrived carrying the wrong thing".
+  // method 0 would mean the emitter forgot to say what caused the change.
+  const log = page.getByTestId("log");
+  await expect(log).toContainText(/event ilc\.data-changed — prefix "", method [1-9]/);
+
+  // …and the consequence: the list re-read itself. Ordering is load-bearing —
+  // the worker holds the event until the OPFS flush completes, so a listener
+  // that lists immediately cannot observe a half-written tree.
+  await expect(page.getByTestId("files")).toContainText("from-the-event.txt");
+  await expect(page.getByTestId("files")).not.toContainText("myapp/go.mod");
+});
+
 // A bundle is untrusted input wherever it arrives from. The refusal comes from
 // engine/, so the browser inherits the CLI's safety rather than reimplementing it.
 test("refuses a bundle whose paths escape the root", async ({ page }) => {

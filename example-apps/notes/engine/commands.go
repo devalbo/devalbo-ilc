@@ -57,6 +57,7 @@ func handleCreateRecord(req *notesv1.CreateRecordRequest) (*notesv1.CreateRecord
 	if err := writeRecord(record); err != nil {
 		return nil, err
 	}
+	emitRecordChanged(id, notesv1.MethodCreateRecord)
 	return &notesv1.CreateRecordResponse{
 		Record: record,
 		Path:   filepath.Join(recordsDir, id+".json"),
@@ -109,7 +110,34 @@ func handleDeleteRecord(req *notesv1.DeleteRecordRequest) (*notesv1.DeleteRecord
 	if err != nil {
 		return nil, errors.New("delete-record: " + err.Error())
 	}
+	// Only when something was actually removed. Deleting a record that was never
+	// there changed nothing, and an event saying otherwise would make every
+	// subscriber re-read for no reason — and would make a no-op look like a write
+	// to anyone counting events.
+	if ok {
+		emitRecordChanged(req.Id, notesv1.MethodDeleteRecord)
+	}
 	return &notesv1.DeleteRecordResponse{Deleted: ok}, nil
+}
+
+// emitRecordChanged announces that a record appeared or vanished (§6.3).
+//
+// Called AFTER the write succeeds, never before: a subscriber that re-lists on
+// this event must find the new state already there. This mirrors the platform's
+// own emitDataChanged, and the mirroring is the point — an app's events are made
+// of the same parts as the platform's, with no extra machinery.
+//
+// A marshal failure is swallowed rather than returned: the command has already
+// succeeded, and failing it now because a notification could not be encoded
+// would report data as unwritten that is on disk.
+func emitRecordChanged(id string, method uint32) {
+	payload, err := (&notesv1.RecordChangedEvent{Id: id, Method: method}).MarshalVT()
+	if err != nil {
+		return
+	}
+	// The topic is namespaced to the app. "notes." is not registered anywhere —
+	// see the note in commands.proto.
+	platform.Emit("notes.record-changed", payload)
 }
 
 // slug turns a title into a filesystem-safe id.
