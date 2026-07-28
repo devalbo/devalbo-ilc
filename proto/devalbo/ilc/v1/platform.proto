@@ -147,6 +147,8 @@ message ResetFsResponse {
 // files are the truth (§7.1). Telling a UI only that something moved keeps the
 // filesystem authoritative and keeps this message from growing into a protocol.
 message DataChangedEvent {
+  option (devalbo.options.v1.topic) = "ilc.data-changed";
+
   // Root-relative subtree that changed. Empty means the whole root.
   string prefix = 1;
   // The command that caused it, as a method_id — enough for a subscriber to

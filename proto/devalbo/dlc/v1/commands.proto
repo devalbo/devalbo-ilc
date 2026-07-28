@@ -61,8 +61,20 @@ message NewRequest {
   repeated string caps = 3 [
     (devalbo.options.v1.help) = "capability opt-ins (console, filesystem)"
   ];
+  // REQUIRED ON A COMMAND LINE, though not in the schema — and the distinction
+  // is the point. A tier is now a directory of host code plus a `dlc.toml` entry
+  // that is checked to exist, so scaffolding a layout nobody chose is the kind
+  // of silent default this repo keeps removing (see manifest.go, which errors on
+  // an unknown key rather than ignoring it).
+  //
+  // `required` is CLI-surface metadata, read only by the command-line runner.
+  // The engine never enforces it, so the browser form — which asks the same
+  // question as checkboxes and may legitimately send nothing — is unaffected and
+  // still gets the engine's default. An interactive terminal is satisfied by the
+  // prompt; a script has to say what it wants.
   repeated string tiers = 4 [
-    (devalbo.options.v1.help) = "tier opt-ins (native, web)"
+    (devalbo.options.v1.help) = "tier opt-ins: native, web (pass --tiers, or run interactively to be asked)",
+    (devalbo.options.v1.required) = true
   ];
   // NO DEFAULT, deliberately. This declared `UI_KIND_REACT` while the engine
   // rejected anything but UNSPECIFIED — the template scaffolds a vanilla-TS UI.

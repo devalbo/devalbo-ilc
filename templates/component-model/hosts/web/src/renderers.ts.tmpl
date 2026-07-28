@@ -40,6 +40,13 @@ export const appRenderers: Record<number, Renderer | undefined> = {
     const files = ImportFsResponse.fromBinary(bytes).files ?? [];
     return files.length === 0 ? "(nothing imported)" : files.map((f) => "  + " + f).join("\n");
   },
-  [MethodResetFs]: (bytes) =>
-    `removed ${(ResetFsResponse.fromBinary(bytes).removed ?? []).length} file(s)`,
+  // The engine returns the TOP-LEVEL entries removed, not a file count —
+  // `records/` is one entry holding many notes. Naming them beats a number that
+  // reads as though something survived.
+  [MethodResetFs]: (bytes) => {
+    const removed = ResetFsResponse.fromBinary(bytes).removed ?? [];
+    return removed.length === 0
+      ? "nothing to remove"
+      : removed.map((r) => "  - " + r).join("\n");
+  },
 };

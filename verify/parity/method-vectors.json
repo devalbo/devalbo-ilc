@@ -17,12 +17,12 @@
   {
     "name": "new (defaults)",
     "method": 10000,
-    "request": "0a0b6170702d64656661756c74"
+    "request": "0a0b6170702d64656661756c7422066e61746976652203776562"
   },
   {
     "name": "new with module",
     "method": 10000,
-    "request": "0a0a6170702d6d6f64756c65121a6769746875622e636f6d2f61636d652f6170702d6d6f64756c65"
+    "request": "0a0a6170702d6d6f64756c65121a6769746875622e636f6d2f61636d652f6170702d6d6f64756c6522066e61746976652203776562"
   },
   {
     "name": "new with enums",
@@ -32,7 +32,12 @@
   {
     "name": "new missing name (envelope error)",
     "method": 10000,
-    "request": ""
+    "request": "22066e6174697665"
+  },
+  {
+    "name": "new missing tiers (envelope error)",
+    "method": 10000,
+    "request": "0a0b6170702d6e6f7469657273"
   },
   {
     "name": "export-fs whole root (BFT)",

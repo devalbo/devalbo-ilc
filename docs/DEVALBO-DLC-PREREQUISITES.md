@@ -127,7 +127,8 @@ git clone <repo> && cd devalbo-ilc
 devbox shell                 # provisions the pinned toolchain
 make doctor                  # (task) confirm readiness
 make build-engine            # TinyGo → engine.core.wasm
-dlc new myapp                # scaffold a project (terminal)
+dlc new myapp                # scaffold a project (asks which tiers)
+dlc new --tiers native --tiers web myapp   # …or say so, which scripts must
 make dev-web                 # run dlc in the browser (React UI)
 ```
 

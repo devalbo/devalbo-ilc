@@ -28,10 +28,6 @@ import (
 // is the truth, and a human can read the game without the app.
 const gameFile = "game.json"
 
-// TopicStateChanged is this app's own topic. The app names it; nothing
-// registers it (Decision 33 D3).
-const TopicStateChanged = "game.state-changed"
-
 func init() {
 	// The INHERITED verbs — version, export-fs, import-fs, reset-fs. Explicit
 	// rather than an import side effect, so an app can see what it is getting.
@@ -212,11 +208,7 @@ func save(s *tictactoev1.GameState) error {
 }
 
 func emitStateChanged(s *tictactoev1.GameState) {
-	payload, err := (&tictactoev1.StateChangedEvent{State: s}).MarshalVT()
-	if err != nil {
-		return // an event that cannot be encoded is not worth failing a move over
-	}
-	platform.Emit(TopicStateChanged, payload)
+	platform.EmitEvent(&tictactoev1.StateChangedEvent{State: s})
 }
 
 // itoa avoids strconv, which is fine under TinyGo but not worth an import for

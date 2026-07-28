@@ -133,16 +133,18 @@ export async function onFlush(fn: () => void): Promise<() => void> {
 const flushListeners = new Set<() => void>();
 let flushAttached: Promise<void> | null = null;
 
-/**
- * The platform's own topic — emitted by the inherited filesystem verbs
- * (`import-fs`, `reset-fs`) with a `DataChangedEvent` payload.
- *
- * Mirrors `platform.TopicDataChanged` in `engine/platform/events.go`. Topics are
- * strings by design (they are not a wire contract the way method ids are), and
- * the cost of that is exactly this: a typo matches nothing, silently. Import the
- * constant, never retype the string.
- */
-export const TopicDataChanged = "ilc.data-changed";
+// NO TOPIC CONSTANTS HERE, deliberately.
+//
+// `TopicDataChanged = "ilc.data-changed"` used to live in this file AND in
+// `engine/platform/events.go` — the hand-mirroring AGENTS.md §1 bans for method
+// ids, which events escaped only because they predated the rule having teeth.
+//
+// Both sides now read one `(topic)` declaration on the message, and the
+// generated bindings carry it: import `DataChangedEventTopic` from
+// `@gen/devalbo/ilc/v1/platform.events.pb`, which `dlc gen` puts in every app's
+// tree. It is not re-exported from here on purpose — this package must not
+// depend on an app's `@gen` alias, which would point the runtime at the
+// application instead of the other way round.
 
 /** Every file currently in OPFS, sorted. */
 export async function listFiles(): Promise<string[]> {

@@ -68,6 +68,13 @@ step() { # <label> <command...>
 }
 
 # ---- fast: no wasm toolchain, no browser --------------------------------
+# Anything interactive must refuse to be interactive here. `dlc new` prompts for
+# tiers at a terminal, and a suite run from a developer's shell HAS a terminal —
+# so a script that forgot `--tiers` blocked the whole run on a prompt instead of
+# failing. Setting CI makes that a named error. Playwright reads it too, and
+# stops reusing a stray dev server.
+export CI=1
+
 step "repo structure (B0)"      run make test-b0
 step "shell lint" ./scripts/lint-scripts.sh
 step "formatting"               run ./scripts/check-fmt.sh

@@ -17,6 +17,7 @@
 // worker, and no OPFS.
 import type { EnginePort } from "@devalbo/ilc-web/port";
 
+import { RecordChangedEventTopic } from "@gen/notes/v1/commands.events.pb";
 import {
   CreateRecordRequest,
   CreateRecordResponse,
@@ -31,8 +32,10 @@ import {
   MethodListRecords,
 } from "@gen/notes/v1/commands.registry.pb";
 
-/** notes' own topic. The app names it; nothing registers it (Decision 33 D3). */
-export const TopicRecordChanged = "notes.record-changed";
+// The topic is NOT written here. It is declared once on `RecordChangedEvent` in
+// commands.proto and generated for both tiers, so the emit side and this
+// subscriber cannot disagree — the hand-mirroring AGENTS.md §1 bans for ids.
+export { RecordChangedEventTopic as TopicRecordChanged } from "@gen/notes/v1/commands.events.pb";
 
 export type NotesView = {
   /**
@@ -234,7 +237,7 @@ export function mountNotes(
   // and reaches us by message from the worker, so there is no engine on the
   // stack.
   const unsubscribing = port.subscribe((topic, payload) => {
-    if (topic !== TopicRecordChanged) return;
+    if (topic !== RecordChangedEventTopic) return;
     const { id, method } = RecordChangedEvent.fromBinary(payload);
     say(`event ${topic} — ${id} (method ${method})`);
     refresh().catch((e) => say(`ERROR: ${(e as Error).message}`));

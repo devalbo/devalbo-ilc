@@ -24,9 +24,33 @@ package platform
 //     deadlock. Hosts defer instead (the web host gets this for free — Comlink
 //     is a message boundary).
 
-// TopicDataChanged is the platform's own topic: the filesystem changed under
-// some prefix. Apps namespace their own as "<app>.<what-happened>".
-const TopicDataChanged = "ilc.data-changed"
+// Event is anything the generator produced a topic for: a proto message that
+// declared `(devalbo.options.v1.topic)`.
+//
+// The topic comes from the MESSAGE rather than the call site, which is what
+// makes a mismatched topic and payload unrepresentable — there is no longer a
+// function that takes both. It also deletes the hand-mirrored literals: before
+// this, every topic was written once where it was emitted and once where a host
+// subscribed, which is exactly what AGENTS.md §1 bans for method ids.
+type Event interface {
+	Topic() string
+	MarshalVT() ([]byte, error)
+}
+
+// EmitEvent publishes a typed event.
+//
+// Prefer this to Emit: the topic and the payload can no longer disagree, and a
+// renamed topic is caught by the topic lock rather than by a subscriber quietly
+// never firing.
+func EmitEvent(e Event) {
+	payload, err := e.MarshalVT()
+	if err != nil {
+		// An event that cannot be encoded is not worth failing a command over —
+		// emitting is fire-and-forget, and a caller has no way to react anyway.
+		return
+	}
+	Emit(e.Topic(), payload)
+}
 
 // EventSink receives an emitted event. Hosts install one with SetEventSink.
 type EventSink func(topic string, payload []byte)

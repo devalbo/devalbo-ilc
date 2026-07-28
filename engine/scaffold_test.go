@@ -75,8 +75,7 @@ func TestShippedTemplatesRender(t *testing.T) {
 	req := &dlcv1.NewRequest{
 		Name:         "probe",
 		Module:       "example.com/probe",
-		PlatformPath: "/tmp/platform",
-	}
+		PlatformPath: "/tmp/platform", Tiers: []string{"native", "web"}}
 	files, err := scaffoldFiles(scaffoldVars(req), requestedTiers(req))
 	if err != nil {
 		t.Fatalf("the shipped templates do not render: %v", err)
@@ -98,7 +97,7 @@ func TestShippedTemplatesRender(t *testing.T) {
 // a template may use comes from a NewRequest field or a derivation of one. Pin
 // the set, so adding a request field without wiring it (or vice versa) is loud.
 func TestScaffoldVarsDictionary(t *testing.T) {
-	vars := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Module: "example.com/my-app"})
+	vars := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Module: "example.com/my-app", Tiers: []string{"native", "web"}})
 	want := []string{
 		"ProjectName", "ProjectVersion", "Module", "PkgName",
 		"PlatformPath", "PlatformPathFrontend", "PlatformReplace",
@@ -131,11 +130,11 @@ func TestScaffoldVarsDictionary(t *testing.T) {
 	// `../../../..`. This pins the depth rather than a single "..": the re-base
 	// used to ignore its subdir argument, which was invisible while every caller
 	// happened to be one level down.
-	rel := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "../.."})
+	rel := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "../..", Tiers: []string{"native", "web"}})
 	if rel["PlatformPathFrontend"] != "../../../.." {
 		t.Errorf("relative re-base: got %q, want ../../../..", rel["PlatformPathFrontend"])
 	}
-	abs := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "/opt/ilc"})
+	abs := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "/opt/ilc", Tiers: []string{"native", "web"}})
 	if abs["PlatformPathFrontend"] != "/opt/ilc" {
 		t.Errorf("absolute path should pass through: %q", abs["PlatformPathFrontend"])
 	}

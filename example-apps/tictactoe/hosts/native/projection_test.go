@@ -94,6 +94,30 @@ func TestProjectionParityVectors(t *testing.T) {
 			want: "[X]|[X]|[X]\n---+---+---\n O | O | 6 \n---+---+---\n 7 | 8 | 9 \nX wins in 5\n",
 		},
 		{
+			// THE DECISION PROBE — a state the engine would never produce.
+			//
+			// Three X in a row, but `outcome` says IN_PROGRESS and `winningLine`
+			// is empty. It exists to separate a slot that READS from one that
+			// COMPUTES, which no valid state can do: for a valid state the
+			// engine's judgement and an independently derived one agree, so a
+			// slot that quietly worked out the winner itself would render
+			// identically and pass every other vector here.
+			//
+			// A slot that reads renders the contradiction faithfully — plain
+			// marks, "O to play". A slot that decides "helpfully corrects" it to
+			// "X wins" with the line highlighted, and reveals itself.
+			//
+			// DO NOT "FIX" THIS STATE. Its impossibility is the mechanism.
+			name: "decision probe: a slot must not notice a win the engine did not report",
+			state: &tictactoev1.GameState{
+				Board:   []tictactoev1.Mark{x, x, x, o, o, e, e, e, e},
+				Turn:    o,
+				Outcome: tictactoev1.Outcome_OUTCOME_IN_PROGRESS,
+				History: []*tictactoev1.Move{mv(1, x), mv(4, o), mv(2, x), mv(5, o), mv(3, x)},
+			},
+			want: " X | X |>X<\n---+---+---\n O | O | 6 \n---+---+---\n 7 | 8 | 9 \nO to play (move 6)\n",
+		},
+		{
 			name: "a draw",
 			state: &tictactoev1.GameState{
 				Board:   []tictactoev1.Mark{x, o, x, x, o, o, o, x, x},

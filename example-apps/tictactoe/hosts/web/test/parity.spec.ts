@@ -78,6 +78,28 @@ const vectors = [
     want: "[X]|[X]|[X]\n---+---+---\n O | O | 6 \n---+---+---\n 7 | 8 | 9 \nX wins in 5\n",
   },
   {
+    // THE DECISION PROBE — a state the engine would never produce.
+    //
+    // Three X in a row, but `outcome` is IN_PROGRESS and `winningLine` empty.
+    // It separates a slot that READS from one that COMPUTES, which no valid
+    // state can do: for a valid state the engine's judgement and an
+    // independently derived one agree, so a slot quietly working out the winner
+    // itself would render identically and pass every other vector here.
+    //
+    // A slot that reads renders the contradiction. A slot that decides
+    // "corrects" it to "X wins" and reveals itself.
+    //
+    // DO NOT "FIX" THIS STATE. Its impossibility is the mechanism.
+    name: "decision probe: a slot must not notice a win the engine did not report",
+    state: {
+      board: [x, x, x, o, o, e, e, e, e],
+      turn: o,
+      outcome: OUTCOME.IN_PROGRESS,
+      history: [mv(1, x), mv(4, o), mv(2, x), mv(5, o), mv(3, x)],
+    },
+    want: " X | X |>X<\n---+---+---\n O | O | 6 \n---+---+---\n 7 | 8 | 9 \nO to play (move 6)\n",
+  },
+  {
     name: "a draw",
     state: {
       board: [x, o, x, x, o, o, o, x, x],

@@ -15,9 +15,11 @@ package main
 //     in main.go and are attached to the command list separately.
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
 	"github.com/devalbo/devalbo-ilc/engine/platform/cli"
@@ -42,6 +44,25 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 		Stdout: stdout,
 		Stderr: stderr,
 		Stdin:  stdin,
+
+		// Tier selection is a SETUP QUESTION, not just a flag.
+		//
+		// `--tiers` decides which slots get scaffolded, and since the host layer
+		// landed that is a consequential choice: a tier is a directory of host
+		// code plus a `dlc.toml` entry that is checked to exist. Defaulting
+		// silently leaves someone deleting a slot by hand.
+		//
+		// Host-side by Decision 28 — the engine receives a resolved NewRequest
+		// and never prompts, because it also runs in a browser tab where there
+		// is no terminal to prompt on. The web tier asks the same question as
+		// checkboxes.
+		Fill: func(cmd clispec.Command, values map[string][]string) {
+			if cmd.Method == engineMethodNew && len(values["tiers"]) == 0 {
+				if picked := promptTiers(stderr, stdout, stdin); len(picked) > 0 {
+					values["tiers"] = picked
+				}
+			}
+		},
 
 		Render: map[uint32]cli.Renderer{
 			dlcv1.MethodNew: render(func(out io.Writer, r *dlcv1.NewResponse) error {
@@ -90,6 +111,81 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 			}),
 		},
 	}
+}
+
+// engineMethodNew is dlc's own `new`, named here so the Fill hook above reads
+// as a rule about one command rather than a magic number.
+const engineMethodNew = dlcv1.MethodNew
+
+// promptTiers asks which tiers to scaffold, and returns nothing if it cannot.
+//
+// ONLY WHEN INTERACTIVE, and getting that test right took two goes.
+//
+// A prompt with nobody there is worse than the silent default it replaces: on a
+// stream nobody writes to it hangs forever, and in a log it is noise in the
+// middle of a command's output. Every automated caller — verify-scaffold.sh,
+// CI, anyone's script — runs `dlc new` without a person attached.
+//
+// TWO GUARDS, because the obvious one is not enough:
+//
+//  1. stdin AND stdout must both be character devices. `ModeCharDevice` alone
+//     is NOT an "is a human there" test — /dev/null is a character device, so
+//     `dlc new foo </dev/null` (what CI usually does) sailed past a stdin-only
+//     check and printed the whole menu before the read hit EOF. Requiring
+//     stdout too catches it, because an automated caller virtually always
+//     captures or redirects output.
+//  2. The prompt goes to STDERR. Even if the heuristic is wrong somewhere, a
+//     stray menu lands in the log rather than corrupting the command's output,
+//     which for `dlc export-fs` would mean a corrupted bundle.
+//
+// The genuinely correct test is `golang.org/x/term.IsTerminal`, an ioctl rather
+// than a mode bit. It is not a dependency yet, and would bring x/sys with it —
+// worth taking if this heuristic is ever found insufficient.
+func promptTiers(stderr io.Writer, stdout io.Writer, stdin io.Reader) []string {
+	// CI FIRST, before any terminal test. A suite run from a developer's
+	// terminal has a real TTY on both ends, so the device check below passes and
+	// a script that forgot `--tiers` HANGS — which is exactly what happened to
+	// `verify-bundle-xtier.sh`, a caller this change missed. Honouring `CI` turns
+	// that from a hang into the required-flag error, which names the fix.
+	if os.Getenv("CI") != "" {
+		return nil
+	}
+	f, ok := stdin.(*os.File)
+	if !ok || !isCharDevice(f) || !isCharDevice(stdout) {
+		return nil
+	}
+
+	fmt.Fprintln(stderr, "Which tiers? Each one becomes a hosts/<tier>/ slot you write code in.")
+	fmt.Fprintln(stderr, "  1) native + web  (default)")
+	fmt.Fprintln(stderr, "  2) native only")
+	fmt.Fprintln(stderr, "  3) web only")
+	fmt.Fprint(stderr, "> ")
+
+	line, err := bufio.NewReader(f).ReadString('\n')
+	if err != nil {
+		return nil
+	}
+	switch strings.TrimSpace(line) {
+	case "2":
+		return []string{"native"}
+	case "3":
+		return []string{"web"}
+	default:
+		// Enter, or anything unrecognised, takes the default. A setup question
+		// should never be a wall.
+		return []string{"native", "web"}
+	}
+}
+
+// isCharDevice reports whether w is a terminal-ish device rather than a file or
+// a pipe. See promptTiers for why this is checked on both ends.
+func isCharDevice(w any) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // render adapts a typed printer to the byte-level Renderer, so each printer says

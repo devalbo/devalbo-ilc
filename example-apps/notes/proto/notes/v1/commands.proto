@@ -118,6 +118,8 @@ message DeleteRecordResponse {
 // is the truth (§7.1). Carrying the record itself would let a subscriber render
 // state it never read from the store, and the two would drift.
 message RecordChangedEvent {
+  option (devalbo.options.v1.topic) = "notes.record-changed";
+
   // The record that changed. Present even for a delete — a subscriber watching
   // one note wants to know it is gone.
   string id = 1;

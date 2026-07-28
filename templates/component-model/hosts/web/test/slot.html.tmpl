@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  A page with NO app script.
+
+  The slot test needs the real markup driven by a FAKE engine, and index.html
+  loads main.ts, which connects to a live component in a worker. So this page
+  loads nothing: the driver fetches index.html, mounts the view found inside it,
+  and hands it a fake port.
+
+  Fetching rather than copying the markup is the point — a duplicated form would
+  drift from the real one silently.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{.ProjectName}} — slot harness</title>
+  </head>
+  <body>
+    <div id="harness"></div>
+  </body>
+</html>

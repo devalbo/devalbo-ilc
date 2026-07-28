@@ -104,12 +104,20 @@ func snapshot() ([]byte, error) {
 	if err := os.Chdir(dir); err != nil {
 		return nil, err
 	}
+	// GRANT the root, as a host does — the engine panics without one, because
+	// falling back to the working directory is what let `reset-fs` clear it.
+	if err := platform.SetRoot("."); err != nil {
+		return nil, err
+	}
 	defer os.Chdir(prev)
 
 	newReq, err := (&dlcv1.NewRequest{
 		Name:         goldenApp,
 		Module:       goldenModule,
 		PlatformPath: goldenPlatformPath,
+		// Stated, not defaulted: the engine has no default tier set, so the
+		// golden pins a layout someone chose rather than one that fell out.
+		Tiers: []string{"native", "web"},
 	}).MarshalVT()
 	if err != nil {
 		return nil, err

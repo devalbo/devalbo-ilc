@@ -1,8 +1,10 @@
 # The host layer — implementation plan (§6.4, §16.6)
 
-**Status: decided, not started.** **Decision 34** is recorded in
-[`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md) along with §6.4's third render path; the phases below
-are the work list. Written in the shape of
+**Status: COMPLETE (2026-07-28).** All six phases landed and every definition-of-done item is met,
+including the one that took two attempts — host parity has now been watched to fail on a slot that
+*decided* something the engine did not send (the decision probe, Phase 4), not merely on a broken engine.
+**Decision 34** is recorded in [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md) along with §6.4's third
+render path. Kept for the findings, not as a work list. Written in the shape of
 [`EVENTS-PLAN.md`](./EVENTS-PLAN.md) — design decisions first, phases that each leave the tree green, and
 nothing claimed until it has been broken on purpose.
 
@@ -376,6 +378,56 @@ that the generator agrees with itself.
 padding, so rows sat one column right of their separators — and the two disagreed about it. A cosmetic bug,
 but exactly the class parity cannot see, found by the first check that could see it.
 
+**STILL OPEN — definition-of-done item 5, and the gap is not what it looks like.**
+
+The DoD asks that host parity be *watched to fail on a slot that decided something the engine did not
+send*. What has actually been watched is the opposite direction: breaking the ENGINE's win detection and
+confirming both slots go wrong identically. That is a real result — it proves the slots carry no logic
+*today* — but it is a different claim, and the difference matters:
+
+**A slot that decides CORRECTLY passes every existing vector.** The vectors pin valid states, and for a
+valid state the engine's `winningLine` and an independently computed one agree. A web slot that scanned the
+board itself would render exactly the same text and stay green. So the suite as it stands catches rendering
+divergence, not deriving.
+
+**The mechanism that closes it: a DECISION PROBE — a deliberately impossible state.**
+
+Send a board with three X in a row, but `outcome: IN_PROGRESS` and `winningLine: []`. The engine would never
+produce it; that is the point. It is the only kind of state where reading and computing disagree:
+
+| a slot that READS | a slot that COMPUTES |
+| --- | --- |
+| `X to play`, no highlight | `X wins`, line highlighted |
+
+A slot that reads renders the contradiction faithfully. A slot that decides "helpfully corrects" it — and
+reveals itself.
+
+Two properties worth having:
+- It catches deriving even when **every** slot derives identically. Slot-to-slot comparison could not: they
+  would agree with each other and both be wrong. Comparing each slot to a written expectation can.
+- It costs one vector per side, in the file that already exists.
+
+**DONE 2026-07-28.** The probe is in both vector files, and the falsification was watched:
+
+```
+- Expected     X | X |>X<        (the slot READS: no win reported, so none drawn)
++ Received    [X]|[X]|[X]        (the slot DECIDED: found the line itself)
+```
+
+**1 failed, 5 passed** — and the 5 is the part that matters. With the web slot deriving the winning line
+from the board, every VALID vector stayed green, exactly as predicted: for a valid state the engine's
+judgement and a derived one agree, so nothing else could have caught it. Only the impossible state could.
+Reverted and re-verified.
+
+**D3 now has enforcement that has been seen to enforce**, rather than a check whose green was compatible
+with the rule being broken.
+
+**Generalising, briefly:** the probe works because tic-tac-toe's judgements (`outcome`, `winningLine`) are
+derivable from the rest of the payload — that is exactly why a slot might be tempted to derive them, and
+exactly what makes a contradictory state constructible. Any app whose engine sends a computed field
+alongside its inputs can build the same probe; an app whose events carry only opaque results cannot, and
+does not need to.
+
 **Worth noting what these vectors deliberately do NOT cover:** they are pure state → text, so they stayed
 green while the engine's win detection was disabled. That is correct. Rendering parity and engine
 correctness are different claims, and a check that conflated them would fail for two unrelated reasons.
@@ -409,6 +461,29 @@ than un-locking a format.
 recordChangedBytes)` is legal today and uncaught); a changed event payload without a re-bless must fail the
 lock; and the existing parity `events` probe must stay red on a diverged stream.
 
+**Landed 2026-07-28.** `(topic)` on the event MESSAGE; the plugin emits a Go `Topic()` method and a TS
+constant; `platform.EmitEvent(msg)` reads the topic off the message. **All six hand-mirrored literals are
+gone** — `ilc.data-changed`, `notes.record-changed` and `game.state-changed` were each written twice, once
+where emitted and once where subscribed.
+
+**A METHOD, not a constant, on the Go side** — that is what makes a mismatched topic and payload
+*unrepresentable* rather than merely discouraged: there is no longer a call that takes both.
+
+**Falsified:** renaming `ilc.data-changed` fails the build, naming both values and the re-bless command.
+The topic lock is a sibling file (`method-ids-topics.lock`); strings and numbers in one file would need a
+format distinguishing them for no gain.
+
+**Two things worth keeping:**
+- **`platform.TopicDataChanged` was deleted, not aliased.** Keeping it would have preserved exactly the
+  second definition this phase exists to remove.
+- **The literals still in tests are deliberate and annotated.** A test that read the generated constant
+  would compare it to itself and assert nothing; these are the independent pin, the role parse vectors play
+  for request bytes.
+
+**One correction mid-flight:** the first cut had `api.ts` re-export the topic from `@gen/…`, which makes the
+runtime package depend on an *app's* alias — pointing the runtime at the application rather than the
+reverse. Apps import the generated constant directly.
+
 ### Phase 6 — scaffold the slot, and ask which tiers
 
 What survives of the original Phase 5. **The documentation half is already done** — Decision 34, §6.4's
@@ -436,6 +511,45 @@ checkboxes — same request, two front ends, which is the inversion working as i
 *Falsification:* scaffold an app with two tiers and confirm both slots build and their slot tests pass out
 of the box; then delete a slot and confirm `verify` fails rather than producing a tier that silently
 renders nothing.
+
+**Landed 2026-07-28.** The template ships `test/slot.{html,spec.ts}` and `slot-driver.ts`, so a scaffolded
+app renders with no engine from its first run — three tests green out of the box, including an engine
+refusal, which is the failure path a live engine makes awkward to stage.
+
+**Tier selection is now a setup question**, asked through the existing `Fill` hook rather than new
+plumbing — `Fill` exists to supply what a user should not have to type, and "which tiers?" qualifies.
+
+**Only when interactive, and that guard is the whole design.** Every automated caller — `verify-scaffold.sh`,
+CI, anyone's script — runs `dlc new` with no TTY, and a prompt there would hang forever on a stream nobody
+writes to. That is a worse failure than the silent default it replaces, so with no character device on
+stdin the prompt is skipped and the engine's default applies. Verified: piped input still scaffolds both
+tiers, and `--tiers native` still wins and emits no web slot.
+
+**Falsified:** deleting a declared slot makes `dlc build web` and `dlc gen` fail by name
+(`[tiers.web] root "hosts/web" does not exist`). Note `dlc version` does *not* fail, correctly — it never
+loads the manifest.
+
+**A NON-INTERACTIVE CALLER NOW GETS AN ERROR, NOT A DEFAULT**, and this replaced a worse first attempt.
+
+The first version prompted when it could and defaulted silently when it could not. Two problems. The guard
+was `ModeCharDevice` on stdin, which tests "is this a device" and not "is a human there" — **`/dev/null` is
+a character device**, so `dlc new foo </dev/null`, the shape CI usually takes, printed the whole menu into
+stdout before the read hit EOF. And even once that was fixed, a script that said nothing about tiers got a
+slot layout nobody chose — the silent default this repo keeps removing (`manifest.go` errors on an unknown
+key for the same reason).
+
+So `tiers` is now **`required` on the CLI surface**, and the distinction from the schema is the design:
+
+- `required` is CLI metadata, read only by the command-line runner. The **engine never enforces it**, so the
+  browser form — which asks the same question as checkboxes and may legitimately send nothing — is
+  unaffected and still gets the engine's default.
+- An interactive terminal is satisfied by the prompt, because **required is checked after `Fill`**, which
+  was already the order and already tested.
+- A script gets `new: --tiers is required — tier opt-ins: native, web (pass --tiers, or run interactively
+  to be asked)`. The runner now appends a flag's help (and its enum values) to every required-flag error,
+  which helps every app, not just this one.
+
+No new branch was needed for any of it: the behaviour falls out of `Fill`-then-`required`, which existed.
 
 ---
 
@@ -475,8 +589,8 @@ Order-independent — the reordering above changes when each is earned, not what
 3. An app's event schemas are declared, locked, and generate both the emit side and the subscribe side; no
    topic string is hand-written in Go or TypeScript.
 4. A tier slot's rendering is tested with **no engine instantiated**.
-5. Host parity has been watched to fail on a slot that decided something the engine did not send — D3 has
-   mechanical enforcement, not only a sentence.
+5. ✅ Host parity has been watched to fail on a slot that decided something the engine did not send — D3 has
+   mechanical enforcement, not only a sentence. (The decision probe; see Phase 4.)
 6. Tic-tac-toe renders from one engine as DOM and as ASCII, and commenting out the engine's win detection
    breaks **both** identically.
 7. `dlc new --tiers web,native` scaffolds working slots with their tests.

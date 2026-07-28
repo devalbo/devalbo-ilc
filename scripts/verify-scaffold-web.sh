@@ -35,7 +35,7 @@ echo "scaffold (web): dlc new -> build web -> run it in Chromium"
 go build -buildvcs=false -o "$WORK/dlc" ./hosts/native || fail "building dlc"
 
 step "dlc new $APP"
-( cd "$WORK" && "$WORK/dlc" new --module "example.com/$APP" --platform-path "$REPO" "$APP" ) \
+( cd "$WORK" && "$WORK/dlc" new --tiers native --tiers web --module "example.com/$APP" --platform-path "$REPO" "$APP" ) \
 	|| fail "dlc new"
 PROJ="$WORK/$APP"
 

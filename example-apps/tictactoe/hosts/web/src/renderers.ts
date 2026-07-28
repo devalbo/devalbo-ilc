@@ -45,6 +45,9 @@ export const gameRenderers: Record<number, Renderer | undefined> = {
     const files = ImportFsResponse.fromBinary(b).files ?? [];
     return files.length === 0 ? "(nothing imported)" : files.map((f) => "  + " + f).join("\n");
   },
-  [MethodResetFs]: (b) =>
-    `removed ${(ResetFsResponse.fromBinary(b).removed ?? []).length} file(s)`,
+  // The engine returns the TOP-LEVEL entries removed, not a file count.
+  [MethodResetFs]: (b) => {
+    const removed = ResetFsResponse.fromBinary(b).removed ?? [];
+    return removed.length === 0 ? "nothing to remove" : removed.map((r) => "  - " + r).join("\n");
+  },
 };

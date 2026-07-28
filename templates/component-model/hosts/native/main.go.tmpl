@@ -31,11 +31,28 @@ import (
 	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
 	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 
+	"{{.Module}}/gen/go/dlcconfig"
+
 	_ "{{.Module}}/engine" // importing the engine registers its commands
 	{{.PkgName}}v1 "{{.Module}}/gen/go/{{.PkgName}}/v1"
 )
 
 func main() {
+	// GRANT the filesystem before anything touches it — the native equivalent of
+	// the WASI preopen a browser host installs before instantiating a component.
+	//
+	// `./.{{.ProjectName}}/`: project-local like git, so running in two projects keeps two
+	// stores, but CONFINED. That second half matters because `reset-fs` is an
+	// INHERITED verb you did not write, and with the bare working directory as
+	// root it would clear whatever folder the user happened to be standing in.
+	//
+	// Change this to "." if your app's output belongs to the USER rather than to
+	// the app — that is what `dlc` itself does, because `dlc new` has to scaffold
+	// where you are.
+	if err := platform.SetRoot(platform.AppRoot(dlcconfig.Name)); err != nil {
+		os.Stderr.WriteString("{{.ProjectName}}: " + err.Error() + "\n")
+		os.Exit(2)
+	}
 	os.Exit(app(platform.Live, os.Stdout, os.Stderr, os.Stdin).Run(os.Args[1:]))
 }
 
@@ -81,8 +98,21 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 				return nil
 			}),
 			ilcv1.MethodResetFs: render(func(out io.Writer, r *ilcv1.ResetFsResponse) error {
-				_, err := fmt.Fprintf(out, "removed %d file(s)\n", len(r.GetRemoved()))
-				return err
+				// The engine returns the TOP-LEVEL entries it removed, not a
+				// file count — `records/` is one entry holding many notes. This
+				// printed "removed 1 file(s)" after deleting two, which reads
+				// as though something survived. Name what was actually removed.
+				removed := r.GetRemoved()
+				if len(removed) == 0 {
+					_, err := fmt.Fprintln(out, "nothing to remove")
+					return err
+				}
+				for _, rm := range removed {
+					if _, err := fmt.Fprintln(out, "  - "+rm); err != nil {
+						return err
+					}
+				}
+				return nil
 			}),
 		},
 	}

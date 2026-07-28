@@ -58,6 +58,27 @@ enum CliSource {
   CLI_SOURCE_STDIN = 3;
 }
 
+extend google.protobuf.MessageOptions {
+  // This message IS an event, published on this topic.
+  //
+  //   message StateChangedEvent {
+  //     option (devalbo.options.v1.topic) = "game.state-changed";
+  //   }
+  //
+  // Declaring it here rather than passing a string at the call site is what
+  // stops a topic living in two places. Today every app writes the literal
+  // twice — once where it emits, once where a host subscribes — which is
+  // exactly the hand-mirroring AGENTS.md §1 bans for method ids, and it went
+  // unnoticed because events predate that rule having teeth.
+  //
+  // UNLIKE method_id, the topic is NOT the wire — dispatch does not key on it,
+  // and a subscriber matches by string. What makes it a contract is Decision 34:
+  // once a host RENDERS from an event's payload, changing the message breaks
+  // every host drawing it. So the schema is the contract, and the topic is how
+  // you find it.
+  string topic = 50010;
+}
+
 extend google.protobuf.FieldOptions {
   string help = 50001;
   bool required = 50002;

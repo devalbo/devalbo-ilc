@@ -183,5 +183,7 @@ message NewGameResponse {
 // event, and writing back from a payload is what would make the event a second
 // source of truth.
 message StateChangedEvent {
+  option (devalbo.options.v1.topic) = "game.state-changed";
+
   GameState state = 1;
 }

@@ -35,7 +35,7 @@ echo "scaffold: dlc new -> gen -> test -> build -> run"
 go build -buildvcs=false -o "$WORK/dlc" ./hosts/native || fail "building dlc"
 
 step "dlc new $APP"
-( cd "$WORK" && "$WORK/dlc" new --module "example.com/$APP" --platform-path "$REPO" "$APP" >/dev/null ) \
+( cd "$WORK" && "$WORK/dlc" new --tiers native --tiers web --module "example.com/$APP" --platform-path "$REPO" "$APP" >/dev/null ) \
 	|| fail "dlc new"
 
 PROJ="$WORK/$APP"

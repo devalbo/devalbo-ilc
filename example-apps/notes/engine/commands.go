@@ -131,13 +131,9 @@ func handleDeleteRecord(req *notesv1.DeleteRecordRequest) (*notesv1.DeleteRecord
 // succeeded, and failing it now because a notification could not be encoded
 // would report data as unwritten that is on disk.
 func emitRecordChanged(id string, method uint32) {
-	payload, err := (&notesv1.RecordChangedEvent{Id: id, Method: method}).MarshalVT()
-	if err != nil {
-		return
-	}
-	// The topic is namespaced to the app. "notes." is not registered anywhere —
-	// see the note in commands.proto.
-	platform.Emit("notes.record-changed", payload)
+	// The topic lives on the message (generated from the .proto), so the emit
+	// side and every subscriber read the same declaration.
+	platform.EmitEvent(&notesv1.RecordChangedEvent{Id: id, Method: method})
 }
 
 // slug turns a title into a filesystem-safe id.

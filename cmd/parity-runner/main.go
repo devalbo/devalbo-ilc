@@ -62,8 +62,13 @@ var fixtures = []struct {
 	{name: "version", method: platform.MethodVersion, request: &ilcv1.VersionRequest{}},
 	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
 	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},
-	{name: "new (defaults)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-default"}},
-	{name: "new with module", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-module", Module: "github.com/acme/app-module"}},
+	// Tiers are stated, not defaulted — the engine has no default set, and these
+	// two vectors are what CREATE the trees the export-fs vectors below bundle.
+	// When they silently stopped scaffolding, export-fs started erroring on a
+	// missing directory, and the two tiers word THAT error differently. See the
+	// note under "new missing tiers" below.
+	{name: "new (defaults)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-default", Tiers: []string{"native", "web"}}},
+	{name: "new with module", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-module", Module: "github.com/acme/app-module", Tiers: []string{"native", "web"}}},
 	{name: "new with enums", method: engine.MethodNew, request: &dlcv1.NewRequest{
 		Name:    "app-enums",
 		Caps:    []string{"console", "filesystem"},
@@ -71,7 +76,10 @@ var fixtures = []struct {
 		Ui:      dlcv1.UiKind_UI_KIND_REACT,
 		Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT,
 	}},
-	{name: "new missing name (envelope error)", method: engine.MethodNew, request: &dlcv1.NewRequest{}},
+	{name: "new missing name (envelope error)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "", Tiers: []string{"native"}}},
+	// An ENGINE-side refusal, worded by the engine itself — so both tiers must
+	// produce the same string, which is the point of diffing the error text.
+	{name: "new missing tiers (envelope error)", method: engine.MethodNew, request: &dlcv1.NewRequest{Name: "app-notiers"}},
 	// export-fs runs AFTER the `new` fixtures above, so it bundles a root that
 	// already has trees in it — the vector is only meaningful because the
 	// ordering is fixed and the root starts empty.
@@ -97,6 +105,16 @@ var fixtures = []struct {
 }
 
 func main() {
+	// GRANT the root, as any host must. The parity harness runs this binary in a
+	// scratch directory it has already created, so "." IS the grant here — but
+	// it has to be said, because `Root()` panics without one rather than
+	// defaulting to the working directory. That default is what let `reset-fs`
+	// clear a user's files.
+	if err := platform.SetRoot("."); err != nil {
+		fmt.Fprintln(os.Stderr, "parity-runner:", err)
+		os.Exit(2)
+	}
+
 	args := os.Args[1:]
 	gen := len(args) > 0 && args[0] == "-gen"
 	if gen {

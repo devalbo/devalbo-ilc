@@ -31,6 +31,7 @@ import (
 	"github.com/devalbo/devalbo-ilc/engine/platform"
 	"github.com/devalbo/devalbo-ilc/engine/platform/cli"
 	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
+	"github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/dlcconfig"
 	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/notes/engine" // importing the engine registers its commands
@@ -38,6 +39,16 @@ import (
 )
 
 func main() {
+	// GRANT the filesystem before anything can touch it — the native equivalent
+	// of the WASI preopen a browser host installs before instantiating.
+	//
+	// `./.notes/`: project-local like git, so running in two projects keeps
+	// two stores, but CONFINED — which matters because `reset-fs` is inherited
+	// and would otherwise clear whatever directory you happened to be in.
+	if err := platform.SetRoot(platform.AppRoot(dlcconfig.Name)); err != nil {
+		os.Stderr.WriteString("notes: " + err.Error() + "\n")
+		os.Exit(2)
+	}
 	os.Exit(app(platform.Live, os.Stdout, os.Stderr, os.Stdin, time.Now).Run(os.Args[1:]))
 }
 
@@ -128,8 +139,21 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				return nil
 			}),
 			ilcv1.MethodResetFs: render(func(out io.Writer, r *ilcv1.ResetFsResponse) error {
-				_, err := fmt.Fprintf(out, "removed %d file(s)\n", len(r.GetRemoved()))
-				return err
+				// The engine returns the TOP-LEVEL entries it removed, not a
+				// file count — `records/` is one entry holding many notes. This
+				// printed "removed 1 file(s)" after deleting two, which reads
+				// as though something survived. Name what was actually removed.
+				removed := r.GetRemoved()
+				if len(removed) == 0 {
+					_, err := fmt.Fprintln(out, "nothing to remove")
+					return err
+				}
+				for _, rm := range removed {
+					if _, err := fmt.Fprintln(out, "  - "+rm); err != nil {
+						return err
+					}
+				}
+				return nil
 			}),
 		},
 	}

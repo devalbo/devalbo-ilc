@@ -29,6 +29,12 @@ func inTempRoot(t *testing.T) string {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
+	// GRANT the root, as a host does. There is no implicit "wherever you are
+	// standing" any more: `Root()` panics without a grant, because falling back
+	// to the cwd is what let `reset-fs` clear a user's directory.
+	if err := platform.SetRoot("."); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chdir(prev) })
 	return root
 }
@@ -120,6 +126,13 @@ func TestListOpenDelete(t *testing.T) {
 // Tested here rather than only in the browser because the emission is engine
 // code: every tier inherits whatever this asserts. The web test covers the other
 // half, that a host can actually receive it.
+// The topic is a LITERAL ON PURPOSE, and must stay one.
+//
+// Everywhere else the string is generated from the `(topic)` option, which is
+// the point — the emit side and every subscriber read one declaration. A test
+// that also read that declaration would compare a generated value to itself and
+// assert nothing. This is the independent pin, the same role the parse vectors
+// play for request bytes.
 func TestMutationsEmitRecordChanged(t *testing.T) {
 	inTempRoot(t)
 

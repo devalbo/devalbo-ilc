@@ -98,8 +98,49 @@ func run() error {
 
 	var resp pluginpb.CodeGeneratorResponse
 	locked := map[string]uint32{}
+	lockedTopics := map[string]string{}
 
 	for _, file := range req.ProtoFile {
+		// EVENTS are independent of services: a file may declare event messages
+		// and no commands, so this runs before the `len(services) == 0` skip
+		// below. Every topic goes into the lock, whether or not we generate for
+		// this file — the lock is about the contract, not about codegen.
+		events, err := eventsOf(file, resolver)
+		if err != nil {
+			return err
+		}
+		if !isSpikePackage(file.GetPackage()) {
+			for _, e := range events {
+				lockedTopics[file.GetPackage()+"."+e.message] = e.topic
+			}
+		}
+		if generate[file.GetName()] && len(events) > 0 {
+			base := strings.TrimSuffix(file.GetName(), ".proto")
+			if lang == "go" {
+				content, err := renderEventsGo(file, events)
+				if err != nil {
+					return err
+				}
+				formatted, ferr := format.Source([]byte(content))
+				if ferr != nil {
+					return fmt.Errorf("%s: generated invalid Go events: %w", file.GetName(), ferr)
+				}
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".events.pb.go"),
+					Content: proto.String(string(formatted)),
+				})
+			} else {
+				content, err := renderEventsTS(file, events)
+				if err != nil {
+					return err
+				}
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".events.pb.ts"),
+					Content: proto.String(content),
+				})
+			}
+		}
+
 		services, err := servicesOf(file, resolver)
 		if err != nil {
 			return err
@@ -185,6 +226,9 @@ func run() error {
 	}
 
 	if err := checkLock(paramValue(req.GetParameter(), "lock"), locked); err != nil {
+		return err
+	}
+	if err := checkTopicLock(paramValue(req.GetParameter(), "lock"), lockedTopics); err != nil {
 		return err
 	}
 

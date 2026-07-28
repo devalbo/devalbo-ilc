@@ -33,7 +33,7 @@ mkdir -p "$WORK/imported"
 
 # 3. Terminal: build the same tree natively, from the same inputs.
 mkdir -p "$WORK/native"
-( cd "$WORK/native" && "$WORK/dlc" new --module github.com/acme/xtier xtier >/dev/null ) \
+( cd "$WORK/native" && "$WORK/dlc" new --tiers native --tiers web --module github.com/acme/xtier xtier >/dev/null ) \
   || { echo "native scaffold failed"; exit 1; }
 
 echo "-------------------------------------------------"

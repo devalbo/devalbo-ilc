@@ -51,7 +51,7 @@ containment is inherited rather than re-implemented per command.
 **Portability traps already paid for** — do not re-introduce:
 - `os.IsNotExist` / `errors.Is(err, fs.ErrNotExist)` do **not** match TinyGo's WASI errno
 - `os.RemoveAll` fails under wasip2 (errno 52) even on a plain file — walk with `ReadDir` + `os.Remove`
-- WASI has no working directory; anchor paths at `platform.Root()`
+- WASI has no working directory; anchor paths at `platform.Root()` — which a host must GRANT (§3·5)
 
 ## 3. The platform boundary
 
@@ -108,6 +108,26 @@ differently per tier — the divergence this architecture exists to prevent.
 **`dlc.toml` capabilities declare what an app can REACH, not what it can ANNOUNCE.** Console, filesystem,
 display, index, network are privileges a host could refuse. Emitting carries nothing back and cannot be
 refused, so it is not declared. See Decision 33 before adding the next capability to that list.
+
+## 3·5 The filesystem root is GRANTED, never assumed
+
+**A host must call `platform.SetRoot` before the engine touches a file**, exactly as a browser host installs
+a WASI preopen before instantiating the component. `Root()` panics without a grant, deliberately: the old
+behaviour was a bare `"."`, meaning "wherever the user happened to be standing", and that is not a root.
+
+**Why it panics rather than defaulting.** `reset-fs` is an INHERITED verb — every ILC app has it and no
+author writes it — and with the working directory as root it recursively clears whatever folder the app was
+run in. It deleted a bundle during development; in a user's home directory it is data loss from a command
+the app never opted into. A default here fails as destruction, not as an error.
+
+**The convention is `./.<app>/`** (`platform.AppRoot(dlcconfig.Name)`) — project-local like git, so two
+projects keep two stores, but confined, so `reset-fs` can only ever clear the app's own subtree.
+**`dlc` overrides to `"."`** because its data IS the user's project: `dlc new` must scaffold where you are
+standing. The rule generalises — an app whose output belongs to the *user* takes `"."`; one that keeps a
+private store takes the convention.
+
+On wasm `SetRoot` is a no-op: the grant already happened when the host installed the preopen, and the guest
+cannot rebind it. Both tiers call it anyway, so the startup sequence reads the same everywhere.
 
 ## 3a. The host layer
 

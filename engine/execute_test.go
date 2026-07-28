@@ -62,6 +62,12 @@ func inTempRoot(t *testing.T) string {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
+	// GRANT the root, as a host does. There is no implicit "wherever you are
+	// standing" any more: `Root()` panics without a grant, because falling back
+	// to the cwd is what let `reset-fs` clear a user's directory.
+	if err := platform.SetRoot("."); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chdir(prev) })
 	return root
 }
@@ -70,7 +76,7 @@ func TestNew(t *testing.T) {
 	inTempRoot(t)
 
 	var resp dlcv1.NewResponse
-	out := call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})
+	out := call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Tiers: []string{"native", "web"}})
 	if err := resp.UnmarshalVT(out); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +120,7 @@ func TestNew(t *testing.T) {
 func TestNewWritesTree(t *testing.T) {
 	root := inTempRoot(t)
 
-	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp"})
+	call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Module: "github.com/acme/myapp", Tiers: []string{"native", "web"}})
 
 	// Every emitted file must be fully substituted — a stray {{.Token}} is the
 	// classic scaffolder bug, and it compiles fine until someone reads it.
@@ -167,7 +173,7 @@ func TestNewRefusesOccupiedDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in, err := (&dlcv1.NewRequest{Name: "myapp"}).MarshalVT()
+	in, err := (&dlcv1.NewRequest{Name: "myapp", Tiers: []string{"native", "web"}}).MarshalVT()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +191,7 @@ func TestNewRefusesOccupiedDir(t *testing.T) {
 func TestNewRejectsEscapingNames(t *testing.T) {
 	inTempRoot(t)
 	for _, name := range []string{"../evil", "/etc/evil", "a/../../evil"} {
-		in, err := (&dlcv1.NewRequest{Name: name}).MarshalVT()
+		in, err := (&dlcv1.NewRequest{Name: name, Tiers: []string{"native", "web"}}).MarshalVT()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +204,7 @@ func TestNewRejectsEscapingNames(t *testing.T) {
 // A missing name is a command error, carried by the envelope rather than a
 // response field (Decision 28).
 func TestNewRequiresName(t *testing.T) {
-	in, err := (&dlcv1.NewRequest{}).MarshalVT()
+	in, err := (&dlcv1.NewRequest{Tiers: []string{"native", "web"}}).MarshalVT()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +228,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	inTempRoot(t)
 
 	var scaffolded dlcv1.NewResponse
-	if err := scaffolded.UnmarshalVT(call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp"})); err != nil {
+	if err := scaffolded.UnmarshalVT(call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "myapp", Tiers: []string{"native", "web"}})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,10 +317,12 @@ func TestNewRejectsUnsupportedOptions(t *testing.T) {
 
 	cases := map[string]*dlcv1.NewRequest{
 		// "web" is supported now; an unknown tier still is not.
-		"tier":    {Name: "a", Tiers: []string{"embedded"}},
-		"cap":     {Name: "b", Caps: []string{"sqlite"}},
-		"ui":      {Name: "c", Ui: dlcv1.UiKind_UI_KIND_REACT},
-		"storage": {Name: "d", Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT},
+		"tier": {Name: "a", Tiers: []string{"embedded"}},
+		// The others carry a valid tier set, so the refusal under test is the
+		// one named — not the missing-tiers refusal standing in for it.
+		"cap":     {Name: "b", Tiers: []string{"native"}, Caps: []string{"sqlite"}},
+		"ui":      {Name: "c", Tiers: []string{"native"}, Ui: dlcv1.UiKind_UI_KIND_REACT},
+		"storage": {Name: "d", Tiers: []string{"native"}, Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT},
 	}
 	for name, req := range cases {
 		in, err := req.MarshalVT()
@@ -333,6 +341,13 @@ func TestNewRejectsUnsupportedOptions(t *testing.T) {
 		if _, err := os.Stat(req.Name); err == nil {
 			t.Errorf("%s: scaffolded despite refusing", name)
 		}
+	}
+
+	// An EMPTY tier list is its own refusal — no default, on any tier.
+	if r := engine.ExecuteMethod(engine.MethodNew, mustMarshal(t, &dlcv1.NewRequest{Name: "notiers"})); r.Success {
+		t.Error("an empty tier list must be refused, not defaulted")
+	} else if !strings.Contains(r.Err, "no tiers requested") {
+		t.Errorf("unhelpful error for empty tiers: %q", r.Err)
 	}
 
 	// The supported subset still works.
@@ -383,7 +398,7 @@ func TestNewTiersSelectFiles(t *testing.T) {
 
 	// The default is BOTH tiers — the cross-tier story is the product.
 	var both dlcv1.NewResponse
-	out = call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "full"})
+	out = call(t, engine.MethodNew, &dlcv1.NewRequest{Name: "full", Tiers: []string{"native", "web"}})
 	if err := both.UnmarshalVT(out); err != nil {
 		t.Fatal(err)
 	}

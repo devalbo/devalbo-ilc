@@ -16,6 +16,7 @@
 // commands, no widget tree, no Display capability.
 import type { EnginePort } from "@devalbo/ilc-web/port";
 
+import { StateChangedEventTopic } from "@gen/tictactoe/v1/commands.events.pb";
 import {
   GetStateRequest,
   GetStateResponse,
@@ -33,8 +34,10 @@ import {
   MethodPlay,
 } from "@gen/tictactoe/v1/commands.registry.pb";
 
-/** This app's own topic. The app names it; nothing registers it. */
-export const TopicStateChanged = "game.state-changed";
+// The topic is NOT written here — it is declared on `StateChangedEvent` in
+// commands.proto and generated for both tiers, so the engine's emit and this
+// subscriber read one declaration.
+export { StateChangedEventTopic as TopicStateChanged } from "@gen/tictactoe/v1/commands.events.pb";
 
 export type GameView = {
   play(square: number): Promise<void>;
@@ -127,7 +130,7 @@ export function mountGame(
   }
 
   const unsubscribing = port.subscribe((topic, payload) => {
-    if (topic !== TopicStateChanged) return;
+    if (topic !== StateChangedEventTopic) return;
     // The whole state arrives in the payload — the semantic path. Rendered,
     // never written back from (§7.1): a stale render is fixed by the next
     // event, a write-back would make the event a second source of truth.

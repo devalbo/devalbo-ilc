@@ -19,6 +19,8 @@ package main
 import (
 	"os"
 
+	"github.com/devalbo/devalbo-ilc/engine/platform"
+
 	// Importing the engine is what REGISTERS dlc's commands; nothing else here
 	// touches it. The blank-ish import is load-bearing.
 	_ "github.com/devalbo/devalbo-ilc/engine"
@@ -31,6 +33,20 @@ var toolchainVerbs = map[string]func([]string) error{
 }
 
 func main() {
+	// dlc GRANTS ITSELF the working directory, overriding the `./.<app>/`
+	// convention every other app follows.
+	//
+	// That is not an exception so much as the rule applied honestly: an app's
+	// root is where its data lives, and dlc's data IS the user's project —
+	// `dlc new myapp` must scaffold where you are standing, and `export-fs`
+	// must bundle the tree in front of you. An app whose output belongs to the
+	// user rather than to itself should do the same; one that keeps a private
+	// store (notes, tictactoe) should not.
+	if err := platform.SetRoot("."); err != nil {
+		os.Stderr.WriteString("dlc: " + err.Error() + "\n")
+		os.Exit(2)
+	}
+
 	args := os.Args[1:]
 
 	if len(args) > 0 {

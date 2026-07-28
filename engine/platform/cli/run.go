@@ -160,7 +160,17 @@ func (a App) exec(cmd clispec.Command, values map[string][]string, render Render
 	// pass something the host is going to overwrite.
 	for _, f := range cmd.Flags {
 		if f.Required && len(values[f.Name]) == 0 {
-			return fmt.Errorf("%s: --%s is required", cmd.Name, f.Name)
+			// The help text comes along: a required flag whose error says only
+			// its name leaves the reader to go and find out what it wants, and
+			// the schema already knows.
+			msg := fmt.Sprintf("%s: --%s is required", cmd.Name, f.Name)
+			if f.Help != "" {
+				msg += " — " + f.Help
+			}
+			if len(f.EnumValues) > 0 {
+				msg += " (one of: " + strings.Join(f.EnumValues, ", ") + ")"
+			}
+			return errors.New(msg)
 		}
 	}
 

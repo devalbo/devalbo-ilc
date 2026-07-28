@@ -6,10 +6,15 @@ Task breakdown derived from [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md)
 **The bootstrap is MET** (see the roll-up below) — `dlc` runs in the terminal and the browser from one
 engine, and App #2 (`notes`) and the Events capability landed on top of it.
 
-**Current focus: the HOST LAYER** — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md), would settle as Decision
-34. Per-app, per-tier host code becomes a named, contracted, scaffolded thing, and **Display drops to
-optional**: an app author chooses between app-side rendering (§6.4's draw-list / widget tree) and emitting a
-semantic event the **host** renders however that tier likes.
+**The HOST LAYER is DONE** (Decision 34, [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md), all six phases).
+Per-app, per-tier host code is a named, contracted, scaffolded thing; **Display dropped to optional**, with
+tic-tac-toe as the worked example of the third render path — one engine, a DOM board and an ASCII board,
+sharing only the schema. Three web routes (terminal, files, commands inspector) and the generated CLI
+surface landed alongside it.
+
+**Current focus: nothing is claimed.** The candidates, roughly ordered: `dlc`'s own dogfood drift (it lacks
+every capability built for apps — see the review item below), the **environment manifest** (Decision 32,
+now justified by the filesystem-availability gap rather than by Display), and the embedded tier.
 
 _Created 2026-07-25. Re-anchored 2026-07-27 — several boxes below were stale, ticked against what is
 actually in the tree._
@@ -181,8 +186,8 @@ native slot subscribes to nothing.
 - [x] **Phase 2 — a slot renders with no engine** ✅ `hosts/web/port.ts` (`EnginePort`) + `hosts/web/testing.ts` (`createFakePort`); notes' slot split into `view.ts` (takes a port, exports `projection()`) and a thin `main.ts`. Six tests, falsified. **The seam is the whole port, not the event stream** — notes re-lists on an event, so a faked stream alone still calls a missing engine. Reached three things the live test cannot: a failed `list-records`, a foreign topic costing zero commands, and unmount actually unsubscribing
 - [x] **Phase 3 — tic-tac-toe (App #3)** ✅ one engine, DOM and ASCII slots, semantic events the host renders. **Scaffolded with `dlc new`** — the first app the tool actually produced. Falsified: disabling win detection makes both slots wrong *identically* and neither invents a winner. Finding: dropping `platform.RegisterAll()` fails at run time (`unknown method_id 1`), not at compile time
 - [x] **Phase 4 — host parity** ✅ four states, two languages, no shared code: `hosts/native/projection_test.go` + `hosts/web/test/parity.spec.ts`. Caught a real mismatch on its first run (both slots mis-indented rows relative to their separators, and disagreed about it) — precisely the class parity cannot see. D3 now has mechanical enforcement rather than only a sentence
-- [ ] **Phase 5 — the published interface**: event schemas declared in proto, **locked** like `method_id`, generating both emit and subscribe sides. Deletes the four hand-mirrored topic literals that `AGENTS.md` §1 already bans for ids. Costs one rewrite of tic-tac-toe's subscriber wiring — accepted, so the codegen's shape is decided by a real consumer
-- [ ] **Phase 6 — scaffold the slot**: `dlc new` emits slots + their tests, and **tier selection becomes a setup question** (host-side prompt when `--tiers` is absent — a tier is now a directory of host code plus a checked `dlc.toml` entry, so it is worth asking rather than defaulting silently). The documentation half of this phase already landed with Phase 1
+- [x] **Phase 5 — the published interface** ✅: event schemas declared in proto, **locked** like `method_id`, generating both emit and subscribe sides. Deletes the four hand-mirrored topic literals that `AGENTS.md` §1 already bans for ids. Costs one rewrite of tic-tac-toe's subscriber wiring — accepted, so the codegen's shape is decided by a real consumer
+- [x] **Phase 6 — scaffold the slot** ✅: `dlc new` emits slots + their tests, and **tier selection becomes a setup question** (host-side prompt when `--tiers` is absent — a tier is now a directory of host code plus a checked `dlc.toml` entry, so it is worth asking rather than defaulting silently). The documentation half of this phase already landed with Phase 1
 
 **Generated apps are disposable for now** — re-scaffold rather than migrate, so template layout changes
 cost a re-bless (`make scaffold-golden`) and not a migration story.
@@ -388,6 +393,82 @@ now?" is a filesystem question, not a command question.
 
 **Not a filesystem editor, and not a replacement for `export-fs`.** A bundle is the portable artifact; this
 is a window.
+
+### App root: every tier should be GRANTED a root, the way WASI grants a preopen
+
+**The seam exists and one side does not use it.** `Root()` is a build-tag constant — `"."` natively, `"/"`
+under WASI — and every path goes through `SafeJoin(Root(), path)`. Under WASI the host *installs* a preopen
+before instantiation and the guest cannot name anything outside it. Natively nothing is granted: the root is
+wherever the user happened to be standing.
+
+**Three problems, in descending order of severity.**
+
+1. **`reset-fs` deletes the working directory.** It is an INHERITED verb — every ILC app has it — and
+   natively it recursively removes the contents of wherever you ran it. This already bit us during
+   development: it deleted an exported bundle sitting in the same directory. In a real app,
+   `notes reset-fs` in the wrong terminal is data loss, from a verb the app author never wrote.
+2. **No confinement.** `SafeJoin` stops `../` escapes *relative to the root*, but the root itself moves with
+   the shell. The WASI guarantee — "this is your filesystem, there is nothing else" — has no native
+   equivalent, so the tiers differ in what an app can even reach.
+3. **Paths and errors diverge** (see the item below): native errors carry cwd-relative paths, wasm errors
+   carry `/`-rooted ones. Granting a root does not by itself fix the errno wording, but it is what makes a
+   single reported path shape possible.
+
+**The shape: the host grants, the engine consumes.** `Root()` becomes host-set state rather than a
+constant — set during phase 1 of the two-phase launch (§5.5 already says the native host constructs the
+Environment with an FS root). Wasm keeps `/`, its preopen. The engine is unchanged: it already only ever
+joins against `Root()`.
+
+**THE OPEN QUESTION, and it is a real tension rather than a detail: what is the native root?**
+
+| option | good | bad |
+| --- | --- | --- |
+| cwd (today, made explicit) | familiar, git-like, project-local | keeps the `reset-fs` hazard entirely |
+| per-app data dir (XDG / Application Support) | one store per app, `reset-fs` is safe | surprising for a tool meant to act on the current directory |
+| `./.<app>/` under cwd | project-local AND confined; `reset-fs` can only clear that subtree | a hidden directory per project |
+| explicit flag, no default | maximally explicit | every invocation carries it |
+
+**`dlc` itself is the case that rules out a blanket answer.** Its data *is* the user's working directory —
+`dlc new myapp` must scaffold into cwd, so giving dlc a private data dir would break the tool. Meanwhile
+`notes` probably wants one store regardless of where you are. So the root is **per-app**, which points at
+`dlc.toml` declaring it (a launch fact, next to tiers and slots) with the host resolving it.
+
+- [ ] Decide the per-app default and the `dlc.toml` spelling (`[storage] root = …`?)
+- [ ] `platform.SetRoot` + host-side resolution; keep `Root()` as the single accessor so the engine is
+      untouched
+- [ ] Make `reset-fs` safe by construction, and test that it cannot reach outside the grant
+- [ ] Report paths RELATIVE to the root in errors, which is what would let the parity check guard the
+      missing-file path instead of avoiding it
+- [ ] Update the parity harness and verify scripts, which currently rely on chdir-as-root
+
+### Native and wasm word OS errors differently — a latent parity landmine
+
+**Observed 2026-07-28**, when a parity vector accidentally reached a missing-file path:
+
+```
+native     export-fs: open app-default: no such file or directory
+component  export-fs: open /app-default: file does not exist
+```
+
+Two divergences in one line. The **path** differs because `Root()` is `.` natively and `/` under WASI, and
+the joined path lands in the error. The **errno text** differs because Go's `os` and TinyGo's WASI runtime
+phrase the same condition differently.
+
+**Why this matters more than it looks.** The parity check diffs the error STRING deliberately — that is
+what makes "TinyGo and native Go agree on envelope errors" a checked claim rather than a hope. So any
+command whose error wraps an OS error is un-parity-able, and today the vectors stay green only because
+none of them happen to hit such a path. The one that did hit it was an accident (a `new` vector stopped
+scaffolding, so a later `export-fs` found nothing), and it failed instantly — which is the check working,
+but it means this is a trip-wire rather than a guarded boundary.
+
+It is also user-visible: `notes open nonexistent` prints different text in a terminal and in a browser.
+
+- [ ] Wrap OS errors at the platform boundary so the ENGINE words them, not the runtime — e.g. a
+      `platform.ErrNotFound` mapped once per tier, with `fs.go` already owning the `os.IsNotExist` /
+      TinyGo-errno mismatch that `AGENTS.md` §2 warns about. The engine already refuses to let
+      `errors.Is(err, fs.ErrNotExist)` be trusted; wording is the same problem one layer out.
+- [ ] Add a parity vector that DELIBERATELY hits a missing path, so the boundary is guarded rather than
+      merely unexercised. It should be red until the wrapping lands — which is the honest state.
 
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan

@@ -170,9 +170,7 @@ func ResolveUnder(prefix string) (string, error) {
 // succeeded, and failing it now because a notification could not be encoded
 // would turn a cosmetic problem into data the caller thinks was not written.
 func emitDataChanged(prefix string, method uint32) {
-	payload, err := (&ilcv1.DataChangedEvent{Prefix: prefix, Method: method}).MarshalVT()
-	if err != nil {
-		return
-	}
-	Emit(TopicDataChanged, payload)
+	// The topic comes off the message (generated from the .proto), so it cannot
+	// disagree with the one a subscriber matches on.
+	EmitEvent(&ilcv1.DataChangedEvent{Prefix: prefix, Method: method})
 }

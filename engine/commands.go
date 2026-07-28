@@ -74,6 +74,19 @@ func handleNew(req *dlcv1.NewRequest) (*dlcv1.NewResponse, error) {
 // user gets a project that contradicts what they asked for, with nothing to
 // indicate why. Say no instead, and name what is supported.
 func checkScaffoldOptions(req *dlcv1.NewRequest) error {
+	// NO DEFAULT TIER SET. An empty list is a caller that did not say, and
+	// choosing for them means scaffolding a slot layout nobody picked — a tier
+	// is a directory of host code plus a `dlc.toml` entry that is then checked
+	// to exist, so the wrong guess is something a user has to undo by hand.
+	//
+	// Refused HERE, in the engine, so it holds on every tier: the CLI marks
+	// `--tiers` required and the browser has checkboxes, but neither of those is
+	// what makes the rule true. A front end that forgot to ask would otherwise
+	// quietly get the old default back.
+	if len(req.Tiers) == 0 {
+		return errors.New("new: no tiers requested — pass at least one of: " +
+			strings.Join(supportedTiers, ", "))
+	}
 	for _, tier := range req.Tiers {
 		if !supportedTier(tier) {
 			return errors.New("new: tier " + strconv.Quote(tier) +
@@ -151,14 +164,15 @@ func supportedTier(name string) bool {
 	return false
 }
 
-// requestedTiers is what the project will declare in dlc.toml. Defaulting to
-// BOTH keeps `dlc new myapp` giving you a working web tier without having to
-// know the flag exists — the cross-tier story is the product, so it should be
-// the default rather than an opt-in.
+// requestedTiers is what the project will declare in dlc.toml, in canonical
+// order rather than request order.
+//
+// NO DEFAULT. An empty list is an error, not "give them everything" — see
+// validateNew. A tier is a directory of host code plus a `dlc.toml` entry that
+// is checked to exist, so choosing one on a caller's behalf means scaffolding a
+// layout nobody asked for. Every front end asks the question its own way: the
+// CLI marks `--tiers` required, the browser has checkboxes.
 func requestedTiers(req *dlcv1.NewRequest) []string {
-	if len(req.Tiers) == 0 {
-		return supportedTiers
-	}
 	out := make([]string, 0, len(req.Tiers))
 	for _, t := range supportedTiers { // canonical order, not request order
 		for _, r := range req.Tiers {

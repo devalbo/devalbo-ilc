@@ -4,13 +4,13 @@
 //
 // No business logic lives here. What `new` *means* is in engine/, shared with
 // the CLI; this only collects fields and renders what came back.
+import { DataChangedEventTopic } from "@gen/devalbo/ilc/v1/platform.events.pb";
 import { useCallback, useEffect, useState } from "react";
 import {
   execute,
   listFiles,
   reset,
   subscribe,
-  TopicDataChanged,
 } from "@devalbo/ilc-web/api";
 // Ids are generated, never typed by hand — see the note in the host's api.ts.
 import { MethodNew } from "@gen/devalbo/dlc/v1/commands.registry.pb";
@@ -33,6 +33,16 @@ import {
 export function App() {
   const [name, setName] = useState("myapp");
   const [module, setModule] = useState("");
+  // TIER SELECTION, this tier's way of asking. The engine has no default — an
+  // empty list is refused — because a tier is a directory of host code plus a
+  // `dlc.toml` entry that is checked to exist, and choosing on a caller's behalf
+  // scaffolds a layout nobody picked. The CLI marks `--tiers` required and
+  // prompts when interactive; a browser asks with checkboxes. Same question,
+  // two idioms, one refusal underneath (Decision 28).
+  const [tiers, setTiers] = useState<string[]>(["native", "web"]);
+
+  const toggleTier = (t: string) =>
+    setTiers((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
   const [files, setFiles] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -64,7 +74,7 @@ export function App() {
     let unsubscribe: (() => void) | null = null;
     let dropped = false;
     subscribe((topic, payload) => {
-      if (topic !== TopicDataChanged) return;
+      if (topic !== DataChangedEventTopic) return;
       const { prefix, method } = DataChangedEvent.fromBinary(payload);
       say(`event ${topic} — prefix "${prefix ?? ""}", method ${method ?? 0}`);
       refresh().catch((e) => say(`ERROR listing OPFS: ${e.message}`));
@@ -89,7 +99,7 @@ export function App() {
       // unsupported caps/tiers/ui/storage rather than silently emitting
       // something else, so sending aspirational values here would just fail —
       // correctly. They come back as the template grows.
-      const request = NewRequest.toBinary({ name, module });
+      const request = NewRequest.toBinary({ name, module, tiers });
       const r = await execute(MethodNew, request);
       if (!r.success) {
         say(`new failed: ${r.error ?? "(no message)"}`);
@@ -216,11 +226,28 @@ export function App() {
             data-testid="module"
           />
         </label>
+        <fieldset style={styles.row}>
+          <legend>tiers</legend>
+          {["native", "web"].map((t) => (
+            <label key={t} style={{ marginRight: "1rem" }}>
+              <input
+                type="checkbox"
+                checked={tiers.includes(t)}
+                onChange={() => toggleTier(t)}
+                data-testid={`tier-${t}`}
+              />{" "}
+              {t}
+            </label>
+          ))}
+        </fieldset>
         <div style={styles.row}>
           <button
             style={styles.button}
             onClick={runNew}
-            disabled={busy || !name}
+            // Disabled with no tier selected: the engine would refuse, and a
+            // form that lets you submit a request it knows will fail is just a
+            // slower error message.
+            disabled={busy || !name || tiers.length === 0}
             data-testid="new"
           >
             dlc new
