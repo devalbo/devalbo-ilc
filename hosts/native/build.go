@@ -73,8 +73,12 @@ func runBuild(args []string) error {
 	//              nothing serves it
 	//   web assets jco's loader FETCHES the core .wasm at run time, so these must
 	//              sit inside the web root or a dev server will not serve them
+	// The assets default is derived from the tier's SLOT, not hard-coded: the
+	// slot is where this tier's host code lives, and jco's output has to be
+	// servable from inside it. A literal here would silently disagree with a
+	// project that put its slot somewhere else.
 	out := firstNonEmpty(outFlag, declared.Component, "build/engine.component.wasm")
-	webOut := firstNonEmpty(webOutFlag, declared.Assets, filepath.Join("frontend", "src", "wasm"))
+	webOut := firstNonEmpty(webOutFlag, declared.Assets, filepath.Join(declared.Root, "src", "wasm"))
 
 	switch tier {
 	case "web":

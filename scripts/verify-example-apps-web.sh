@@ -2,7 +2,7 @@
 #
 # verify-example-apps-web.sh — the example apps run in a browser.
 #
-# Each app ships its own browser test (frontend/test/). This builds the web tier
+# Each app ships its own browser test (hosts/web/test/). This builds the web tier
 # and runs that test, so the app's OWN check is what verifies it — the same
 # thing a user would run, rather than a parallel harness that could drift.
 #
@@ -23,19 +23,19 @@ echo "example apps (web): build-web -> the app's own browser test"
 
 for app in example-apps/*/; do
 	name="$(basename "$app")"
-	[ -d "$app/frontend/test" ] || continue
+	[ -d "$app/hosts/web/test" ] || continue
 	printf "\n  %s\n" "$name"
 
 	if ! ( cd "$app" && PATH="$BIN:$PATH" make build-web >/dev/null 2>&1 ); then
 		printf "  ${R}✗${Z} %s: make build-web\n" "$name"; fail=$((fail+1)); continue
 	fi
-	if ! ( cd "$app/frontend" && npm install --silent --no-audit --no-fund >/dev/null 2>&1 ); then
+	if ! ( cd "$app/hosts/web" && npm install --silent --no-audit --no-fund >/dev/null 2>&1 ); then
 		printf "  ${R}✗${Z} %s: npm install\n" "$name"; fail=$((fail+1)); continue
 	fi
-	if ! ( cd "$app/frontend" && npx playwright install chromium >/dev/null 2>&1 ); then
+	if ! ( cd "$app/hosts/web" && npx playwright install chromium >/dev/null 2>&1 ); then
 		printf "  ${R}✗${Z} %s: chromium download\n" "$name"; fail=$((fail+1)); continue
 	fi
-	if ! ( cd "$app/frontend" && npm test ); then
+	if ! ( cd "$app/hosts/web" && npm test ); then
 		printf "  ${R}✗${Z} %s: browser test\n" "$name"; fail=$((fail+1)); continue
 	fi
 	printf "  ${G}✓${Z} %s runs in a browser\n" "$name"

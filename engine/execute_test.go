@@ -89,7 +89,7 @@ func TestNew(t *testing.T) {
 		"hosts/native/main.go",
 		"cmd/engine-component/main.go",
 		"proto/myapp/v1/commands.proto",
-		"frontend/src/main.ts",
+		"hosts/web/src/main.ts",
 	}
 	have := map[string]bool{}
 	for _, f := range resp.Files {
@@ -355,7 +355,7 @@ func mustMarshal(t *testing.T, m interface{ MarshalVT() ([]byte, error) }) []byt
 }
 
 // --tiers now decides what gets emitted, which is the whole point of recording
-// it: a native-only project should not carry a frontend it never builds.
+// it: a native-only project should not carry a web slot it never builds.
 func TestNewTiersSelectFiles(t *testing.T) {
 	inTempRoot(t)
 
@@ -365,7 +365,7 @@ func TestNewTiersSelectFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range nativeOnly.Files {
-		if strings.HasPrefix(f, "frontend/") || strings.HasPrefix(f, "cmd/engine-component/") {
+		if strings.HasPrefix(f, "hosts/web/") || strings.HasPrefix(f, "cmd/engine-component/") {
 			t.Errorf("native-only scaffold emitted a web-tier file: %s", f)
 		}
 	}
@@ -387,13 +387,13 @@ func TestNewTiersSelectFiles(t *testing.T) {
 	if err := both.UnmarshalVT(out); err != nil {
 		t.Fatal(err)
 	}
-	var hasFrontend bool
+	var hasWebSlot bool
 	for _, f := range both.Files {
-		if strings.HasPrefix(f, "frontend/") {
-			hasFrontend = true
+		if strings.HasPrefix(f, "hosts/web/") {
+			hasWebSlot = true
 		}
 	}
-	if !hasFrontend {
+	if !hasWebSlot {
 		t.Error("default scaffold has no web tier")
 	}
 	if len(both.Files) <= len(nativeOnly.Files) {

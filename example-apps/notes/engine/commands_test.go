@@ -2,7 +2,7 @@
 // so a passing test means the wiring works and not merely the function.
 //
 // These assertions are deliberately the CLI-and-browser-agnostic half: the
-// browser test in frontend/test asserts the same behaviours through the web
+// browser test in hosts/web/test asserts the same behaviours through the web
 // tier. If one needed a tier-specific tweak, logic has leaked out of engine/.
 package engine_test
 

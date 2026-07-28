@@ -84,6 +84,22 @@ differently per tier — the divergence this architecture exists to prevent.
 display, index, network are privileges a host could refuse. Emitting carries nothing back and cannot be
 refused, so it is not declared. See Decision 33 before adding the next capability to that list.
 
+## 3a. The host layer
+
+**`hosts/` splits the same way `engine/` does** (Decision 34): inherited **host runtime** (`hosts/web/` —
+`@devalbo/ilc-web`) versus an app's **tier slot**, `hosts/<tier>/`, holding that app's presentation and
+input for one tier. Every tier in `dlc.toml` names its slot as `root`, and `dlc` refuses a manifest whose
+slot is missing — the one field that file actually gates.
+
+**A tier slot renders; it never decides.** Parity compares command results, the written filesystem, and the
+event stream — all engine-side — so a slot is invisible to it *by construction*. Two hosts that each
+compute the same conclusion will eventually disagree on one tier only, with every check still green. The
+engine decides `winner`; a slot may highlight the line the engine named and may not find one.
+
+**`frontend/` at the repo root is `dlc`'s own web slot**, not runtime, and keeps that name only until the
+runtime is extracted (§16.4) and frees `hosts/web/`. Apps have no such collision — see
+`example-apps/notes/`.
+
 ## 4. Templates
 
 **Every file under `templates/` ends in `.tmpl` (substituted) or `.raw` (verbatim).** Without a suffix:

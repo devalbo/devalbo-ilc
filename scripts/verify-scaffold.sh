@@ -89,7 +89,7 @@ step "dlc build web"
 # The web assets go INSIDE the Vite root (jco fetches the core .wasm at
 # runtime, so a dev server has to be able to serve it); the component stays in
 # build/, where nothing serves it.
-[ -f "$PROJ/frontend/src/wasm/engine.component.js" ] || fail "jco transpile produced no JS in the web root"
+[ -f "$PROJ/hosts/web/src/wasm/engine.component.js" ] || fail "jco transpile produced no JS in the web root"
 # The app's own generated ids must reach the web tier — hand-mirroring them into
 # TypeScript is the hole protoc-gen-dlc-registry exists to close.
 grep -q "MethodGreet" "$PROJ/gen/ts/$PKG/v1/commands.registry.pb.ts" 2>/dev/null \

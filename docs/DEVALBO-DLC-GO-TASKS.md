@@ -3,9 +3,16 @@
 Task breakdown derived from [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md) (authoritative). Naming:
 **ILC** = the framework; **`dlc`** = the CLI tool (Devalbo Line of Command).
 
-**Current focus: the BOOTSTRAP.** Everything else lives in [Backlog / Next implementation](#backlog--next-implementation).
+**The bootstrap is MET** (see the roll-up below) — `dlc` runs in the terminal and the browser from one
+engine, and App #2 (`notes`) and the Events capability landed on top of it.
 
-_Created 2026-07-25._
+**Current focus: the HOST LAYER** — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md), would settle as Decision
+34. Per-app, per-tier host code becomes a named, contracted, scaffolded thing, and **Display drops to
+optional**: an app author chooses between app-side rendering (§6.4's draw-list / widget tree) and emitting a
+semantic event the **host** renders however that tier likes.
+
+_Created 2026-07-25. Re-anchored 2026-07-27 — several boxes below were stale, ticked against what is
+actually in the tree._
 
 ---
 
@@ -78,16 +85,16 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] **Host introspection (Decision 29):** the host embeds the `buf build` **FileDescriptorSet** and walks it with **protoreflect** (native Go) / `@bufbuild/protobuf` (web) → methods + `method_id` + request fields (name→flag, type, proto `enum`→menu, option help/required/default). **Custom options arrive as unknown fields** on `MethodOptions`/`FieldOptions`: register via `dynamicpb.NewExtensionType`, re-unmarshal with `UnmarshalOptions{Resolver}`, read with `ProtoReflect().Range` — `HasExtension` is unreliable across dynamicpb type identities (spike-measured). Engine `describe()` is **optional** — only for a *generic* host that doesn't embed the schema. **Bootstrap shim retired (Decision 28 complete):** `hosts/native/commands.go` parses argv into requests; `execute-cli` is gone from the world, `engine.Execute`/ffcli are gone from the engine (component **1.91 MB → 1.52 MB**, ~20% smaller), and the argv parity stream retired — the 19 method vectors cover it.
 - [x] **WIT boundary migration (Decisions 28/31):** `execute-cli(args: list<string>)` → **`execute(method: u32, request: list<u8>) -> command-result`** — scalar id + proto-bytes payload (WAMR-portable; only rich WIT records/variants need the Component Model). Keep the string-args shim until callers move. **Landed:** both exports declared on `world engine`; `cmd/engine-component` wires each through a shared `toCommandResult`. `make build-engine` (TinyGo wasip2) green, and `make verify-parity` now covers **both** boundaries — 9 argv vectors + 10 `execute(method, request)` byte-vectors (`verify/parity/method-vectors.json`, hex requests derived from typed fixtures via `make parity-vectors`; native side is `cmd/parity-runner` until hosts/native builds requests). The method diff includes the **error string**, so TinyGo and native Go must agree on envelope errors, unregistered ids, and decode failures too.
 - [ ] `supported-abis() -> list<u8>` export (byte-ABI, Decision 31) — the guest advertises its boundaries + versions (`["bytes/1"]` today) so hosts pick the richest supported. Cheap hook now; enables a per-capability rich WIT boundary later without breaking the byte path.
-- [ ] **`protoc-gen-dlc-registry` plugin** — reads the `service` + `method_id` options **from the `buf build` image / CodeGeneratorRequest descriptors** (go-lite emits no service stubs, so generated Go is not a source — spike-measured) → emits the engine's `method_id → handler` registration (the reflection-free part) and **enforces `method_id` stability** against a committed lock. Host-side introspection uses the standard descriptor set (no custom host config to generate). Runs under `dlc gen` / `buf generate` (Decision 29).
-- [ ] `engine/caps_native.go` / `caps_wasip2.go` / `caps_wasip1.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26)
+- [x] **`protoc-gen-dlc-registry` plugin** — reads the `service` + `method_id` options **from the `buf build` image / CodeGeneratorRequest descriptors** (go-lite emits no service stubs, so generated Go is not a source — spike-measured) → emits the engine's `method_id → handler` registration (the reflection-free part) and **enforces `method_id` stability** against a committed lock. Host-side introspection uses the standard descriptor set (no custom host config to generate). Runs under `dlc gen` / `buf generate` (Decision 29).
+- [x] `engine/caps_native.go` / `caps_wasip2.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26). **Landed with Events** as `engine/platform/caps_{native,wasip2}.go`; `caps_wasip1.go` stays unbuilt because there is no WAMR tier to run it
 - [x] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`. **Landed** as method ids 4/5 in **BFT** (the real spec: recursive `directory`/`text`/`binary` nodes, alphabetical entries, base64 for binary). Hand-written encoder **and** parser in `engine/bft.go` — `encoding/json` is reflection-heavy and banned in the engine, so the parser accepts only the BFT subset (objects + strings). Bundles are byte-stable (sorted) and text-vs-binary is chosen by content, so a scaffold bundle is readable and diffable. Untrusted-input safe: every path goes through `safeJoin`. Non-regular files (symlinks) are **skipped** — BFT cannot represent them and reading one errors.
-- [ ] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.ProjectName}}`)
+- [x] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.ProjectName}}`) — `engine/scaffold.go`, checked end-to-end by `make verify-scaffold` (new → gen → test → build → run) and `make verify-scaffold-web`
 
 ### Templates (its own area, §16.6 — bootstrap sequencing locked)
-- [ ] Author **`templates/component-model/` in-tree** — **full `dlc`-shaped** skeleton (engine + CLI/web host stubs + go.mod + devbox + wit + proto). B2 = terminal path; B3 completes browser. **Do not** create the skeleton git submodule yet (lift later).
+- [x] Author **`templates/component-model/` in-tree** — **full `dlc`-shaped** skeleton (engine + CLI/web host stubs + go.mod + devbox + proto; the WIT world is supplied by `dlc build`, so a scaffolded app carries none and cannot be stranded on a stale one). **Do not** create the skeleton git submodule yet (lift later). **Note for the host layer:** the skeleton currently ships `frontend/` *and* `hosts/native/` — two names for one layer, which `HOST-LAYER-PLAN.md` Phase 1/5 unifies.
 - [ ] **Defer** versioned `ilc-platform` `go.mod` depend until submodule graduation (§16.4 / §16.6 #2)
 - [ ] `templates/fragments/` in-tree for overlay packs (`--caps` / `--tiers` / …) — ABI mode picks the skeleton, not a fragment
-- [ ] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates
+- [x] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates — `templates/templates.go`, `//go:embed all:component-model`
 - [ ] **`templates/wamr/`** — Backlog until embedded verify exists; do not add an unverifiable stub in B2
 - [ ] **`reset-fs` / import modes in the UI** — `reset-fs` (id 12) and `ImportMode.REPLACE` exist and are tested; the browser uses REPLACE for imports but has no reset button and no per-file editing (§7.3 file verbs remain open — see the notes-app question in §13)
 
@@ -103,7 +110,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] `dlc gen` (host-side orchestration) — wraps `buf generate` (go-lite + es-lite + `protoc-gen-dlc-registry`) over the app's `commands.proto`; supersedes `make gen` for scaffolded apps (Decision 29 / §16.7)
 
 ### Verify (terminal)
-- [ ] `dlc new myapp` produces a buildable project tree on disk
+- [x] `dlc new myapp` produces a buildable project tree on disk — `make verify-scaffold`, in `test-b2` and therefore in `./scripts/ci.sh full`
 - [x] Define the **golden FS snapshot** for a known `dlc new` invocation (§11 Scaffolder row) — `verify/scaffold/golden.txt`: path + size + digest, one line per file, produced by scaffolding a fixed invocation and running it through `export-fs`. A **manifest rather than the BFT bundle itself**: BFT stores contents as JSON-escaped strings, so a 3 KB file becomes one unreadable line and the review diff that justified it disappears. Re-bless with `make scaffold-golden`; checked by `make verify-scaffold-golden` in `test-b2`.
 - [x] **wasm-parity check (Decision 26):** also build the engine as `engine.component.wasm` and run the same golden `command-result` vectors through the wasm engine; assert byte-identical output vs the in-process native run. This is the CI form of the cross-tier identity guarantee (native is convenience; wasm is the contract). **Landed:** `make verify-parity` covers **both** boundaries — argv (9 vectors, native `dlc` binary vs `execute-cli`) and method (10 vectors, `cmd/parity-runner` vs `execute`), the latter diffing the **error string** as well as the output. Vectors are regenerated from typed fixtures via `make parity-vectors`; the diff is falsification-tested (a tampered vector does produce a mismatch). **Falsification-tested:** `make verify-parity-selftest` injects a `//go:build tinygo`-only divergence and asserts both boundaries report a mismatch, so a silently-broken parity check can't pass as green (T-B2.2). The whole layer runs as `make test-b2` (unit → parity → self-test), wired into `make test`. **Still open:** vectors cover only in-memory commands — extend once `new` writes through the filesystem capability, and run `make test` in CI.
 
@@ -139,11 +146,16 @@ not optional — it's what turns a throwaway spike into durable regression + des
 
 ## Bootstrap exit criteria (roll-up)
 
-- [ ] One engine **codebase** drives CLI (native in-process) and web (`engine.component.wasm` via jco); golden `command-result` vectors byte-identical across native, CI wasm-parity, and browser (Decision 26)
-- [ ] `dlc new myapp` works from the terminal (scaffold to disk) and the browser (scaffold to OPFS + download)
-- [ ] React UI on the web tier drives the engine
-- [ ] Capabilities limited to Console + Filesystem; graceful behavior where a cap is absent
-- [ ] `devbox run verify` green for CLI + web; golden FS snapshot stable
+**Met 2026-07-27.** Ticked against the tree, not from memory — every line below names the check that proves it.
+
+- [x] One engine **codebase** drives CLI (native in-process) and web (`engine.component.wasm` via jco); golden `command-result` vectors byte-identical across native and the CI wasm-parity run (Decision 26) — `make verify-parity`, falsified by `make verify-parity-selftest`. **Partial:** the sha256 tie from the parity artifact to the *browser's* bytes is still open (see the cross-tier identity row above)
+- [x] `dlc new myapp` works from the terminal (scaffold to disk) and the browser (scaffold to OPFS + download) — `make verify-scaffold`, `make verify-web`, `make verify-bundle-xtier`
+- [x] React UI on the web tier drives the engine — `frontend/`, `make verify-web`
+- [x] Capabilities limited to Console + Filesystem; graceful behavior where a cap is absent. **Superseded in practice:** Events landed on top (Decision 33), which is beyond the bootstrap subset by design
+- [x] `devbox run verify` green for CLI + web; golden FS snapshot stable — `./scripts/ci.sh full`, `make verify-scaffold-golden`
+
+**The one bootstrap row still genuinely open** is the sha256 leg of cross-tier identity. It is a
+verification tightening, not a capability, so it did not hold the milestone.
 
 ---
 
@@ -151,10 +163,33 @@ not optional — it's what turns a throwaway spike into durable regression + des
 
 Deferred until after the bootstrap. Grouped; roughly priority-ordered within each group.
 
+### 🎯 CURRENT — the host layer (Decision 34) — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md)
+
+Per-app, per-tier host code gets a name, a contract, and a slot. The line `engine/` vs `engine/platform/`
+already draws is missing one directory over, and `hosts/native/` currently mixes runtime with `dlc`'s own
+code while notes ships the same layer twice under two names (`hosts/native/` and `frontend/`).
+
+- [x] **Phase 1 — draw the line in `hosts/`** ✅ runtime vs *tier slot*; notes **and the template** adopt `hosts/<tier>/` uniformly (the template came early on purpose — D7); every tier in `dlc.toml` names its slot root and a missing slot fails the build, which is the first field `dlc.toml` has ever gated. Golden re-blessed; falsified by disabling the gate. Turned up a latent bug — `platformPathFrontend` ignored its own subdir argument — and a CI gap: `hosts/` was vetted but never tested. **Deferred:** splitting the runtime out of `hosts/native/` (separate "lift-ready package" task; named as a debt in `hosts/README.md`)
+**Phases 2–6 were reordered after Phase 1** (see the plan for the reasoning): the pilot moved ahead of the
+typed interface, because D2's case for locking event schemas is "a host renders from the payload" and no
+host does that yet — locking a format before its first consumer exists is how the shape turns out wrong.
+Host parity split off from the harness for the same class of reason: notes cannot exercise it, since its
+native slot subscribes to nothing.
+
+- [ ] **Phase 2 — a slot renders with no engine**: synthetic event driver + a normalized text projection per slot. Works on today's `(topic, payload)` API; also how an embedded renderer gets developed without flashing anything
+- [ ] **Phase 3 — tic-tac-toe (App #3)**: one engine, DOM and ASCII slots, semantic events the host renders. Built against the **current** string+bytes API on purpose
+- [ ] **Phase 4 — host parity**: two slots, one synthetic stream, compare normalized renderings — the only mechanical check on a layer parity cannot reach, and it has no subject until Phase 3 exists
+- [ ] **Phase 5 — the published interface**: event schemas declared in proto, **locked** like `method_id`, generating both emit and subscribe sides. Deletes the four hand-mirrored topic literals that `AGENTS.md` §1 already bans for ids. Costs one rewrite of tic-tac-toe's subscriber wiring — accepted, so the codegen's shape is decided by a real consumer
+- [ ] **Phase 6 — scaffold the slot**: `dlc new` emits slots + their tests, and **tier selection becomes a setup question** (host-side prompt when `--tiers` is absent — a tier is now a directory of host code plus a checked `dlc.toml` entry, so it is worth asking rather than defaulting silently). The documentation half of this phase already landed with Phase 1
+
+**Generated apps are disposable for now** — re-scaffold rather than migrate, so template layout changes
+cost a re-bless (`make scaffold-golden`) and not a migration story.
+
 ### Second app — notes/list (App #2, the breadth pilot) — §13
-- [ ] Scaffold notes/list **with `dlc new`** (proves the scaffolder on a real app)
-- [ ] `proto/record.proto`; handlers: `create/list/open/update/delete-record`, `rebuild-index`
-- [ ] Drives out the capabilities/tiers below; `dlc new`'s flags co-evolve (§16.4)
+- [x] Scaffold notes/list — `example-apps/notes/`, built on the platform via `dlc.toml` `[platform] path`. **Not** scaffolded by `dlc new` in the end; it predates the template being complete, and Phase 1 above brings its layout back in line
+- [x] Handlers: `create` / `list` / `delete-record` over the filesystem, plus its own `notes.record-changed` event (the first app-defined topic)
+- [ ] `open` / `update` / `rebuild-index` — wait on split-storage and the SQLite index
+- [x] Drove out Events and the `caps_*` seam; now driving out the host layer
 
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan
@@ -162,8 +197,8 @@ Deferred until after the bootstrap. Grouped; roughly priority-ordered within eac
 - [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/ilc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes
   - [ ] follow-up: no desktop tier to wire `runtime.EventsEmit` into yet (§6.3)
-- [ ] **Environment manifest** (§6.4a, Decision 32) — `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change. Prerequisite for Display; also how `unavailable` stops being a linking problem and becomes a data one
-- [ ] **Display** capability (§6.4): draw-command list + retained widget tree, branching on the manifest
+- [ ] **Environment manifest** (§6.4a, Decision 32) — `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change; how `unavailable` stops being a linking problem and becomes a data one. **Re-justified by Decision 34:** its original headline reason was so a handler could branch on display facts, and a host-rendered app never learns there is a screen. What remains load-bearing is the non-display half — is there an index, what kind of FS root — which is also where the strict/lenient knob was already headed (`EVENTS-PLAN.md` §3, Phase 5)
+- [ ] **Display** capability (§6.4) — **now OPTIONAL, and the app author's call** (Decision 34). Three paths, chosen per app or per event: draw-command list · retained widget tree · **semantic events the host renders**. The first two put presentation in the app and are what this capability builds; the third costs one small tier slot and no capability at all, so it goes first. Build draw-list/widget-tree when an app genuinely wants to write presentation **once** and have it work everywhere — not before
 - [ ] **Network** (deferred): `wasi:http` when needed
 
 ### Tiers / hosts

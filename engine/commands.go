@@ -100,6 +100,15 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 	return nil
 }
 
+// Tier slots — where each tier's HOST code lives (Decision 34). One directory
+// per tier, and `root` in dlc.toml names it. Constants rather than literals
+// because the scaffold, the manifest defaults, and the npm re-base all have to
+// agree on the same path, and they are in three different files.
+const (
+	nativeSlot = "hosts/native"
+	webSlot    = "hosts/web"
+)
+
 // tierSections renders the [tiers.*] blocks for dlc.toml.
 //
 // Built here rather than in the template because the set is dynamic: the
@@ -112,12 +121,17 @@ func tierSections(tiers []string) string {
 		}
 		b.WriteString("[tiers." + t + "]\n")
 		b.WriteString(`capabilities = ["console", "filesystem"]` + "\n")
-		if t == "web" {
-			b.WriteString("# Where `dlc build web` writes. The assets MUST sit inside the web root:\n")
-			b.WriteString("# jco's loader fetches the core .wasm at run time, and a dev server will\n")
-			b.WriteString("# not serve a path outside its root.\n")
-			b.WriteString(`root      = "frontend"` + "\n")
-			b.WriteString(`assets    = "frontend/src/wasm"` + "\n")
+		switch t {
+		case "native":
+			b.WriteString("# This tier's HOST code — argv in, a proto request out.\n")
+			b.WriteString(`root      = "` + nativeSlot + `"` + "\n")
+		case "web":
+			b.WriteString("# This tier's HOST code, and where `dlc build web` writes into it.\n")
+			b.WriteString("# The assets MUST sit inside the slot: jco's loader fetches the core\n")
+			b.WriteString("# .wasm at run time, and a dev server will not serve a path outside\n")
+			b.WriteString("# its root.\n")
+			b.WriteString(`root      = "` + webSlot + `"` + "\n")
+			b.WriteString(`assets    = "` + webSlot + `/src/wasm"` + "\n")
 			b.WriteString(`component = "build/engine.component.wasm"` + "\n")
 		}
 	}
@@ -189,7 +203,7 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 		// npm `file:` path relative to ITSELF, not to the project root — using
 		// the root-relative one silently resolves to a sibling directory that
 		// does not exist, and npm reports only "package not found".
-		"PlatformPathFrontend": platformPathFrom("frontend", req.PlatformPath),
+		"PlatformPathFrontend": platformPathFrom(webSlot, req.PlatformPath),
 		"PlatformReplace":      platformReplace(req.PlatformPath),
 		// The manifest must describe what was actually emitted — a [tiers.web]
 		// section in a project with no frontend/ would be a lie the build would
@@ -201,11 +215,23 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 // platformPathFrom re-bases a project-root-relative platform path for a file in
 // a subdirectory. Absolute paths are already location-independent and pass
 // through unchanged.
+//
+// The depth comes from `subdir`, which it did NOT before the web slot moved to
+// `hosts/web`: this hard-coded a single "..", ignored its own argument, and was
+// correct only by coincidence while every caller was one level down. A silently
+// wrong `file:` dependency is an npm install resolving to nothing, reported
+// nowhere near the manifest that caused it.
 func platformPathFrom(subdir, path string) string {
 	if path == "" || filepath.IsAbs(path) {
 		return path
 	}
-	return filepath.Join("..", path)
+	parts := []string{}
+	for _, seg := range strings.Split(filepath.ToSlash(subdir), "/") {
+		if seg != "" && seg != "." {
+			parts = append(parts, "..")
+		}
+	}
+	return filepath.Join(append(parts, path)...)
 }
 
 // identifier makes an app name safe for a proto package and a Go import alias:

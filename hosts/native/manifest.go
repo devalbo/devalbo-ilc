@@ -40,9 +40,14 @@ type Tier struct {
 	// separately via the environment manifest.
 	Capabilities []string
 
+	// Root is this tier's SLOT: the directory holding this app's host code for
+	// that tier (Decision 34) — `hosts/web`, `hosts/native`. Required for every
+	// tier, and checked to exist. On the web tier it doubles as the Vite root,
+	// which is why the assets below must sit inside it.
+	Root string
+
 	// web only
-	Root      string // the web root; assets must live inside it
-	Assets    string // jco output
+	Assets    string // jco output; must be inside Root
 	Component string // the wasm component (not a web asset)
 }
 
@@ -61,7 +66,46 @@ func loadManifest() (*Manifest, error) {
 	if m.Name == "" {
 		return nil, fmt.Errorf("%s: [project] name is required", manifestFile)
 	}
+	if err := checkSlots(m); err != nil {
+		return nil, fmt.Errorf("%s: %w", manifestFile, err)
+	}
 	return m, nil
+}
+
+// checkSlots enforces the one thing dlc.toml actually gates (Decision 34): every
+// declared tier names a slot directory, and that directory is there.
+//
+// Until now nothing in this file was load-bearing — `capabilities` had one
+// writer and zero readers, and `root` was parsed and never read, so a typo or an
+// omission cost nothing until something downstream did the wrong thing quietly.
+// A tier with no slot is a tier with nowhere to put host code; saying so here is
+// the difference between a named error and a web build that succeeds and serves
+// an empty directory.
+//
+// Checked against the filesystem rather than trusted, because the failure this
+// prevents is a MOVED or renamed directory — exactly what a stale `root` looks
+// like, and exactly what happened when the web slot moved out of `frontend/`.
+func checkSlots(m *Manifest) error {
+	names := make([]string, 0, len(m.Tiers))
+	for name := range m.Tiers {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic: report the FIRST bad tier, not a random one
+
+	for _, name := range names {
+		tier := m.Tiers[name]
+		if tier.Root == "" {
+			return fmt.Errorf("[tiers.%s] has no root — every tier names the directory holding its host code, e.g. root = \"hosts/%s\"", name, name)
+		}
+		info, err := os.Stat(tier.Root)
+		if err != nil {
+			return fmt.Errorf("[tiers.%s] root %q does not exist", name, tier.Root)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("[tiers.%s] root %q is not a directory", name, tier.Root)
+		}
+	}
+	return nil
 }
 
 func parseManifest(src string) (*Manifest, error) {

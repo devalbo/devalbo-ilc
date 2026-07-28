@@ -6,7 +6,7 @@
 // the check has to live where the code does. If this passes and
 // `./{{.ProjectName}} greet` passes, the two tiers genuinely agree.
 //
-// Run: make build-web && cd frontend && npm test
+// Run: make build-web && cd hosts/web && npm test
 import { expect, test } from "@playwright/test";
 
 test("greets from the browser, using the same engine as the CLI", async ({

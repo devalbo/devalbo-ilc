@@ -12,7 +12,7 @@
   "dependencies": {
     "@aptre/protobuf-es-lite": "^1.1.1",
     "comlink": "^4.4.2",
-    "@devalbo/ilc-web": "file:../../../hosts/web"
+    "@devalbo/ilc-web": "file:../../../../hosts/web"
   },
   "devDependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",

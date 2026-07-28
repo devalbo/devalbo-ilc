@@ -166,10 +166,16 @@ The honest gaps, in the order they matter:
 1. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
-2. 📋 **Desktop, embedded, and the remaining capabilities** (SQLite index, display, sync) are
-   designed and unbuilt — see the tasks doc. Events is the one that landed, and it built the
-   `caps_native` / `caps_wasip2` seam the rest of them inherit.
-3. 📋 **Events do not cross a tab or a process.** Same graph only — worker → main thread, or native
+2. 📋 **Desktop, embedded, and the remaining capabilities** (SQLite index, sync) are designed and
+   unbuilt — see the tasks doc. Events is the one that landed, and it built the `caps_native` /
+   `caps_wasip2` seam the rest of them inherit. **Display is now optional** (Decision 34): an app either
+   renders app-side through that capability, or emits a *semantic* event and lets each host draw it
+   however that tier likes — the second costs no capability at all, so it goes first.
+3. 📋 **Per-app, per-tier host code has no agreed shape yet.** `hosts/web/` is inherited runtime,
+   `hosts/native/` mixes runtime with `dlc`'s own code, and `frontend/` is app code under a third name.
+   The line `engine/` vs `engine/platform/` already draws is missing one directory over — that is the
+   current focus (`docs/HOST-LAYER-PLAN.md`).
+4. 📋 **Events do not cross a tab or a process.** Same graph only — worker → main thread, or native
    in-process. A second tab on the same OPFS origin does not see this one's writes; that needs a
    `BroadcastChannel` and is the natural follow-up.
 

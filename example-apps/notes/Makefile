@@ -21,20 +21,20 @@ test: ## unit tests
 .PHONY: gen-web
 gen-web: gen ## copy generated es-lite messages into the Vite root
 	# Bundlers resolve @aptre/* from the IMPORTING file's tree, and gen/ sits
-	# outside frontend/ — so the messages are copied in rather than aliased.
-	rm -rf frontend/src/gen
-	mkdir -p frontend/src/gen
-	cp -R gen/ts/notes frontend/src/gen/
+	# outside hosts/web/ — so the messages are copied in rather than aliased.
+	rm -rf hosts/web/src/gen
+	mkdir -p hosts/web/src/gen
+	cp -R gen/ts/notes hosts/web/src/gen/
 
 .PHONY: build-web
 build-web: gen-web ## build the wasm component + jco transpile (needs dlc on PATH)
-	# Puts the component in build/ and the web assets in frontend/src/wasm —
+	# Puts the component in build/ and the web assets in hosts/web/src/wasm —
 	# they have different audiences, so dlc writes each where it belongs.
 	dlc build web
 
 .PHONY: dev-web
 dev-web: build-web ## serve the web tier
-	cd frontend && npm install && npm run dev
+	cd hosts/web && npm install && npm run dev
 
 .PHONY: verify
 verify: build ## the smoke test: the binary exists and answers

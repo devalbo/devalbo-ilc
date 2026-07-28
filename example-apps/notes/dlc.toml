@@ -12,11 +12,17 @@ module  = "github.com/devalbo/devalbo-ilc/example-apps/notes"
 # BOOTSTRAP: relative, so this works on any machine and in CI.
 path = "../.."
 
+# `root` is this tier's SLOT — the directory holding this app's host code for
+# that tier (Decision 34). One slot per tier, and it must exist: a declared tier
+# with no slot is a tier nobody can write host code for, so `dlc` refuses it
+# rather than building something with no front end.
+
 [tiers.native]
 capabilities = ["console", "filesystem"]
+root      = "hosts/native"
 
 [tiers.web]
 capabilities = ["console", "filesystem"]
-root      = "frontend"
-assets    = "frontend/src/wasm"
+root      = "hosts/web"
+assets    = "hosts/web/src/wasm"
 component = "build/engine.component.wasm"

@@ -126,11 +126,14 @@ func TestScaffoldVarsDictionary(t *testing.T) {
 		t.Errorf("ProjectVersion: got %q, want 0.1.0", vars["ProjectVersion"])
 	}
 
-	// A relative platform path is re-based for files one directory down; an
-	// absolute one is already location-independent.
+	// A relative platform path is re-based for the tier slot's DEPTH — the web
+	// slot is `hosts/web`, two levels down, so a project-root `../..` becomes
+	// `../../../..`. This pins the depth rather than a single "..": the re-base
+	// used to ignore its subdir argument, which was invisible while every caller
+	// happened to be one level down.
 	rel := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "../.."})
-	if rel["PlatformPathFrontend"] != "../../.." {
-		t.Errorf("relative re-base: got %q, want ../../..", rel["PlatformPathFrontend"])
+	if rel["PlatformPathFrontend"] != "../../../.." {
+		t.Errorf("relative re-base: got %q, want ../../../..", rel["PlatformPathFrontend"])
 	}
 	abs := scaffoldVars(&dlcv1.NewRequest{Name: "x", PlatformPath: "/opt/ilc"})
 	if abs["PlatformPathFrontend"] != "/opt/ilc" {

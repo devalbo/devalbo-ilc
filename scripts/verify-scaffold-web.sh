@@ -55,19 +55,19 @@ step "go mod tidy"
 
 step "make build-web (dlc build web)"
 ( cd "$PROJ" && PATH="$WORK:$PATH" make build-web ) || fail "make build-web"
-[ -f "$PROJ/frontend/src/wasm/engine.component.js" ] || fail "no transpiled component in the web root"
+[ -f "$PROJ/hosts/web/src/wasm/engine.component.js" ] || fail "no transpiled component in the web root"
 
 step "npm install (fresh project — slow)"
-( cd "$PROJ/frontend" && npm install --no-audit --no-fund ) \
-	|| fail "npm install in the scaffolded frontend"
+( cd "$PROJ/hosts/web" && npm install --no-audit --no-fund ) \
+	|| fail "npm install in the scaffolded web slot"
 
 step "playwright install chromium"
-( cd "$PROJ/frontend" && npx playwright install chromium ) \
+( cd "$PROJ/hosts/web" && npx playwright install chromium ) \
 	|| fail "playwright browser download"
 
 # The spec that runs here came from the template — it is the test the user gets.
 step "npm test (the app's own browser test)"
-if ! ( cd "$PROJ/frontend" && npm test ); then
+if ! ( cd "$PROJ/hosts/web" && npm test ); then
 	fail "the scaffolded app's browser test"
 fi
 

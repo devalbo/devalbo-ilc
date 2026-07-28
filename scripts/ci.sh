@@ -76,7 +76,10 @@ step "formatting"               run ./scripts/check-fmt.sh
 # without this step a clean tree fails with "no matching versions for …/gen/go/…".
 step "codegen"                  run make gen
 step "vet"                      run go vet ./engine/... ./cmd/... ./hosts/...
-step "unit tests"               run go test ./engine/...
+# hosts/ is in scope as well as engine/: it vets here but did not TEST here, so
+# hosts/native/manifest_test.go — the dlc.toml slot gate — would have passed CI
+# by never running. Vet and test should cover the same tree.
+step "unit tests"               run go test ./engine/... ./hosts/...
 
 # ---- full: the engine boundary and the web tier -------------------------
 if [ "$TIER" != "fast" ]; then

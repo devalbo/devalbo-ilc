@@ -14,7 +14,7 @@ one command boundary. The framework rules below come from the ILC platform this 
 | --- | --- | --- |
 | `engine/` | **all** business logic — what a command *means* | platform APIs, argv parsing, UI |
 | `hosts/native/` | argv → request; printing results | decisions about what a command means |
-| `frontend/` | the browser UI — form state → request | business logic |
+| `hosts/web/` | the browser UI — form state → request | business logic |
 | `cmd/engine-component/` | six lines wiring the wasm exports | anything at all |
 
 If you find yourself deciding something in a host or the UI, it belongs in `engine/`. That is the whole
@@ -65,7 +65,7 @@ make gen && go mod tidy     # codegen FIRST — engine/ imports generated code, 
                             # "unrecognized import path .../gen/go/..."
 make verify                 # build + run the CLI
 make build-web              # wasm component + web assets
-cd frontend && npm test     # the browser test that ships with this project
+cd hosts/web && npm test     # the browser test that ships with this project
 ```
 
 **`dlc` is a required build tool.** `dlc build web` supplies the WIT world from `dlc` itself, so this
@@ -75,6 +75,6 @@ project carries none and cannot be stranded on a stale one.
 
 ## 5. Testing
 
-The two tiers must agree. `go test ./engine/` proves the logic; `cd frontend && npm test` proves the same
+The two tiers must agree. `go test ./engine/` proves the logic; `cd hosts/web && npm test` proves the same
 engine answers in a browser. **If you change a command, both should still pass without either being
 edited** — if a test needed a tier-specific tweak, logic probably leaked out of `engine/`.

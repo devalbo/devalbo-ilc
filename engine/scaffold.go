@@ -40,17 +40,23 @@ const (
 // project gets. Path-prefix based rather than a manifest listing each file:
 // adding a file to a tier should mean putting it in that tier's directory, not
 // editing a list somewhere else that will fall out of date.
+//
+// `hosts/<tier>/` IS the tier slot (Decision 34), so the mapping is the path —
+// a new tier needs a directory here and nothing else. That is the payoff for the
+// uniform layout: this used to special-case `frontend/` as the web tier, which
+// meant the one directory whose name did not say which tier it was.
 func tierOf(path string) string {
-	switch {
-	case strings.HasPrefix(path, "frontend/"),
-		strings.HasPrefix(path, "cmd/engine-component/"):
-		// Both exist only to produce and serve the wasm component.
-		return "web"
-	case strings.HasPrefix(path, "hosts/native/"):
-		return "native"
-	default:
-		return ""
+	if rest, ok := strings.CutPrefix(path, "hosts/"); ok {
+		if i := strings.Index(rest, "/"); i > 0 {
+			return rest[:i]
+		}
 	}
+	// The one file outside a slot that still belongs to a tier: the component
+	// shim exists only to produce what the web tier serves.
+	if strings.HasPrefix(path, "cmd/engine-component/") {
+		return "web"
+	}
+	return ""
 }
 
 // scaffoldFiles renders the embedded template tree for the requested tiers.
