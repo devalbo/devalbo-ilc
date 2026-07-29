@@ -56,6 +56,35 @@ step "make gen"
 step "go mod tidy"
 ( cd "$PROJ" && go mod tidy ) >/dev/null 2>&1 || fail "go mod tidy"
 
+# ---- the extraction claim (§16.4), checked rather than asserted ------------
+#
+# A scaffolded app depends on dlc-platform and NOT on the dlc repo. That is the
+# whole point of the extraction, and it is the kind of claim that decays
+# silently: one convenience import of something still living in devalbo-ilc and
+# the module graph quietly grows a dependency nobody notices, because in THIS
+# tree the dlc checkout is always right there.
+#
+# Read precisely: an app still needs the dlc BINARY as a build tool (`make gen`
+# above runs `dlc gen`, and `dlc build web` supplies the WIT world). What it must
+# not need is the dlc MODULE. Those are different claims and only the second is
+# being made here.
+step "the module graph contains dlc-platform and not devalbo-ilc"
+graph="$( cd "$PROJ" && go list -m all 2>/dev/null )" || fail "go list -m all"
+case "$graph" in
+	*github.com/devalbo/dlc-platform*) ;;
+	*) fail "the scaffold does not depend on dlc-platform at all" ;;
+esac
+case "$graph" in
+	*github.com/devalbo/devalbo-ilc*)
+		fail "the scaffold still depends on the dlc module: $(printf '%s' "$graph" | grep devalbo-ilc | tr '\n' ' ')" ;;
+esac
+
+# And it must BUILD with no network: a dependency that is only satisfiable by
+# fetching is one the module graph did not really contain.
+step "builds offline (nothing to fetch)"
+( cd "$PROJ" && GOPROXY=off GOFLAGS=-mod=mod go build ./... ) \
+	|| fail "the scaffold cannot build without the network — something is not resolved by replace"
+
 step "go test ./..."
 ( cd "$PROJ" && go test ./... ) || fail "the scaffold's own tests"
 

@@ -39,6 +39,7 @@ run_check "T-B2.2" "parity self-test (the check can detect drift)" ./scripts/ver
 run_check "T-B2.3" "scaffold builds and runs (dlc new -> gen -> build -> run)" ./scripts/verify-scaffold.sh
 run_check "T-B2.4" "scaffold golden (the tree is exactly what we meant)" make -s verify-scaffold-golden
 run_check "T-B2.5" "example apps build and pass (they consume the platform)" ./scripts/verify-example-apps.sh
+run_check "T-B2.6" "platform gen is committed and current (consumers cannot run buf)" ./scripts/verify-platform-gen.sh
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then

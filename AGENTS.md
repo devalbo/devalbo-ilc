@@ -248,7 +248,14 @@ committed**, because a consumer of that module cannot run `buf` or `wit-bindgen`
 committed too**, and there are now two — `dlc-platform/proto/method-ids.lock` for the framework band
 (1–9999) and `proto/method-ids.lock` for dlc's own app ids.
 
-**Anything a scaffolded app needs belongs in `dlc-platform`.** An app depends on the platform and NOT on
-`dlc`: the module, the WIT world, and `protoc-gen-dlc-registry` all live there, so a generated project
-builds and generates without the dlc repo at all. If you find yourself adding a `devalbo-ilc` import to the
-template, the thing you are importing is in the wrong module.
+**Anything a scaffolded app needs belongs in `dlc-platform`.** An app's MODULE GRAPH contains the platform
+and not `dlc` — `verify-scaffold.sh` asserts exactly that with `go list -m all`, and builds the scaffold
+with `GOPROXY=off` so a dependency that is only satisfiable by fetching cannot hide. If you find yourself
+adding a `devalbo-ilc` import to the template, the thing you are importing is in the wrong module.
+
+**Read that claim precisely:** an app still needs the `dlc` BINARY as a build tool (`make gen` runs
+`dlc gen`; `dlc build web` supplies the WIT world). What it does not need is the `dlc` Go module.
+
+**`dlc-platform/gen/` is checked by `verify-platform-gen.sh`** for both ways it rots — stale bytes, and
+files that exist locally but were never committed. Neither is visible from inside this repo, because we
+always regenerate; both ship broken to anyone who does not.

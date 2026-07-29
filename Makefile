@@ -148,6 +148,10 @@ verify-example-apps: ## the example apps (which CONSUME the platform) still buil
 test-b2: ## Phase B2 engine boundary: unit + parity + parity self-test
 	@./scripts/test-b2.sh
 
+.PHONY: verify-platform-gen
+verify-platform-gen: ## §16.4: dlc-platform's committed generated code is current
+	@./scripts/verify-platform-gen.sh
+
 .PHONY: verify-parity-selftest
 verify-parity-selftest: ## prove verify-parity can FAIL (inject tinygo-only drift)
 	@./scripts/verify-parity-selftest.sh
