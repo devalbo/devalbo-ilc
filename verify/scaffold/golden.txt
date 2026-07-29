@@ -7,7 +7,7 @@ AGENTS.md                                            3931  eb524f7772665b8c
 Makefile                                             1696  16b2b6b50d826c3f
 README.md                                            1867  11d2a460986f28e8
 cmd/engine-component/main.go                          791  da8957a3830c86ef
-devbox.json                                           473  fd10c51393a9e86e
+devbox.json                                           430  eeadf3eae7b01195
 dlc.toml                                             1683  b4eb691a56462587
 engine/commands.go                                   2014  358a66d978f3fc42
 engine/commands_test.go                               764  f6a2b519662828fc
