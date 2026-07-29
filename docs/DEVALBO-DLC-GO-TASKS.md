@@ -19,10 +19,23 @@ mid-session and come back. `platform.Boot` owns the startup order. Parity now co
 command SURFACE as well as results — which it had to, because twice during the build parity was green
 while every filesystem verb on both tiers was broken.
 
+**The PLATFORM IS EXTRACTED** (§16.4). `dlc-platform/` is a real Go module —
+`github.com/devalbo/dlc-platform`, named for where it is going and resolved by `replace` until it gets
+there — carrying the Go platform, the protos with **committed** generated code, the WIT world,
+`protoc-gen-dlc-registry`, and the TS runtime (`@devalbo/dlc-web`). **A scaffolded app's module graph now
+contains the platform and not `dlc`** — checked with `go list -m all` plus an offline build, not asserted.
+`dlc`'s web slot moved `frontend/` → `hosts/web/`, so dlc finally has the layout it scaffolds.
+
 **Current focus: nothing is claimed.** The candidates, roughly ordered: the **SQLite index** (§6.2, now
-unblocked — the manifest makes `unavailable` expressible and it is the second consumer that will catch a
-wrong schema shape), the §16.4 `dlc-platform` extraction (which unblocks dlc's hardcoded version, the
-`frontend/` → `hosts/web/` move, and the `hosts/native` runtime/slot split), and the embedded tier.
+unblocked — the manifest makes `unavailable` expressible, and it is the second consumer that will catch a
+wrong manifest schema while changing it is still cheap), **publishing `dlc-platform`** (extracted but not
+tagged — deliberately deferred), and the **embedded tier**, which is where "no filesystem" and "no console"
+stop being edge cases and become the normal shape.
+
+**Note on what the extraction did NOT unblock:** dlc's hardcoded version. That cycle is `dlcconfig` being
+written by the dlc binary built from the package that would import it, with the manifest parser still in
+`hosts/native` (package main) — untouched by moving the platform out. It was listed as a beneficiary when
+the extraction was proposed; that was wrong.
 
 _Created 2026-07-25. Re-anchored 2026-07-27 — several boxes below were stale, ticked against what is
 actually in the tree._
@@ -519,7 +532,22 @@ usability cost, a tier-dependent one is a parity failure.
 - [ ] Two-apps/versions **BFT interchange** workflow (diff/migrate/merge). **Foundation landed:** `make verify-bundle-xtier` proves a bundle exported in the **browser** imports in the **terminal** and rebuilds a byte-identical tree; the diff/migrate/merge workflows build on that.
 
 ### Platform & tooling
-- [x] Extract **`dlc-platform`** module once App #2 shares it (§16.4) — **DONE 2026-07-28.** A real nested Go module at `dlc-platform/`, named `github.com/devalbo/dlc-platform` for where it is going and resolved by `replace` until it gets there. Carries the Go platform, the protos + **committed** generated code (consumers cannot run `buf`), the WIT world, `protoc-gen-dlc-registry`, and the TS runtime `dlc-platform/web` (`@devalbo/dlc-web`). **A scaffolded app now depends on the platform and not on `dlc` at all.** Two id locks, one per band. `dlc`'s web slot moved `frontend/` → `hosts/web/`, so dlc finally has the layout it scaffolds. **Both claims are now checked, not asserted** (2026-07-28): `verify-scaffold.sh` reads the scaffold's `go list -m all` and builds it with `GOPROXY=off`, and `verify-platform-gen.sh` (T-B2.6) catches committed generated code going stale or never being added — the two failures invisible from inside this repo because we always regenerate. Original note: — templates depend-on, never inline. **Package boundary landed early** as `engine/platform/` (a later module extraction is a directory move): dispatch, fs root seam, `SafeJoin`/`WriteTree`, BFT, and the inherited verbs. Driven by the template work — a template built against the wrong boundary would teach it to every scaffolded app. **Method id bands reserved: 1–9999 ILC (capability sub-blocks, 600–9999 held for capabilities not yet shipped), 10000+ the app** (`platform.AppMethodBase`); settled before the id-lock existed, when renumbering was still free. **`dlc` claims no reserved block — it is an app like any other** (`New`=10000): it never shares a registry with a scaffolded app, so a block would be signalling not protection, and keeping it in the app band is the dogfooding (plan §8).
+- [x] Extract **`dlc-platform`** module once App #2 shares it (§16.4) — **DONE 2026-07-28.** A real nested Go module at `dlc-platform/`, named `github.com/devalbo/dlc-platform` for where it is going and resolved by `replace` until it gets there. Carries the Go platform, the protos + **committed** generated code (consumers cannot run `buf`), the WIT world, `protoc-gen-dlc-registry`, and the TS runtime `dlc-platform/web` (`@devalbo/dlc-web`). **A scaffolded app now depends on the platform and not on `dlc` at all.** Two id locks, one per band. `dlc`'s web slot moved `frontend/` → `hosts/web/`, so dlc finally has the layout it scaffolds. Original note: templates depend-on, never inline. **Package boundary landed early** as `engine/platform/` (now `dlc-platform/`) (a later module extraction is a directory move): dispatch, fs root seam, `SafeJoin`/`WriteTree`, BFT, and the inherited verbs. Driven by the template work — a template built against the wrong boundary would teach it to every scaffolded app. **Method id bands reserved: 1–9999 ILC (capability sub-blocks, 600–9999 held for capabilities not yet shipped), 10000+ the app** (`platform.AppMethodBase`); settled before the id-lock existed, when renumbering was still free. **`dlc` claims no reserved block — it is an app like any other** (`New`=10000): it never shares a registry with a scaffolded app, so a block would be signalling not protection, and keeping it in the app band is the dogfooding (plan §8). **Both claims are now checked, not asserted** (2026-07-28): `verify-scaffold.sh` reads the scaffold's `go list -m all` and builds it with `GOPROXY=off`, and `verify-platform-gen.sh` (T-B2.6) catches committed generated code going stale or never being added — the two failures invisible from inside this repo because we always regenerate.
+  - [ ] **follow-up: publish it.** Deliberately deferred (no new repo yet). The remaining work is a
+        directory move plus a tag — the module path is ALREADY `github.com/devalbo/dlc-platform`, so no
+        consumer re-imports anything. What must move with it: `dlc-platform/proto` currently sits in this
+        repo's buf WORKSPACE so that dlc's `commands.proto` can import `devalbo/options/v1` from two
+        directories away. Split the repo and that import has to resolve some other way:
+        **vendor a fourth copy of `options.proto` into `dlc`** (what the template and both example apps
+        already do, kept honest by `TestTemplateOptionsProtoInSync` + `make sync-template-proto`), or
+        publish the platform's protos to the Buf Schema Registry and add a `deps:` entry the way
+        `buf.build/protocolbuffers/wellknowntypes` already resolves `descriptor.proto`.
+        **Vendoring is probably right:** the machinery exists and is tested, `dlc` would be one more copy
+        of a file that already has three, and a BSR dep adds a hosted service, an account, and network
+        access at codegen time for a repo that currently generates offline. Also drop the `replace`
+        directives from the root, both example apps, and the scaffold template.
+  - [ ] **follow-up: `@devalbo/dlc-web` is unpublished too**, consumed by `file:` paths. Same shape: an npm
+        publish plus removing three `file:` deps and the template's `PlatformPathFrontend`.
 - [ ] **Periodic dogfood review — where is `dlc` not using its own framework?** `AGENTS.md` §3 already says "`dlc` is an app like any other; if `dlc` needs special treatment, the template is teaching something `dlc` does not do." Nothing enforces it, and drift is **one-directional and invisible**: a capability gets built, notes and the template adopt it, and `dlc` keeps the old shape — so the tool that teaches the pattern is the one app not following it, and nobody notices because everything is green.
 
   **Cadence: when a capability or plan phase LANDS**, not on a calendar. That is when drift is created, and the diff is still fresh enough to fix cheaply.
@@ -561,6 +589,19 @@ usability cost, a tier-dependent one is a parity failure.
         one app exercises each policy.
   - [x] every native host, `dlc`'s included, boots through `platform.Boot` rather than hand-ordering the
         sequence — including the parity runner and the golden-tree generator, which are hosts too.
+
+  **Third review run, 2026-07-28 — after the platform extraction (§16.4).** The biggest dogfood gap in the
+  repo is now closed: `dlc` has the layout it scaffolds. `hosts/` holds only its own tier slots
+  (`hosts/native/`, `hosts/web/`), the same shape `example-apps/notes/` has, and the inherited runtime it
+  used to be tangled with lives in a separate module.
+  - [x] **`frontend/` is gone.** dlc's web slot is `hosts/web/`, and the `dlc.toml` comment that used to
+        explain the exception now explains that there isn't one.
+  - [x] **dlc consumes the platform exactly as a scaffolded app does** — same module, same `replace`, same
+        codegen plugin. It is no longer the app with a shortcut.
+  - [ ] **still open: dlc's hardcoded version** (see the header note — the extraction did not touch it).
+  - [ ] **new gap, small: dlc's `dlc.toml` has no `[platform] path`** the way scaffolded apps do; dlc finds
+        the platform by being it. Harmless today, and worth a look when `dlc-platform` is published, since
+        that is the moment the two stop being the same tree.
 
   **Original gap list (2026-07-28), kept for the record:**
   - `hosts/native/commands.go` still hand-writes argv parsing while notes and the template use the generated surface — `dlc` is now the *only* app not eating this
