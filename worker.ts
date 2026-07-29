@@ -130,9 +130,6 @@ async function boot(): Promise<EngineModule> {
       filesystem: hasFilesystem
         ? { available: true, kind: FILESYSTEM_KIND_OPFS }
         : { available: false },
-      // No index on this tier yet. Stated rather than omitted; see the Manifest
-      // type. SLATED FOR REVERT — docs/INDEX-PLAN.md D8.
-      index: { available: false },
     }),
   );
   if (!res.success) {
@@ -227,7 +224,6 @@ const api = {
         filesystem: hasFilesystem
           ? { available: true, kind: FILESYSTEM_KIND_OPFS }
           : { available: false },
-        index: { available: false },
       }),
     );
     const events = duringCommand;
