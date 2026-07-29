@@ -100,7 +100,8 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 | **Console** — stdio natively; browser stdio → `console.*` | 🚧 native works; the web wiring is not done |
 | **Host-side arg parsing** (Decision 28) | ✅ every tier builds requests — argv in `hosts/native`, a form on the web. The engine has **one** entry, `execute(method, request)` |
 | **Events** (§6.3) — the engine's first custom capability *import*: `platform.Emit(topic, payload)` → host subscription → UI re-reads | ✅ same code both tiers; parity compares the emitted stream; the browser repaints for a write no UI handler made |
-| SQLite index · Display · Network · sync | 📋 |
+| **Environment manifest** (§6.4a) — the host states what it can DO; capability verbs register from it, so a command a host cannot serve is marked unavailable rather than failing as `unknown method_id` | ✅ `platform.Boot` sends it; parity compares the manifest **and** the registered command surface; a capability can go away mid-session and come back |
+| SQLite index · Display · Network · sync | 📋 the index is next — the manifest is what makes its `unavailable` expressible |
 
 ## Repository layout
 

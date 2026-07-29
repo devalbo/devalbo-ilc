@@ -54,6 +54,12 @@ interface EngineModule {
 
 let engine: EngineModule | null = null;
 
+// The manifest revision in force. The HOST owns this counter: the engine treats
+// an unchanged revision as a deliberate no-op (it re-runs capability
+// registration), so a host that reused a number would silently fail to update
+// the facts and never learn it had.
+let envRevision = 0;
+
 /** The main thread's listener, installed by `subscribe`. */
 type Listener = (topic: string, payload: Uint8Array) => void;
 let listener: Listener | null = null;
@@ -116,10 +122,11 @@ async function boot(): Promise<EngineModule> {
   //    on RegisterDiscovered registers its filesystem verbs FROM this, so a
   //    command sent first would find export-fs missing. Revision 1 — this is
   //    launch, so there is nothing to be newer than.
+  envRevision = 1;
   const res = mod.execute(
     METHOD_SET_ENVIRONMENT,
     encodeSetEnvironment({
-      revision: 1,
+      revision: envRevision,
       filesystem: hasFilesystem
         ? { available: true, kind: FILESYSTEM_KIND_OPFS }
         : { available: false },
@@ -181,6 +188,48 @@ const api = {
     if (flushListener) {
       void Promise.resolve(flushListener()).catch(() => {});
     }
+    for (const [topic, payload] of events) deliver(topic, payload);
+    return {
+      success: r.success === true,
+      output: Uint8Array.from(r.output ?? []),
+      error: r.error ?? undefined,
+    };
+  },
+
+  /**
+   * Re-state the facts, because something changed (§6.4a, plan D4).
+   *
+   * The host is the only party that can notice a capability appearing or
+   * disappearing, so the engine cannot poll for this and does not try — a query
+   * would be a second boundary, and on this tier a synchronous one that could
+   * not await an OPFS probe anyway.
+   *
+   * WHAT IS MISSING, stated rather than implied: nothing here triggers
+   * automatically yet. The browser gives no event for "your OPFS went away", so
+   * this exists to be CALLED — by a page, a test, or a future storage watcher.
+   * The re-send path being real and exercised is what makes it safe to rely on
+   * when a trigger does arrive.
+   *
+   * Revision is assigned here, never by the caller: an off-by-one from a caller
+   * would be a silent no-op, and the counter has exactly one owner.
+   */
+  async setEnvironment(hasFilesystem: boolean): Promise<CommandResult> {
+    const mod = await boot();
+    envRevision += 1;
+    duringCommand = [];
+    const r = mod.execute(
+      METHOD_SET_ENVIRONMENT,
+      encodeSetEnvironment({
+        revision: envRevision,
+        filesystem: hasFilesystem
+          ? { available: true, kind: FILESYSTEM_KIND_OPFS }
+          : { available: false },
+      }),
+    );
+    const events = duringCommand;
+    duringCommand = null;
+    // No flush: a manifest writes nothing. The events still go out, because
+    // `ilc.environment-changed` is exactly how a slot learns to re-read.
     for (const [topic, payload] of events) deliver(topic, payload);
     return {
       success: r.success === true,

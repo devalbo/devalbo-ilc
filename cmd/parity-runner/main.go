@@ -105,12 +105,19 @@ var fixtures = []struct {
 		},
 	}},
 	{name: "export-fs with no filesystem (verb is not registered)", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{}},
+	// THE SURFACE ITSELF, compared while a capability is missing. This is the
+	// vector the phase exists for: parity compares results, and registration is
+	// not a result, so two tiers could offer different commands with every
+	// other check green. Asking what is registered turns the surface into a
+	// result and drags it into the diff.
+	{name: "command surface with no filesystem", method: platform.MethodGetCommandSurface, request: &ilcv1.GetCommandSurfaceRequest{}},
 	{name: "set-environment (filesystem returns)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
 		Environment: &ilcv1.Environment{
 			Revision:   3,
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_PRESENT, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD},
 		},
 	}},
+	{name: "command surface (full)", method: platform.MethodGetCommandSurface, request: &ilcv1.GetCommandSurfaceRequest{}},
 	{name: "version", method: platform.MethodVersion, request: &ilcv1.VersionRequest{}},
 	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
 	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},

@@ -26,6 +26,7 @@ import { positionals } from "./clispec";
 import type { Values } from "./encode";
 import { encodeRequest } from "./encode";
 import { executeCommand, type Renderer } from "./terminal";
+import { liveSurface } from "./environment";
 import type { EnginePort } from "./port";
 
 export type InspectorOptions = {
@@ -47,6 +48,8 @@ export type Inspector = {
   requestHex(): string;
   /** The equivalent command line for what the form holds. */
   commandLine(): string;
+  /** Method ids this host actually registered, or null if it could not say. */
+  surface(): number[] | null;
   destroy(): void;
 };
 
@@ -85,9 +88,70 @@ export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspe
         s.className = "ilc-insp-summary";
         s.textContent = cmd.summary ?? "";
         li.append(b, " ", s);
+        li.dataset.command = cmd.name;
         return li;
       }),
   );
+
+  // Mark what THIS host cannot do (§6.4a). Asynchronous and after the fact: the
+  // list renders immediately from the generated schema, then the answer from
+  // the live registry annotates it. Waiting for the engine before showing
+  // anything would make an inspector that is blank until a command round-trips.
+  //
+  // Marked rather than removed, for the same reason as the CLI: a user who read
+  // the docs and finds a command silently missing has no way to learn that this
+  // host simply cannot do it.
+  // Resolved surface, exposed so a test can tell "everything is available"
+  // apart from "the answer never decoded". Both mark nothing, and without this
+  // an assertion that no command is struck through would pass just as happily
+  // against a broken decoder.
+  let surfaceIds: number[] | null = null;
+
+  void markUnavailable();
+
+  // RE-READ when the facts move (§6.4a). The engine announces
+  // `ilc.environment-changed` after the surface is already in line with the new
+  // manifest, so asking again here cannot race the registration it is reacting
+  // to.
+  //
+  // The event carries only a revision and this deliberately ignores it: acting
+  // on a payload would make the event a second source of truth, when the engine
+  // is the first one and is sitting right there. Ask it.
+  let unsubscribe: (() => void) | null = null;
+  void opts.port
+    .subscribe?.((topic) => {
+      if (topic === "ilc.environment-changed") void markUnavailable();
+    })
+    .then((off) => {
+      unsubscribe = off;
+    })
+    .catch(() => {});
+
+  async function markUnavailable(): Promise<void> {
+    const live = await liveSurface(opts.port);
+    if (live === null) return; // the engine cannot say — claim nothing
+    surfaceIds = [...live].sort((x, y) => x - y);
+    for (const cmd of opts.commands) {
+      const li = list.querySelector<HTMLElement>(`[data-command="${cmd.name}"]`);
+      if (!li) continue;
+      const stale = li.querySelector(".ilc-insp-unavailable");
+      if (live.has(cmd.method)) {
+        // A capability can come BACK — a browser that regains a storage grant,
+        // a host that re-mounts an index. Marking has to be reversible or the
+        // first absence is permanent.
+        delete li.dataset.unavailable;
+        stale?.remove();
+        continue;
+      }
+      li.dataset.unavailable = "true";
+      if (stale) continue;
+      const note = document.createElement("span");
+      note.className = "ilc-insp-unavailable";
+      note.dataset.testid = `unavailable-${cmd.name}`;
+      note.textContent = "unavailable on this host";
+      li.append(" ", note);
+    }
+  }
 
   function select(name: string) {
     const cmd = opts.commands.find((c) => c.name === name);
@@ -281,7 +345,9 @@ export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspe
         .join("");
     },
     commandLine,
+    surface: () => surfaceIds,
     destroy() {
+      unsubscribe?.();
       list.remove();
       detail.remove();
       output.remove();
@@ -297,6 +363,8 @@ export function inspectorStyles(): string {
 .ilc-insp-list li { padding: .15rem 0; }
 .ilc-insp-name { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-decoration: underline; padding: 0; }
 .ilc-insp-summary { opacity: .7; }
+.ilc-insp-unavailable { opacity: .7; font-style: italic; }
+li[data-unavailable] .ilc-insp-name { text-decoration: line-through; }
 .ilc-insp-meta { opacity: .7; }
 .ilc-insp-field { padding: .2rem 0; }
 .ilc-insp-field label { display: inline-block; min-width: 10em; }

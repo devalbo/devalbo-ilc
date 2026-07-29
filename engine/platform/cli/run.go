@@ -13,6 +13,7 @@ import (
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
 	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 )
 
 // Renderer prints one response. Nil means the command prints nothing.
@@ -77,13 +78,28 @@ func (a App) build() (*ffcli.Command, error) {
 	commands := append([]clispec.Command(nil), a.Commands...)
 	sort.Slice(commands, func(i, j int) bool { return commands[i].Name < commands[j].Name })
 
+	live := a.liveSurface()
+
 	subs := make([]*ffcli.Command, 0, len(commands))
 	for _, cmd := range commands {
 		sub, err := a.subcommand(cmd)
 		if err != nil {
 			return nil, err
 		}
+		if live != nil && !live[cmd.Method] {
+			sub = unavailable(cmd, sub)
+		}
 		subs = append(subs, sub)
+	}
+
+	// Help goes to the App's OWN stderr, not the process's. App takes its
+	// writers as arguments so a slot can be driven by a test (Decision 34) —
+	// but ffcli prints usage through the FlagSet, whose default output is
+	// os.Stderr, so until now `-h` escaped the seam entirely and no test could
+	// see what a user reads.
+	rootFlags := flag.NewFlagSet(a.Name, flag.ContinueOnError)
+	if a.Stderr != nil {
+		rootFlags.SetOutput(a.Stderr)
 	}
 
 	return &ffcli.Command{
@@ -91,7 +107,7 @@ func (a App) build() (*ffcli.Command, error) {
 		ShortHelp:   a.Short,
 		ShortUsage:  a.Name + " <command> [flags]",
 		Subcommands: subs,
-		FlagSet:     flag.NewFlagSet(a.Name, flag.ContinueOnError),
+		FlagSet:     rootFlags,
 		Exec: func(_ context.Context, args []string) error {
 			// ffcli routes anything it does not recognise to the ROOT Exec, so
 			// without this a typo'd subcommand printed the help and exited 0 —
@@ -104,6 +120,61 @@ func (a App) build() (*ffcli.Command, error) {
 	}, nil
 }
 
+// liveSurface asks the engine which commands are actually registered, or
+// returns nil when it cannot tell.
+//
+// NIL IS A THIRD STATE, not a default. "Available", "not available" and "this
+// engine cannot say" are genuinely different, and only the first two justify
+// changing what the user sees. A port that does not answer is either a test
+// fake with scripted replies or an engine older than GetCommandSurface;
+// neither should make the CLI refuse to run, and neither licenses claiming a
+// command is missing when nobody said so.
+func (a App) liveSurface() map[uint32]bool {
+	if a.Port == nil {
+		return nil
+	}
+	req, err := (&ilcv1.GetCommandSurfaceRequest{}).MarshalVT()
+	if err != nil {
+		return nil
+	}
+	res := a.Port.Execute(platform.MethodGetCommandSurface, req)
+	if !res.Success {
+		return nil
+	}
+	var resp ilcv1.GetCommandSurfaceResponse
+	if err := resp.UnmarshalVT(res.Output); err != nil {
+		return nil
+	}
+	live := make(map[uint32]bool, len(resp.MethodIds))
+	for _, id := range resp.MethodIds {
+		live[id] = true
+	}
+	// A TRUTHFUL SURFACE CONTAINS THE ID THAT ANSWERED IT. Anything else did not
+	// really answer: a scripted fake returns success for every method and decodes
+	// to an empty list, which would otherwise read as "this engine has no
+	// commands at all" and mark every one of them unavailable. Self-consistency
+	// is the cheapest way to tell a real answer from a plausible-looking one.
+	if !live[platform.MethodGetCommandSurface] {
+		return nil
+	}
+	return live
+}
+
+// unavailable keeps a command VISIBLE but refuses to run it.
+//
+// Hiding it would be worse: a user who read the docs would find the command
+// silently missing, with the generated surface and the live registry disagreeing
+// and nothing reconciling them. And letting it dispatch would surface an
+// internal "unknown method_id 100" — an error that reads like the user mistyped
+// something, when in fact this host simply cannot do it.
+func unavailable(cmd clispec.Command, sub *ffcli.Command) *ffcli.Command {
+	sub.ShortHelp = strings.TrimSpace(sub.ShortHelp + " (unavailable on this host)")
+	sub.Exec = func(context.Context, []string) error {
+		return fmt.Errorf("this host does not provide the capability %q needs", cmd.Name)
+	}
+	return sub
+}
+
 func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
 	renderer, ok := a.Render[cmd.Method]
 	if !ok {
@@ -111,6 +182,9 @@ func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
 	}
 
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
+	if a.Stderr != nil {
+		fs.SetOutput(a.Stderr)
+	}
 	values := map[string][]string{}
 
 	for _, f := range cmd.Flags {

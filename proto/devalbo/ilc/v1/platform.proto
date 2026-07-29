@@ -51,6 +51,20 @@ service PlatformService {
     // A host sends this; nobody types it. See cli_hidden.
     option (devalbo.options.v1.cli_hidden) = true;
   }
+  // What is registered RIGHT NOW — which is not what the schema says, once
+  // capability verbs register from the manifest (plan D7).
+  //
+  // Two callers, and they want the same answer for different reasons. A host
+  // marks a command unavailable instead of letting it fail as `unknown
+  // method_id`. And PARITY compares the surface itself: registration is
+  // invisible to a check that only compares results, so two tiers can offer
+  // different commands with every existing check green — twice demonstrated
+  // while building phase 2.
+  rpc GetCommandSurface(GetCommandSurfaceRequest) returns (GetCommandSurfaceResponse) {
+    option (devalbo.options.v1.method_id) = 4;
+    // Introspection plumbing: hosts call it, people do not type it.
+    option (devalbo.options.v1.cli_hidden) = true;
+  }
   // Held for commands that are designed but unbuilt. Declared, not commented —
   // the generator refuses any rpc that claims one, and the id lock records them.
   //   3 = SupportedAbis   (Decision 31) the guest advertising ITS boundaries —
@@ -128,6 +142,18 @@ message Environment {
   // still current.
   uint32 revision = 1;
   Filesystem filesystem = 2;
+}
+
+message GetCommandSurfaceRequest {}
+message GetCommandSurfaceResponse {
+  // Every registered method_id, ASCENDING. Sorted because map iteration order
+  // is unspecified in Go, and an unsorted answer would make the parity diff
+  // fail at random — a flake that would read as a real divergence.
+  //
+  // Ids rather than names: the id is the wire and the name is cosmetic
+  // (AGENTS.md §3b), and the caller already has the names — it holds the
+  // generated clispec and is asking which of those are live.
+  repeated uint32 method_ids = 1;
 }
 
 message SetEnvironmentRequest {
@@ -215,6 +241,28 @@ message ResetFsResponse {
 // truth that a subscriber could act on WITHOUT re-reading the files — and the
 // files are the truth (§7.1). Telling a UI only that something moved keeps the
 // filesystem authoritative and keeps this message from growing into a protocol.
+// EnvironmentChangedEvent announces that the facts moved (§6.4a).
+//
+// Emitted only when a manifest actually APPLIES — a re-send of the revision
+// already in force changes nothing, and announcing it would have every listener
+// re-read for no reason.
+//
+// Why an event and not a return value: the host that sent the manifest already
+// knows. This is for everyone ELSE — a command inspector showing which verbs
+// this host provides, a slot rendering a capability-dependent control. They did
+// not make the call and have no other way to learn the answer changed.
+//
+// Carries the revision and nothing else, for the same reason DataChangedEvent
+// is not a diff: a listener that acted on the payload would be treating the
+// event as the source of truth instead of re-reading. Ask the engine.
+message EnvironmentChangedEvent {
+  option (devalbo.options.v1.topic) = "ilc.environment-changed";
+
+  // The revision now in force. Enough for a listener to tell whether it has
+  // already caught up, and useless for anything else — deliberately.
+  uint32 revision = 1;
+}
+
 message DataChangedEvent {
   option (devalbo.options.v1.topic) = "ilc.data-changed";
 

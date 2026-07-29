@@ -12,9 +12,17 @@ tic-tac-toe as the worked example of the third render path — one engine, a DOM
 sharing only the schema. Three web routes (terminal, files, commands inspector) and the generated CLI
 surface landed alongside it.
 
-**Current focus: nothing is claimed.** The candidates, roughly ordered: `dlc`'s own dogfood drift (it lacks
-every capability built for apps — see the review item below), the **environment manifest** (Decision 32,
-now justified by the filesystem-availability gap rather than by Display), and the embedded tier.
+**The ENVIRONMENT MANIFEST is DONE** (Decision 32, [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md), all
+four phases). A host states what it can DO; capability verbs register from that, so a command this host
+cannot serve is marked unavailable instead of failing as `unknown method_id`, and a capability can go away
+mid-session and come back. `platform.Boot` owns the startup order. Parity now compares the registered
+command SURFACE as well as results — which it had to, because twice during the build parity was green
+while every filesystem verb on both tiers was broken.
+
+**Current focus: nothing is claimed.** The candidates, roughly ordered: the **SQLite index** (§6.2, now
+unblocked — the manifest makes `unavailable` expressible and it is the second consumer that will catch a
+wrong schema shape), the §16.4 `ilc-platform` extraction (which unblocks dlc's hardcoded version, the
+`frontend/` → `hosts/web/` move, and the `hosts/native` runtime/slot split), and the embedded tier.
 
 _Created 2026-07-25. Re-anchored 2026-07-27 — several boxes below were stale, ticked against what is
 actually in the tree._
@@ -482,14 +490,17 @@ is the portable option. Being occasionally coarse beats being tier-dependent: a 
 usability cost, a tier-dependent one is a parity failure.
 
 ### Capabilities
-- [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan
+- [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan. **Unblocked (2026-07-28):** the manifest makes `unavailable` expressible — add an `Index` field, register the index block from it, and the fallback becomes a branch on `platform.HasIndex()` rather than a linking problem. Two things the manifest work says to carry over: the fallback must return IDENTICAL results to the fast path (a fallback that answers differently is a second implementation), and adding a capability means adding it to the **surface** parity vectors, because parity cannot see registration
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
 - [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/ilc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes
   - [ ] follow-up: no desktop tier to wire `runtime.EventsEmit` into yet (§6.3)
-- [ ] **An app cannot ask whether it HAS a filesystem, and absence is not survivable.** §6.5 promises graceful degradation when a capability is missing, and for the filesystem there is no degradation path at all: `engine/platform` exposes no availability API — no `Available()`, no `unavailable` — so an app calls `WriteTree` and either it works or it returns an error it had no way to anticipate. `dlc.toml`'s `capabilities = ["console", "filesystem"]` does not help; it has one writer and zero readers. Today apps *assume*. The **query/verify** half is exactly what the manifest below is for, and it is the first concrete demand on it that is not about Display — which matters, since Decision 34 removed the Display argument for building it.
-- [ ] **Environment manifest** (§6.4a, Decision 32) — *planned: [`docs/ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md).* `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change; how `unavailable` stops being a linking problem and becomes a data one. **Re-justified by Decision 34:** its original headline reason was so a handler could branch on display facts, and a host-rendered app never learns there is a screen. What remains load-bearing is the non-display half — is there an index, what kind of FS root — which is also where the strict/lenient knob was already headed (`EVENTS-PLAN.md` §3, Phase 5)
+- [x] **An app cannot ask whether it HAS a filesystem, and absence is not survivable.** *CLOSED 2026-07-28 by the manifest.* `platform.HasFilesystem()` answers it, `Availability` distinguishes "nobody said" from "there is none", and an app on `RegisterDiscovered` never registers verbs it cannot serve. §6.5's promise is now partly kept and partly reframed: the platform REPORTS and the app DECIDES (plan D10), so there is no inherited degradation mechanism — only an inherited way to ask. Original note: §6.5 promises graceful degradation when a capability is missing, and for the filesystem there is no degradation path at all: `engine/platform` exposes no availability API — no `Available()`, no `unavailable` — so an app calls `WriteTree` and either it works or it returns an error it had no way to anticipate. `dlc.toml`'s `capabilities = ["console", "filesystem"]` does not help; it has one writer and zero readers. Today apps *assume*. The **query/verify** half is exactly what the manifest below is for, and it is the first concrete demand on it that is not about Display — which matters, since Decision 34 removed the Display argument for building it.
+- [x] **Environment manifest** (§6.4a, Decision 32) — *COMPLETE 2026-07-28; [`docs/ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md).* `SetEnvironment` platform command (core block, id 2 reserved): the host pushes capability facts at launch and re-sends on change; how `unavailable` stops being a linking problem and becomes a data one. **Re-justified by Decision 34:** its original headline reason was so a handler could branch on display facts, and a host-rendered app never learns there is a screen. What remains load-bearing is the non-display half — is there an index, what kind of FS root — which is also where the strict/lenient knob was already headed (`EVENTS-PLAN.md` §3, Phase 5)
   - [x] **decided (2026-07-28): standalone, with a real consumer.** The objection was that nothing today can be absent, making the "capability missing" branch decoration — but **OPFS can fail today** (storage denied, private browsing, older Safari) and the web host has no answer for it, so absence is a shipping gap on a tier we already ship. Also settled: `Root()` keeps panicking (D8), inherited FS verbs are registered by app choice through a **two-phase registry** (D7 — core verbs at init, capability verbs when the manifest lands), unregistered commands stay **visible and marked unsupported** rather than filtered (D9), and the platform reports while the app decides degradation (D10). Also settled: a **required non-zero revision** (D11 — its reader is D7, letting an unchanged manifest skip re-registration), `platform.Boot` owns the startup sequence so the template calls one function instead of copying five ordered steps (§2.5a), and `ilc.environment-stale` is adopted **provisionally** as the pull-shaped escape hatch over existing boundaries (D4)
+  - [ ] **follow-up: the OPFS probe has no end-to-end test.** The absent BRANCH is watched running in a browser (a capability drops, verbs unregister, the inspector re-marks, it comes back), but the probe that would detect a real denial is not: it runs in the WORKER, and a Playwright stub of `navigator.storage.getDirectory` cannot reach a worker's global scope. Options are moving the probe to the main thread (stubbable, but the probing thread is then not the one using the filesystem) or a worker-visible `?ilc-no-fs=1` switch (a production test seam, declined). Left open deliberately — the residual risk is one `try/catch` around one API call
+  - [ ] **follow-up: `ilc.environment-stale` designed, not built.** The pull-shaped escape hatch (engine asks, host re-sends). Nothing needs it yet, and an event with no emitter is the "field nobody sets" trap; build it when something asks
+  - [ ] **follow-up: nothing triggers a re-send automatically.** The browser has no event for a filesystem appearing or disappearing, so `window.host.setEnvironment` is the only trigger today. The path is kept exercised so it can be trusted when a real trigger exists
 - [ ] **Display** capability (§6.4) — **now OPTIONAL, and the app author's call** (Decision 34). Three paths, chosen per app or per event: draw-command list · retained widget tree · **semantic events the host renders**. The first two put presentation in the app and are what this capability builds; the third costs one small tier slot and no capability at all, so it goes first. Build draw-list/widget-tree when an app genuinely wants to write presentation **once** and have it work everywhere — not before
 - [ ] **Network** (deferred): `wasi:http` when needed
 
@@ -532,6 +543,18 @@ usability cost, a tier-dependent one is a parity failure.
   - [ ] **`hosts/native/` is still both the slot and the un-extracted runtime**, and `frontend/` is still
         dlc's web slot rather than `hosts/web/` — the two halves of the §16.4 extraction debt, now written
         into `dlc.toml` where they are visible rather than implied.
+
+  **Second review run, 2026-07-28 — after the environment manifest (all four phases).** The two open items
+  above are unchanged. What this capability created and the review caught:
+  - [x] **drift in the OTHER direction**: `window.host` landed on `dlc`'s commands page only, so for a few
+        minutes `dlc` had a handle the template did not teach. Fixed — notes, tictactoe and the template
+        all expose it. Worth noting that the checklist is usually read as "is `dlc` behind?", and this was
+        `dlc` ahead; both are drift.
+  - [x] `dlc` uses the capability it built: it is the app on `RegisterDiscovered`, and its own web tier is
+        the one that can genuinely lose a filesystem. notes and tictactoe stay eager **deliberately**, so
+        one app exercises each policy.
+  - [x] every native host, `dlc`'s included, boots through `platform.Boot` rather than hand-ordering the
+        sequence — including the parity runner and the golden-tree generator, which are hosts too.
 
   **Original gap list (2026-07-28), kept for the record:**
   - `hosts/native/commands.go` still hand-writes argv parsing while notes and the template use the generated surface — `dlc` is now the *only* app not eating this

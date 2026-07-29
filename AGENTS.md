@@ -14,7 +14,7 @@ state lives in [`README.md`](README.md). This file is only the rules.
 
 ```proto
 service PlatformService {
-  option (devalbo.options.v1.reserved_method_id) = 2;   // held for SetEnvironment
+  option (devalbo.options.v1.reserved_method_id) = 3;   // held for SupportedAbis
 }
 ```
 
@@ -128,6 +128,36 @@ private store takes the convention.
 
 On wasm `SetRoot` is a no-op: the grant already happened when the host installed the preopen, and the guest
 cannot rebind it. Both tiers call it anyway, so the startup sequence reads the same everywhere.
+
+## 3·6 The environment manifest is PUSHED, and the order is load-bearing
+
+**A host states what it can do before it does anything else** — `platform.Boot` natively, the worker's boot
+sequence on the web. The manifest is a command (`SetEnvironment`, id 2), not a query: an import would be a
+second boundary, and on the web a synchronous one that could not await an OPFS probe anyway.
+
+**Ordering is CORRECTNESS, not convention.** An app on `RegisterDiscovered` registers its capability verbs
+FROM the manifest, so a command sent first meets a half-registered engine and answers `unknown method_id`.
+Every in-process caller is a host — a test, a golden-tree generator and the parity runner each learned this
+by breaking. Call `platform.Boot` rather than re-deriving the sequence
+([`docs/ENVIRONMENT-PLAN.md`](docs/ENVIRONMENT-PLAN.md) §2.5).
+
+**Re-send whenever a fact changes, with a NEW revision.** The engine treats a repeated revision as a
+deliberate no-op, because applying re-runs registration and would rebuild the command surface underneath a
+host that only repeated itself. So a host that reuses a number silently fails to update the facts and never
+learns it. The host owns that counter; nothing else may assign it.
+
+**Absence is reported, never inferred.** `Availability` distinguishes "nobody said" from "there is none",
+and both read as unavailable — the conservative direction. An app branches on what it must DO, never on
+who is listening (§3, Decision 33): a filesystem either accepts a write or does not, whereas emitting
+carries nothing back.
+
+**A capability can come BACK.** Marking, unregistering and rendering all have to be reversible, or a
+browser that regains a storage grant is stuck with a surface that no longer matches it.
+
+**Parity cannot see registration.** It compares results, so two tiers offering different commands both pass
+— demonstrated twice, once with every filesystem verb missing on both sides and the run still green. That
+is why `GetCommandSurface` exists and why the surface is a parity vector. When you add a capability, add it
+to the surface vectors too.
 
 ## 3a. The host layer
 

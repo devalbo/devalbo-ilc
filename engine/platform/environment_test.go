@@ -226,3 +226,78 @@ func TestRegisterAllIsUnaffectedByTheManifest(t *testing.T) {
 		t.Fatal("RegisterAll's surface shrank when a manifest reported no filesystem")
 	}
 }
+
+// --- volatile facts (ENVIRONMENT-PLAN phase 4) ------------------------------
+
+// recordEvents installs a sink and returns the topics it saw.
+func recordEvents(t *testing.T) *[]string {
+	t.Helper()
+	var seen []string
+	SetEventSink(func(topic string, _ []byte) { seen = append(seen, topic) })
+	t.Cleanup(func() { SetEventSink(nil) })
+	return &seen
+}
+
+// The host that sent the manifest already knows it changed. This is for
+// everyone else — an inspector, a capability-dependent control — who did not
+// make the call and has no other way to find out.
+func TestAppliedManifestAnnouncesItself(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+	seen := recordEvents(t)
+
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
+	if len(*seen) != 1 || (*seen)[0] != "ilc.environment-changed" {
+		t.Fatalf("topics = %v, want one ilc.environment-changed", *seen)
+	}
+}
+
+// A re-send of the revision already in force changes nothing, so announcing it
+// would have every listener re-read for no reason — and on a host that re-sends
+// defensively, do so constantly.
+func TestUnchangedManifestIsSilent(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
+	seen := recordEvents(t)
+
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_ABSENT))
+	if len(*seen) != 0 {
+		t.Fatalf("an unchanged manifest emitted %v", *seen)
+	}
+}
+
+// A rejected manifest must not announce a change it did not make.
+func TestRejectedManifestIsSilent(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+	seen := recordEvents(t)
+
+	send(t, manifest(0, ilcv1.Availability_AVAILABILITY_PRESENT))
+	if len(*seen) != 0 {
+		t.Fatalf("a rejected manifest emitted %v", *seen)
+	}
+}
+
+// The event arrives AFTER the surface is in line with the facts. A listener
+// that hears it and immediately asks what is registered must get the NEW
+// answer; emitting first would race every listener against the registration
+// being announced.
+func TestSurfaceIsSettledBeforeTheAnnouncement(t *testing.T) {
+	cleanEnv(t)
+	RegisterDiscovered()
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
+
+	var registeredWhenHeard bool
+	SetEventSink(func(topic string, _ []byte) {
+		if topic == "ilc.environment-changed" {
+			_, registeredWhenHeard = registry[MethodExportFs]
+		}
+	})
+	t.Cleanup(func() { SetEventSink(nil) })
+
+	send(t, manifest(2, ilcv1.Availability_AVAILABILITY_ABSENT))
+	if registeredWhenHeard {
+		t.Fatal("export-fs was still registered when the change was announced")
+	}
+}

@@ -95,3 +95,76 @@ export async function probeOPFS(): Promise<boolean> {
     return false;
   }
 }
+
+/** `GetCommandSurface` — core-lifecycle block, id 4. */
+export const METHOD_GET_COMMAND_SURFACE = 4;
+
+/**
+ * Which commands are registered on THIS host right now.
+ *
+ * Resolves to null when the engine cannot say, which is a third state and not a
+ * default: "available", "not available" and "no answer" are genuinely
+ * different, and only the first two justify changing what a user sees.
+ *
+ * A truthful surface contains the id that answered it. Anything else did not
+ * really answer — a scripted fake succeeds at every method and decodes to an
+ * empty list, which would otherwise read as "this engine has no commands" and
+ * mark every one of them unavailable.
+ */
+export async function liveSurface(
+  port: { execute(method: number, request: Uint8Array): Promise<{ success: boolean; output: Uint8Array }> },
+): Promise<Set<number> | null> {
+  let res;
+  try {
+    res = await port.execute(METHOD_GET_COMMAND_SURFACE, new Uint8Array());
+  } catch {
+    return null;
+  }
+  if (!res.success) return null;
+
+  const ids = new Set<number>();
+  const buf = res.output;
+  let i = 0;
+  while (i < buf.length) {
+    const [tag, tagLen] = readVarint(buf, i);
+    if (tagLen < 0) return null;
+    i += tagLen;
+    const field = tag >>> 3;
+    const wire = tag & 7;
+    if (field === 1 && wire === 2) {
+      // Packed repeated uint32 — the default encoding for a repeated scalar.
+      const [len, lenLen] = readVarint(buf, i);
+      if (lenLen < 0) return null;
+      i += lenLen;
+      const end = i + len;
+      while (i < end) {
+        const [v, n] = readVarint(buf, i);
+        if (n < 0) return null;
+        ids.add(v);
+        i += n;
+      }
+    } else if (field === 1 && wire === 0) {
+      // Unpacked, which a conforming encoder may also emit.
+      const [v, n] = readVarint(buf, i);
+      if (n < 0) return null;
+      ids.add(v);
+      i += n;
+    } else {
+      return null; // an unexpected shape is not an answer we should act on
+    }
+  }
+  return ids.has(METHOD_GET_COMMAND_SURFACE) ? ids : null;
+}
+
+function readVarint(buf: Uint8Array, at: number): [number, number] {
+  let result = 0;
+  let shift = 0;
+  for (let i = at; i < buf.length; i++) {
+    const b = buf[i];
+    result |= (b & 0x7f) << shift;
+    if ((b & 0x80) === 0) return [result >>> 0, i - at + 1];
+    shift += 7;
+    if (shift > 28) return [0, -1];
+  }
+  return [0, -1];
+}

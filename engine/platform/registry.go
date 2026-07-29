@@ -55,8 +55,9 @@ type Handler func(request []byte) Result
 // They are not written down twice.
 const (
 	// core lifecycle (1–99)
-	MethodVersion        = ilcv1.MethodVersion
-	MethodSetEnvironment = ilcv1.MethodSetEnvironment
+	MethodVersion           = ilcv1.MethodVersion
+	MethodSetEnvironment    = ilcv1.MethodSetEnvironment
+	MethodGetCommandSurface = ilcv1.MethodGetCommandSurface
 
 	// filesystem (100–199)
 	MethodExportFs = ilcv1.MethodExportFs

@@ -70,3 +70,64 @@ test("window.app drives the React slot from the console", async ({ page }) => {
   await expect(page.getByTestId("files")).toContainText("fromconsole", { timeout: 30_000 });
 });
 
+
+// The inspector reads the LIVE registry, not just the generated schema.
+//
+// Asserting "nothing is struck through" would be a false pass waiting to
+// happen: a decoder that failed also marks nothing, and this decoder is
+// hand-written varint parsing against whatever the real wasm engine emits
+// (packed vs unpacked repeated fields being exactly the kind of thing that
+// differs). So the assertion is on the DECODED SURFACE — proof the answer came
+// back and was understood.
+test("the inspector reads the live command surface from the engine", async ({ page }) => {
+  await page.goto("/commands.html");
+  const surface = await page.waitForFunction(
+    () => (window as any).inspector?.surface() ?? null,
+    undefined,
+    { timeout: 15000 },
+  );
+  const ids = (await surface.jsonValue()) as number[];
+
+  // Ascending, because the engine sorts: Go map iteration is unordered, and an
+  // unsorted answer would make the parity diff flake.
+  expect([...ids].sort((a, b) => a - b)).toEqual(ids);
+  // 4 = GetCommandSurface itself, 100 = export-fs. dlc registers its filesystem
+  // block from the manifest, so 100 being here is the discovery path having run.
+  expect(ids).toContain(4);
+  expect(ids).toContain(100);
+});
+
+// A capability going away MID-SESSION, and coming back.
+//
+// This is the volatile half of the manifest (§6.4a, plan D4). Nothing in the
+// browser triggers it automatically — there is no "your OPFS went away" event —
+// so the re-send path is driven here directly. That is the point: the path is
+// kept real and exercised so it can be trusted the day a trigger exists.
+//
+// It is also where the absent branch is watched running in a real browser: the
+// engine unregisters its filesystem verbs, announces the change, and the
+// inspector re-reads and strikes the command through — none of which any Go
+// test can show.
+test("a capability that goes away updates the inspector, and comes back", async ({ page }) => {
+  await page.goto("/commands.html");
+  await page.waitForFunction(() => (window as any).inspector?.surface() ?? null, undefined, {
+    timeout: 15000,
+  });
+  await expect(page.getByTestId("unavailable-export-fs")).toHaveCount(0);
+
+  const drop = await page.evaluate(async () => (await (window as any).host.setEnvironment(false)).success);
+  expect(drop).toBe(true);
+
+  // No reload, and no explicit refresh call: the inspector heard
+  // `ilc.environment-changed` and asked the engine again.
+  await expect(page.getByTestId("unavailable-export-fs")).toHaveCount(1);
+  expect(await page.evaluate(() => (window as any).inspector.surface())).not.toContain(100);
+
+  const restore = await page.evaluate(async () => (await (window as any).host.setEnvironment(true)).success);
+  expect(restore).toBe(true);
+
+  // Reversible: a first absence must not be permanent, or a host that regains
+  // a storage grant is stuck with a surface that no longer matches it.
+  await expect(page.getByTestId("unavailable-export-fs")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).inspector.surface())).toContain(100);
+});

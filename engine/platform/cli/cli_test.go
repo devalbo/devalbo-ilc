@@ -523,3 +523,97 @@ func TestHiddenCommandsAreNotInTheSurface(t *testing.T) {
 		}
 	}
 }
+
+// --- the surface reflects the environment (ENVIRONMENT-PLAN phase 3) --------
+
+// revision advances so each helper call states genuinely new facts.
+var revision uint32
+
+// runAgainstLiveEngine drives the CLI against the REAL registry rather than a
+// scripted fake, because what is under test here is registration itself — and a
+// fake by construction has none.
+func runAgainstLiveEngine(t *testing.T, fsAvailability ilcv1.Availability, args ...string) (string, string, int) {
+	t.Helper()
+	// Registration is process-global and idempotent, so no reset is needed —
+	// registerBlock skips what is already there and syncCapabilityVerbs removes
+	// what should not be.
+	platform.RegisterDiscovered()
+	if err := platform.SetRoot(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	// A DISTINCT revision per call, and this is not bookkeeping: an unchanged
+	// revision is a deliberate no-op (plan D11), so reusing 1 would leave the
+	// third test asserting against the first test's facts and passing or failing
+	// for reasons unconnected to what it claims to test.
+	revision++
+	body, err := (&ilcv1.SetEnvironmentRequest{Environment: &ilcv1.Environment{
+		Revision:   revision,
+		Filesystem: &ilcv1.Filesystem{Availability: fsAvailability, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR},
+	}}).MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := platform.Execute(platform.MethodSetEnvironment, body); !res.Success {
+		t.Fatalf("set-environment: %s", res.Err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := App{
+		Name:     "t",
+		Commands: ilcv1.PlatformServiceCLI,
+		Port:     platform.Live,
+		Render: map[uint32]Renderer{
+			platform.MethodVersion:  func(io.Writer, []byte) error { return nil },
+			platform.MethodExportFs: func(io.Writer, []byte) error { return nil },
+			platform.MethodImportFs: func(io.Writer, []byte) error { return nil },
+			platform.MethodResetFs:  func(io.Writer, []byte) error { return nil },
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Stdin:  strings.NewReader(""),
+	}.Run(args)
+	return stdout.String(), stderr.String(), code
+}
+
+// A command this host cannot provide fails by SAYING SO, not with the internal
+// dispatch error. "unknown method_id 100" reads like the user mistyped
+// something; the truth is that the host has no filesystem.
+func TestUnavailableCommandExplainsItself(t *testing.T) {
+	_, stderr, code := runAgainstLiveEngine(t, ilcv1.Availability_AVAILABILITY_ABSENT, "export-fs")
+	if code == 0 {
+		t.Fatal("export-fs succeeded on a host with no filesystem")
+	}
+	if strings.Contains(stderr, "unknown method_id") {
+		t.Fatalf("leaked the internal dispatch error: %q", stderr)
+	}
+	if !strings.Contains(stderr, "does not provide") {
+		t.Fatalf("error does not explain the cause: %q", stderr)
+	}
+}
+
+// And it stays VISIBLE. Filtering it out would leave a user who read the docs
+// hunting for a command that silently vanished, with the generated surface and
+// the live registry disagreeing and nothing reconciling them.
+func TestUnavailableCommandIsStillListed(t *testing.T) {
+	stdout, stderr, _ := runAgainstLiveEngine(t, ilcv1.Availability_AVAILABILITY_ABSENT, "-h")
+	help := stdout + stderr
+	if !strings.Contains(help, "export-fs") {
+		t.Fatalf("export-fs vanished from the help instead of being marked: %q", help)
+	}
+	if !strings.Contains(help, "unavailable on this host") {
+		t.Fatalf("export-fs is listed but not marked: %q", help)
+	}
+}
+
+// The mark must track the manifest, not the schema: with a filesystem, the same
+// command is ordinary again and carries no annotation.
+func TestAvailableCommandIsNotMarked(t *testing.T) {
+	stdout, stderr, _ := runAgainstLiveEngine(t, ilcv1.Availability_AVAILABILITY_PRESENT, "-h")
+	help := stdout + stderr
+	if !strings.Contains(help, "export-fs") {
+		t.Fatalf("export-fs missing from the help entirely: %q", help)
+	}
+	if strings.Contains(help, "unavailable on this host") {
+		t.Fatalf("export-fs marked unavailable on a host that has a filesystem: %q", help)
+	}
+}

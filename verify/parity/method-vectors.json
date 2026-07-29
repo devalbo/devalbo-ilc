@@ -25,9 +25,19 @@
     "request": ""
   },
   {
+    "name": "command surface with no filesystem",
+    "method": 4,
+    "request": ""
+  },
+  {
     "name": "set-environment (filesystem returns)",
     "method": 2,
     "request": "0a080803120408021001"
+  },
+  {
+    "name": "command surface (full)",
+    "method": 4,
+    "request": ""
   },
   {
     "name": "version",

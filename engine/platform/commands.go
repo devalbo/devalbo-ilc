@@ -33,6 +33,7 @@ func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
 	return ilcv1.PlatformServiceHandlers(
 		handleVersion,
 		handleSetEnvironment,
+		handleGetCommandSurface,
 		handleExportFs,
 		handleImportFs,
 		handleResetFs,
@@ -97,6 +98,22 @@ func syncCapabilityVerbs() {
 	unregisterBlock(blockFilesystemLo, blockFilesystemHi)
 }
 
+// handleGetCommandSurface reports what is registered right now.
+//
+// The LIVE registry, not the generated schema. Those agree under RegisterAll
+// and diverge under RegisterDiscovered, and the divergence is the whole point:
+// a host asking this can mark a command unavailable rather than let it fail as
+// `unknown method_id`, and parity can compare the surfaces instead of assuming
+// they match.
+func handleGetCommandSurface(*ilcv1.GetCommandSurfaceRequest) (*ilcv1.GetCommandSurfaceResponse, error) {
+	ids := make([]uint32, 0, len(registry))
+	for method := range registry {
+		ids = append(ids, method)
+	}
+	sortUint32(ids)
+	return &ilcv1.GetCommandSurfaceResponse{MethodIds: ids}, nil
+}
+
 func handleVersion(*ilcv1.VersionRequest) (*ilcv1.VersionResponse, error) {
 	return &ilcv1.VersionResponse{Version: version}, nil
 }
@@ -115,6 +132,12 @@ func handleSetEnvironment(req *ilcv1.SetEnvironmentRequest) (*ilcv1.SetEnvironme
 	}
 	if applied {
 		syncCapabilityVerbs()
+		// AFTER the surface is in line with the facts, never before. A listener
+		// that hears this and immediately asks what is registered must get the
+		// new answer; emitting first would race every one of them against the
+		// registration it is announcing — the same ordering rule as
+		// emitDataChanged and the same reason.
+		EmitEvent(&ilcv1.EnvironmentChangedEvent{Revision: req.GetEnvironment().GetRevision()})
 	}
 	return &ilcv1.SetEnvironmentResponse{Applied: applied}, nil
 }

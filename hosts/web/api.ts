@@ -46,6 +46,17 @@ export async function execute(
 }
 
 /**
+ * Tell the engine the facts changed (§6.4a).
+ *
+ * Nothing calls this automatically: the browser has no "your OPFS went away"
+ * event. It is the re-send path, kept real and exercised so that it can be
+ * trusted the day a trigger exists.
+ */
+export async function setEnvironment(hasFilesystem: boolean): Promise<CommandResult> {
+  return connect().setEnvironment(hasFilesystem);
+}
+
+/**
  * Listen for engine events (§6.3). Returns an unsubscribe.
  *
  * This is how a UI stops polling or hand-refreshing: the engine announces that

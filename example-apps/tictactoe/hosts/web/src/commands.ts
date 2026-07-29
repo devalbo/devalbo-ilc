@@ -1,5 +1,6 @@
 // tictactoe's command inspector route.
 import { enginePort } from "@devalbo/ilc-web/port";
+import { setEnvironment, type CommandResult } from "@devalbo/ilc-web/api";
 import { inspectorStyles, mountInspector } from "@devalbo/ilc-web/inspector";
 
 import { GameServiceCLI } from "@gen/tictactoe/v1/commands.cli.pb";
@@ -20,9 +21,21 @@ const inspector = mountInspector(document.getElementById("commands")!, {
 
 inspector.select(GameServiceCLI[0].name);
 
+// `window.host` — the HOST's handle, next to window.app's engine one (§6.4a).
+//
+// window.app runs commands, which is the app's domain; this states what the
+// host can do, which is the host's. It is also the only way to drive the
+// volatile half of the environment manifest today: the browser gives no event
+// for a filesystem appearing or disappearing, so re-sending is manual.
+//
+//   await window.host.setEnvironment(false)   // pretend OPFS went away
+//
+// Watch the inspector strike through the commands that need one.
 declare global {
   interface Window {
     inspector: typeof inspector;
+    host: { setEnvironment(hasFilesystem: boolean): Promise<CommandResult> };
   }
 }
 window.inspector = inspector;
+window.host = { setEnvironment };

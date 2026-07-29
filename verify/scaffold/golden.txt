@@ -18,7 +18,7 @@ hosts/web/files.html                                  802  9f020f72437f6ea7
 hosts/web/index.html                                 1150  09e1f94ed0aef63d
 hosts/web/package.json                                643  65806f4e6a4ba710
 hosts/web/playwright.config.ts                       1214  04cf3af9c6af133f
-hosts/web/src/commands.ts                             897  8ee7afca369ada5e
+hosts/web/src/commands.ts                            1616  6d31bc052fa753ba
 hosts/web/src/files.ts                               1064  23a6bd57840dbea2
 hosts/web/src/main.ts                                1119  8300d4a0ec584f98
 hosts/web/src/renderers.ts                           2321  6cb08029c05c1001

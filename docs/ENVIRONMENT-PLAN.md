@@ -1,6 +1,7 @@
 # The environment manifest — implementation plan (§6.4a, Decision 32)
 
-**Status: planned, pre-Phase-1 questions settled (2026-07-28).** Written in the shape of
+**Status: COMPLETE (2026-07-28)** — all four phases landed, `./scripts/ci.sh full` green. One item of the
+definition of done is deliberately unmet; see §6. Written in the shape of
 [`EVENTS-PLAN.md`](./EVENTS-PLAN.md) and [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md): design decisions
 first, phases that each leave the tree green, and nothing claimed until it has been broken on purpose.
 
@@ -365,27 +366,86 @@ So the *engine* half of absence is proven (Go tests + parity vectors, on the rea
   production test seam, at the cost that the thread doing the probing is not the one using the filesystem;
 - **a worker-visible switch** (`?ilc-no-fs=1`) — the production test seam previously declined.
 
-### Phase 3 — the surface reflects the environment
+### Phase 3 — the surface reflects the environment — **LANDED (2026-07-28)**
+
+Reordered so the parity comparison came FIRST, on the evidence from phase 2: twice, parity stayed green
+while both tiers were broken. Registration divergence is invisible to everything else we run, so the check
+went in before the things it protects.
 
 | File | Change |
 | --- | --- |
-| `engine/platform/clispec` | `Unsupported` driven by the live registry, computed at query time (D9) |
-| `frontend/src/commands.ts`, `hosts/web/inspector.ts` | render unsupported commands as present-but-unavailable |
-| parity | compare the registered command SURFACE, not only results (D7) |
+| `proto/.../platform.proto` | `GetCommandSurface` (id 4, `cli_hidden`) — the live registry as data |
+| `engine/platform/commands.go`, `sort.go` | `handleGetCommandSurface`, ascending ids |
+| `engine/platform/cli/run.go` | `liveSurface()`, `unavailable()`; help routed through `App.Stderr` |
+| `hosts/web/environment.ts` | `liveSurface()` — hand-written varint decode of the packed reply |
+| `hosts/web/inspector.ts` | strike through and annotate what this host cannot do; `surface()` |
+| `cmd/parity-runner` | surface vectors, full and filesystem-less (27 -> 29) |
+| `engine/platform/cli/cli_test.go`, `frontend/test/routes.spec.ts` | 4 tests |
 
-*Falsification:* boot with OPFS denied and confirm `export-fs` appears marked unsupported rather than
-vanishing or failing with "unknown method"; then register different verb sets on two tiers and confirm the
-new surface comparison goes red.
+**One introspection verb serves both callers.** A host marking a command unavailable and parity comparing
+surfaces want the same answer; ids rather than names, because the id is the wire and the caller already
+holds the generated names.
 
-### Phase 4 — volatile facts and the re-send contract
+**"The engine cannot say" is a third state, not a default.** `liveSurface` returns nil/null when the port
+does not answer, and nothing is marked — available, unavailable and unknown are genuinely different, and
+only the first two justify changing what a user sees.
+
+**A truthful surface contains the id that answered it.** Found the hard way: the CLI's scripted test fake
+succeeds at every method and decodes to an empty list, which read as "this engine has no commands" and
+marked all of them unavailable — 15 tests red. Self-consistency separates a real answer from a
+plausible-looking one, and the same guard is in both Go and TypeScript.
+
+**Also fixed, because the tests could not see it:** `-h` output went to the process stderr rather than
+`App.Stderr`, so nothing could assert on what a user actually reads — in a type whose whole design is that
+its writers are arguments.
+
+*Falsified, each watched going red:* a tinygo-only registration quirk -> the surface vector diffs
+(native `1,2,4,10000,10001` vs wasm `+100,101,102`) while every other check stayed green; filter instead of
+mark -> the still-listed test fails; drop the self-consistency check -> 15 tests fail; let an unavailable
+command dispatch -> `unknown method_id 100` leaks; handle only unpacked repeated fields in the web decoder
+-> the browser test times out.
+
+**Note on what the parity vectors prove.** The absent-branch vectors pin that the two tiers AGREE; they
+cannot pin that the behaviour is right — breaking `unregisterBlock` leaves parity green because both tiers
+break identically. Correctness is pinned by the Go tests. Worth remembering whenever a parity vector looks
+like sufficient cover.
+
+### Phase 4 — volatile facts and the re-send contract — **LANDED (2026-07-28)**
 
 | File | Change |
 | --- | --- |
-| `hosts/web/*` | re-send on change; `ilc.environment-changed` so a slot re-reads |
-| `AGENTS.md` | the re-send contract, the mandatory ordering (D4/D7), and the D3 line |
+| `proto/.../platform.proto` | `EnvironmentChangedEvent` (`ilc.environment-changed`), carrying only a revision |
+| `engine/platform/commands.go` | emit AFTER the surface settles, and only when the manifest applied |
+| `hosts/web/worker.ts`, `api.ts` | `setEnvironment(hasFilesystem)`; the host owns the revision counter |
+| `hosts/web/inspector.ts` | re-read on the event; marking is REVERSIBLE |
+| `frontend/src/commands.ts` | `window.host` — the host handle, next to `window.app`'s engine one |
+| `AGENTS.md` §3·6 | the contract |
+| tests | 4 Go, 1 browser (the full loop, no reload) |
 
-*Falsification:* change a fact without re-sending and confirm the engine is demonstrably stale — the failure
-Decision 32 predicts, reproduced once so its shape is known.
+**The absent branch is now watched running in a real browser**, which no Go test could show: a capability
+drops, the engine unregisters its verbs, announces, the inspector re-reads and strikes the command
+through — and then it comes back. That is most of what DoD 4 wanted, by a different route than planned.
+
+**`window.host` earns its place by being the only trigger that exists.** The browser gives no event for a
+filesystem appearing or disappearing, so nothing re-sends automatically. Rather than pretend otherwise, the
+re-send path is driven explicitly and kept exercised, so it can be trusted the day a real trigger arrives.
+
+**A capability can come BACK**, and that is not symmetry for its own sake: a browser can regain a storage
+grant, and one-way marking would leave the surface permanently wrong after the first absence.
+
+**`ilc.environment-stale` was NOT built.** D4 adopted it provisionally as the pull-shaped escape hatch, but
+nothing needs it yet, and an event with no emitter is the same "field nobody sets" that D6 exists to
+prevent. It stays a design note until something asks for it.
+
+*Falsified, each watched going red:* announce even when nothing applied -> the silence test fails; announce
+BEFORE the surface settles -> the listener sees a verb that is about to vanish; a host that reuses the
+revision -> the browser test fails, which IS the stale-facts failure Decision 32 predicts, reproduced;
+one-way marking -> the capability never comes back.
+
+**A falsification that silently proved nothing, worth recording.** The first run of the last two showed no
+output at all, and it would have been easy to read that as "no failure". The web server had refused to
+start on the stale-wasm guard, so neither test ran. Re-run with `DLC_SKIP_FRESHNESS=1` — legitimate, since
+only TypeScript had changed — both went red. An empty result is not a passing result.
 
 ---
 
@@ -416,12 +476,18 @@ Decision 32 predicts, reproduced once so its shape is known.
 
 ## 6. Definition of done
 
-1. `./scripts/ci.sh full` green.
-2. An app can ask whether a capability is available, and an unset manifest reads as absent.
-3. Both hosts send it; parity shows the same manifest AND the same command surface on both tiers.
-4. **The web host has been run with OPFS denied**, reaching a filesystem-less surface through real host
-   code — the absent branch watched running, not reasoned about (§1.1).
-5. An unsupported command is visible and marked, not missing and not "unknown method".
-6. A stale manifest has been reproduced once, so the failure Decision 32 predicts has a known shape.
-7. Hosts and the template call `platform.Boot` rather than repeating the §2.5 sequence.
-8. `AGENTS.md` carries the re-send contract, the mandatory ordering, and the D3 line.
+1. [x] `./scripts/ci.sh full` green.
+2. [x] An app can ask whether a capability is available, and an unset manifest reads as absent.
+3. [x] Both hosts send it; parity shows the same manifest AND the same command surface on both tiers.
+4. [~] **The web host has been run with OPFS denied.** PARTLY. The absent branch is watched running in a
+   real browser — the capability drops, verbs unregister, the inspector re-marks — but it is driven by a
+   manifest, not by a failing probe. The probe itself has no end-to-end test: it runs in the WORKER, and a
+   Playwright stub of `navigator.storage.getDirectory` cannot reach a worker's global scope. Closing it
+   means moving the probe to the main thread (stubbable, but the probing thread is then not the one using
+   the filesystem) or a worker-visible switch (a production test seam, declined). **Left open
+   deliberately** — the cost of both options is higher than the residual risk, which is confined to one
+   `try/catch` around one API call.
+5. [x] An unavailable command is visible and marked, not missing and not "unknown method_id".
+6. [x] A stale manifest has been reproduced once — a host that reuses a revision, phase 4 F3.
+7. [x] Hosts and the template call `platform.Boot` rather than repeating the §2.5 sequence.
+8. [x] `AGENTS.md` §3·6 carries the re-send contract, the mandatory ordering, and the D3 line.
