@@ -9,7 +9,7 @@
       "export GOBIN=\"$PWD/.devbox/gobin\"",
       "export GOFLAGS='-buildvcs=false -mod=mod'",
       "export PATH=\"$GOBIN:$PATH\"",
-      "command -v protoc-gen-go-lite >/dev/null || go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@latest"
+      "go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@v0.15.0"
     ]
   }
 }

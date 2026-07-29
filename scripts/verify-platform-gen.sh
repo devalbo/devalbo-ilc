@@ -58,6 +58,8 @@ if [ -n "$before" ]; then
 	printf "  ${R}✗${Z} %s\n" "$GEN has uncommitted changes before regenerating:"
 	printf '%s\n' "$before" | sed 's/^/      /'
 	echo "      Commit them, or discard them — this check cannot tell which you meant."
+	echo "      Tip: if the only diff is '// protoc-gen-go-lite version: …', CI installed"
+	echo "      @latest and drifted the banner — pin the plugin to go.mod's version."
 	exit 1
 fi
 
