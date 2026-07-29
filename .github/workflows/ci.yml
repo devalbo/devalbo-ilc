@@ -52,7 +52,7 @@ jobs:
       # provider-agnostic and know nothing about artifact upload.
       - name: failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6 # Node 24 runtime (v4/v5 still warn: Node 20 deprecated on runners)
         with:
           name: test-results
           path: |
