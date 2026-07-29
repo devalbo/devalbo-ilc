@@ -19,20 +19,104 @@ var version = "unset"
 // SetVersion sets what the `version` command reports, e.g. "myapp 1.2.3".
 func SetVersion(v string) { version = v }
 
-// RegisterAll registers the platform's commands. Call it from the app's init
-// before registering the app's own — the ids cannot collide (1–99 vs 100+), so
-// order is a readability choice, not a correctness one.
-func RegisterAll() {
-	RegisterRaw(ilcv1.PlatformServiceHandlers(
+// Method-id block bounds, for registering a capability's verbs as a unit. The
+// blocks themselves are permanent and documented in platform.proto; these are
+// just the numbers that let registration talk about them.
+const (
+	blockCoreLo, blockCoreHi             uint32 = 1, 99
+	blockFilesystemLo, blockFilesystemHi uint32 = 100, 199
+)
+
+// platformHandlers is the full generated dispatch map — every platform verb,
+// before anything decides which of them this host can support.
+func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
+	return ilcv1.PlatformServiceHandlers(
 		handleVersion,
+		handleSetEnvironment,
 		handleExportFs,
 		handleImportFs,
 		handleResetFs,
-	))
+	)
+}
+
+// RegisterAll registers every platform command up front. Call it from the app's
+// init before registering the app's own — the ids cannot collide (1–9999 vs
+// 10000+), so order is a readability choice, not a correctness one.
+//
+// This is the right choice for an app that KNOWS its hosts have a filesystem,
+// which today is every native app. Use RegisterDiscovered instead when a host
+// might not — a browser whose OPFS is denied — and the app would rather offer a
+// smaller command surface than a set of verbs that cannot work.
+func RegisterAll() {
+	RegisterRaw(platformHandlers())
+}
+
+// RegisterCore registers only the core-lifecycle verbs: version and
+// set-environment.
+//
+// This is the block that must exist before a host has said anything, because
+// SetEnvironment is itself a command and has to be dispatchable in order to
+// deliver the facts that decide everything else. That chicken-and-egg is why
+// the core block exists and why id 2 lives in it.
+func RegisterCore() {
+	registerBlock(platformHandlers(), blockCoreLo, blockCoreHi)
+}
+
+// RegisterDiscovered registers the core verbs now and each capability's verbs
+// when the manifest says that capability is there.
+//
+// The two-phase shape is forced: the manifest arrives as a COMMAND, so it
+// cannot be read at init. The consequence a host must respect is that
+// SetEnvironment has to arrive before any other command — until it does, the
+// only verbs registered are core ones, and anything else answers "unknown
+// method_id". See docs/ENVIRONMENT-PLAN.md §2.5, or just call platform.Boot.
+func RegisterDiscovered() {
+	RegisterCore()
+	discovered = platformHandlers()
+	syncCapabilityVerbs()
+}
+
+// discovered is the full handler map held back by RegisterDiscovered, waiting
+// for a manifest to say which of it applies. Nil under RegisterAll, which is
+// what makes syncCapabilityVerbs a no-op for apps that registered eagerly.
+var discovered map[uint32]func([]byte) ([]byte, error)
+
+// syncCapabilityVerbs brings the registered surface in line with the manifest.
+//
+// Idempotent in both directions, because a re-sent manifest may flip a
+// capability either way: a browser can lose its OPFS handle mid-session as
+// easily as it can fail to get one at startup.
+func syncCapabilityVerbs() {
+	if discovered == nil {
+		return // RegisterAll: the app opted out of discovery
+	}
+	if HasFilesystem() {
+		registerBlock(discovered, blockFilesystemLo, blockFilesystemHi)
+		return
+	}
+	unregisterBlock(blockFilesystemLo, blockFilesystemHi)
 }
 
 func handleVersion(*ilcv1.VersionRequest) (*ilcv1.VersionResponse, error) {
 	return &ilcv1.VersionResponse{Version: version}, nil
+}
+
+// handleSetEnvironment records what this host can do (Decision 32) and brings
+// the command surface in line with it.
+//
+// The registration side-effect is the reason this is not merely a setter, and
+// the reason an unchanged revision must be a no-op: re-running registration
+// would tear down and rebuild the surface underneath a host that only repeated
+// itself.
+func handleSetEnvironment(req *ilcv1.SetEnvironmentRequest) (*ilcv1.SetEnvironmentResponse, error) {
+	applied, err := applyEnvironment(req.GetEnvironment())
+	if err != nil {
+		return nil, err
+	}
+	if applied {
+		syncCapabilityVerbs()
+	}
+	return &ilcv1.SetEnvironmentResponse{Applied: applied}, nil
 }
 
 // handleExportFs bundles a subtree into a single BFT blob (§7.3). This is the

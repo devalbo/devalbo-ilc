@@ -249,6 +249,7 @@ type method struct {
 	output     string
 	fieldParam string // lowerCamel param name
 	cliName    string // (cli_name) override; empty means kebab(name)
+	cliHidden  bool   // (cli_hidden): a host lifecycle verb, not a subcommand
 }
 
 type service struct {
@@ -309,6 +310,7 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 			if err := checkCLIToken(cliName); err != nil {
 				return nil, fmt.Errorf("%s.%s: cli_name: %w", svc.GetName(), m.GetName(), err)
 			}
+			cliHidden, _ := extBool(opts, cliHiddenExt)
 			s.methods = append(s.methods, method{
 				name:       m.GetName(),
 				id:         id,
@@ -316,6 +318,7 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 				output:     shortName(m.GetOutputType()),
 				fieldParam: lowerFirst(m.GetName()) + "Fn",
 				cliName:    cliName,
+				cliHidden:  cliHidden,
 			})
 		}
 		if len(s.methods) > 0 {

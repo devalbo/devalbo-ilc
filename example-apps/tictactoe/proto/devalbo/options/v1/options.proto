@@ -25,6 +25,19 @@ extend google.protobuf.MethodOptions {
   // what the command is called — a host may still override it locally, but then
   // only that host differs, deliberately.
   string cli_name = 50006;
+
+  // Keep this rpc OUT of the generated command-line surface.
+  //
+  // For lifecycle commands a HOST sends and a person never types —
+  // SetEnvironment (Decision 32) is the first. Generating a subcommand for one
+  // is not merely noise: `dlc set-environment` would ask a user to hand-write a
+  // capability manifest, and a host that must supply a renderer for every
+  // command has to supply one for a command with nothing to render.
+  //
+  // Cosmetic like cli_name: dispatch is on method_id, so a hidden command is
+  // still perfectly dispatchable by a host that knows the id. This hides it
+  // from the SURFACE, it does not remove the verb.
+  bool cli_hidden = 50011;
 }
 
 extend google.protobuf.ServiceOptions {

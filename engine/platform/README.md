@@ -16,18 +16,18 @@ the next free number — and an id's magnitude tells you what it is in a wire tr
 
 | Range | Owner |
 | --- | --- |
-| 1 – 99 | core lifecycle (`version`; later `describe`, `supported-abis`) |
+| 1 – 99 | core lifecycle (`version`, `set-environment`; later `supported-abis`) |
 | 100 – 199 | filesystem (`export-fs`, `import-fs`, `reset-fs`; later read/write/delete/list) |
 | 200 – 299 | index (SQLite) |
 | 300 – 399 | events |
 | 400 – 499 | display |
 | 500 – 599 | network |
-| 600 – 999 | reserved |
-| **1000 +** | **the app** (`platform.AppMethodBase`) |
+| 600 – 9999 | reserved |
+| **10000 +** | **the app** (`platform.AppMethodBase`) |
 
 Dispatch is one flat `map[uint32]Handler` across all of it, so the ranges are what stop
 an app colliding with a platform verb added later. The platform range is far larger than
-it needs to be on purpose: ids are `u32`, so reserving 999 costs nothing, while widening
+it needs to be on purpose: ids are `u32`, so reserving 9999 costs nothing, while widening
 the range once apps exist would break every app that had claimed an id inside it.
 
 ## What an app writes

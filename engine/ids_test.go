@@ -80,8 +80,12 @@ func TestMethodIDsRespectRanges(t *testing.T) {
 	}
 	for name, id := range protoIDs(t, "../proto/devalbo/dlc/v1/commands.proto") {
 		if id < platform.AppMethodBase {
-			t.Errorf("app %s = %d, must be >= %d (1–9999 is reserved for ILC)",
-				name, id, platform.AppMethodBase)
+			// The band edge is quoted from the constant, never retyped. This
+			// message used to say "1–9999" while comparing against a constant
+			// that read 1000 — the two copies of the boundary disagreeing inside
+			// a single line, in the test whose job is to police that boundary.
+			t.Errorf("app %s = %d, must be >= %d (1–%d is reserved for ILC)",
+				name, id, platform.AppMethodBase, platform.AppMethodBase-1)
 		}
 	}
 }

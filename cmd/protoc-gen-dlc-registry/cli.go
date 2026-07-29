@@ -31,6 +31,7 @@ const (
 	defaultExt   protoreflect.FullName = "devalbo.options.v1.default"
 	shortExt     protoreflect.FullName = "devalbo.options.v1.short"
 	cliNameExt   protoreflect.FullName = "devalbo.options.v1.cli_name"       // MethodOptions
+	cliHiddenExt protoreflect.FullName = "devalbo.options.v1.cli_hidden"     // MethodOptions
 	cliFlagExt   protoreflect.FullName = "devalbo.options.v1.cli_flag"       // FieldOptions
 	cliSourceExt protoreflect.FullName = "devalbo.options.v1.cli_source"     // FieldOptions
 	cliPosExt    protoreflect.FullName = "devalbo.options.v1.cli_positional" // FieldOptions
@@ -200,6 +201,11 @@ func cliCommandsOf(file *descriptorpb.FileDescriptorProto, services []service, r
 	var out []cliCommand
 	for _, svc := range services {
 		for _, m := range svc.methods {
+			// A host lifecycle verb is dispatchable but not typeable: it never
+			// enters the surface, so no name is claimed and no renderer is owed.
+			if m.cliHidden {
+				continue
+			}
 			// The declared name is the DEFAULT, not the rule: kebab(rpc name)
 			// unless the .proto says otherwise.
 			name := m.cliName

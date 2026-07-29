@@ -42,13 +42,19 @@ service PlatformService {
   rpc Version(VersionRequest) returns (VersionResponse) {
     option (devalbo.options.v1.method_id) = 1;
   }
+  // The host stating what this host can actually do (Decision 32, §6.4a). Sent
+  // once at launch BEFORE any other command, and re-sent whenever a fact
+  // changes. Also the trigger for registering capability-dependent verbs, which
+  // is why it lives in the block that is always registered.
+  rpc SetEnvironment(SetEnvironmentRequest) returns (SetEnvironmentResponse) {
+    option (devalbo.options.v1.method_id) = 2;
+    // A host sends this; nobody types it. See cli_hidden.
+    option (devalbo.options.v1.cli_hidden) = true;
+  }
   // Held for commands that are designed but unbuilt. Declared, not commented —
   // the generator refuses any rpc that claims one, and the id lock records them.
-  //   2 = SetEnvironment  (Decision 32) host pushes the capability manifest at
-  //                       launch and re-sends it when a fact changes
   //   3 = SupportedAbis   (Decision 31) the guest advertising ITS boundaries —
   //                       the opposite direction to the manifest
-  option (devalbo.options.v1.reserved_method_id) = 2;
   option (devalbo.options.v1.reserved_method_id) = 3;
   // --- filesystem block (100–199) ---
   // Bundle a subtree into one portable blob
@@ -68,6 +74,69 @@ service PlatformService {
 message VersionRequest {}
 message VersionResponse {
   string version = 1;
+}
+
+// ---- the environment manifest (§6.4a, Decision 32) ------------------------
+
+// Whether a capability is there.
+//
+// Three states rather than a bool, because UNSPECIFIED is not ABSENT: the first
+// means nobody said, the second means somebody said no. They happen to lead to
+// the same conservative behaviour (an app takes its fallback path either way),
+// but conflating them would make "the host forgot to send a manifest"
+// indistinguishable from "this host has no filesystem" — and only one of those
+// is a bug worth surfacing.
+enum Availability {
+  AVAILABILITY_UNSPECIFIED = 0; // nobody said; treated as absent
+  AVAILABILITY_ABSENT = 1;
+  AVAILABILITY_PRESENT = 2;
+}
+
+// What KIND of root the host granted. Not cosmetic: an app deciding what to
+// cache cares whether its store survives the tab closing.
+enum FilesystemKind {
+  FILESYSTEM_KIND_UNSPECIFIED = 0;
+  FILESYSTEM_KIND_CWD = 1;      // the user's project — `dlc` itself (§3·5)
+  FILESYSTEM_KIND_APP_DIR = 2;  // ./.<app>/ — the convention for everyone else
+  FILESYSTEM_KIND_OPFS = 3;     // the browser's origin-private filesystem
+}
+
+message Filesystem {
+  Availability availability = 1;
+  FilesystemKind kind = 2;
+  // Ephemeral means the store does not survive the process/tab. An app may
+  // still write; it should not promise the user durability.
+  bool ephemeral = 3;
+}
+
+// Environment is what the host can do, as of `revision`.
+//
+// Deliberately small (plan D6): a field here is a branch somewhere, and a
+// capability nothing reads yet is a branch nothing tests. The index lands with
+// the index; display may never land at all now that Decision 34 made the
+// semantic render path the default. Events are absent BY RULE, not by
+// omission — emitting carries nothing back, so its absence is unobservable and
+// Decision 33 forbids an app branching on it.
+message Environment {
+  // Monotonic, host-assigned, and REQUIRED to be non-zero — the engine rejects
+  // 0 rather than reading it as "the first one", so a host that forgot cannot
+  // masquerade as a host that is up to date.
+  //
+  // Its reader is registration: SetEnvironment re-runs capability registration
+  // and churns the command surface, so an unchanged revision is how the engine
+  // knows to do nothing. A slot can also tell whether what it rendered from is
+  // still current.
+  uint32 revision = 1;
+  Filesystem filesystem = 2;
+}
+
+message SetEnvironmentRequest {
+  Environment environment = 1;
+}
+message SetEnvironmentResponse {
+  // Whether this manifest actually changed anything. False means the revision
+  // matched what was already in force and registration was left alone.
+  bool applied = 1;
 }
 
 // Filesystem export/import — the first-class platform primitive (§7.3). An

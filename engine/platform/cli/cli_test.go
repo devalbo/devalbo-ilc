@@ -18,6 +18,7 @@ import (
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
 	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 )
 
 // fakePort records the request it was given and answers with canned bytes.
@@ -497,5 +498,28 @@ func TestMissingRequiredPositional(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "--name is required") {
 		t.Errorf("error should name it: %q", errOut.String())
+	}
+}
+
+// A host lifecycle verb is dispatchable but not typeable.
+//
+// SetEnvironment is a command like any other — the host sends it by id — but
+// generating a SUBCOMMAND for it would ask a person to hand-write a capability
+// manifest on a command line, and would oblige every host to register a
+// renderer for a command with nothing to render. That is what broke
+// verify-bundle-xtier the moment the rpc was added, which is why `cli_hidden`
+// exists and why this pins it.
+func TestHiddenCommandsAreNotInTheSurface(t *testing.T) {
+	for _, c := range ilcv1.PlatformServiceCLI {
+		if c.Method == platform.MethodSetEnvironment {
+			t.Fatalf("set-environment is in the CLI surface as %q; it is (cli_hidden)", c.Name)
+		}
+	}
+	// Guard the guard: a surface that lost everything would also pass the
+	// check above.
+	for _, want := range []string{"version", "export-fs", "import-fs", "reset-fs"} {
+		if _, ok := clispec.Find(ilcv1.PlatformServiceCLI, want); !ok {
+			t.Fatalf("%q vanished from the CLI surface", want)
+		}
 	}
 }

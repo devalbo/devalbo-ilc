@@ -36,18 +36,18 @@ type Handler func(request []byte) Result
 
 // Method ids reserved for the platform, in per-capability blocks. Permanent:
 //
-//	   1 –   99   core lifecycle
-//	 100 –  199   filesystem
-//	 200 –  299   index      (SQLite)
-//	 300 –  399   events
-//	 400 –  499   display
-//	 500 –  599   network
-//	 600 –  999   reserved
-//	1000 +        the app's own commands
+//	    1 –    99   core lifecycle
+//	  100 –   199   filesystem
+//	  200 –   299   index      (SQLite)
+//	  300 –   399   events
+//	  400 –   499   display
+//	  500 –   599   network
+//	  600 –  9999   reserved
+//	10000 +         the app's own commands
 //
 // One flat map serves all of it, so the ranges are what stop an app colliding
 // with a platform verb added later. The platform range is far larger than it
-// needs to be on purpose: ids are u32, so reserving 999 costs nothing, while
+// needs to be on purpose: ids are u32, so reserving 9999 costs nothing, while
 // widening the range once apps exist would break every app inside it.
 // See proto/devalbo/ilc/v1/platform.proto.
 // The ids themselves are GENERATED from platform.proto by
@@ -55,7 +55,8 @@ type Handler func(request []byte) Result
 // They are not written down twice.
 const (
 	// core lifecycle (1–99)
-	MethodVersion = ilcv1.MethodVersion
+	MethodVersion        = ilcv1.MethodVersion
+	MethodSetEnvironment = ilcv1.MethodSetEnvironment
 
 	// filesystem (100–199)
 	MethodExportFs = ilcv1.MethodExportFs
@@ -64,7 +65,16 @@ const (
 
 	// AppMethodBase is the first id an app may claim. Not generated: it is the
 	// range boundary itself, which the .proto documents but cannot express.
-	AppMethodBase uint32 = 1000
+	//
+	// Which is exactly how this read 1000 for a while, disagreeing with the
+	// 10000 in platform.proto, AGENTS.md, and every app actually written. It was
+	// harmless only by luck — nothing had claimed an id in 1000–9999, the band
+	// the framework reserves for capabilities it has not shipped — but it also
+	// meant ids_test would have waved through an app id sitting in ILC's range.
+	// A boundary written down in two places is one that can disagree with
+	// itself; this is the copy that compiles, so it is the one that must be
+	// right.
+	AppMethodBase uint32 = 10000
 )
 
 var registry = map[uint32]Handler{}
@@ -99,6 +109,41 @@ func RegisterRaw(handlers map[uint32]func([]byte) ([]byte, error)) {
 			}
 			return Result{Success: true, Output: out}
 		})
+	}
+}
+
+// registerBlock registers the handlers from a generated dispatch map whose ids
+// fall in [lo, hi], skipping any id already registered.
+//
+// Skipping rather than panicking, unlike Register: a capability block is
+// (re)synced whenever a manifest arrives, so "already there" is the normal case
+// on a re-send, not the two-commands-one-id mistake Register guards against.
+func registerBlock(handlers map[uint32]func([]byte) ([]byte, error), lo, hi uint32) {
+	for method, fn := range handlers {
+		if method < lo || method > hi {
+			continue
+		}
+		if _, exists := registry[method]; exists {
+			continue
+		}
+		h := fn // capture per iteration
+		Register(method, func(request []byte) Result {
+			out, err := h(request)
+			if err != nil {
+				return Result{Err: err.Error()}
+			}
+			return Result{Success: true, Output: out}
+		})
+	}
+}
+
+// unregisterBlock drops every registered handler in [lo, hi] — a capability
+// that went away, or was never there on this host.
+func unregisterBlock(lo, hi uint32) {
+	for method := range registry {
+		if method >= lo && method <= hi {
+			delete(registry, method)
+		}
 	}
 }
 

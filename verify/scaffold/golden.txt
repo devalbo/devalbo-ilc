@@ -35,5 +35,5 @@ hosts/web/vite.config.ts                             1232  bc0cac3c4395a28e
 proto/buf.gen.yaml                                   1290  78fec52b3a0339c6
 proto/buf.yaml                                        363  1c9951bd88411837
 proto/devalbo/options/v1/README.md                    760  b3b9831cae334777
-proto/devalbo/options/v1/options.proto               5160  53117d5a5826a1e5
+proto/devalbo/options/v1/options.proto               5842  d4c0e54d43c74194
 proto/golden_app/v1/commands.proto                    964  3a7685fd539969ca
