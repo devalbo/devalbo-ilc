@@ -9,7 +9,7 @@ every host built requests, taking the `execute-cli` export and the ffcli depende
 
 **This directory is `dlc`'s APP code** — its own verbs (`new`, `echo`) and its templates, in the
 **100+** method id range. The verbs every app inherits (`version`, `export-fs`, `import-fs`, `reset-fs`,
-ids 1–99) live in [`platform/`](./platform), which becomes the `ilc-platform` module. `dlc` depends on
+ids 1–99) live in [`platform/`](./platform), which becomes the `dlc-platform` module. `dlc` depends on
 the platform exactly the way a scaffolded app does — that is what keeps the boundary honest.
 
 **Rules:**

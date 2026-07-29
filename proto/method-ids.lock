@@ -2,10 +2,3 @@
 # Each line is a permanent wire id. A change here is a breaking change.
 devalbo.dlc.v1.DlcService.Echo 10001
 devalbo.dlc.v1.DlcService.New 10000
-devalbo.ilc.v1.PlatformService.ExportFs 100
-devalbo.ilc.v1.PlatformService.GetCommandSurface 4
-devalbo.ilc.v1.PlatformService.ImportFs 101
-devalbo.ilc.v1.PlatformService.ResetFs 102
-devalbo.ilc.v1.PlatformService.SetEnvironment 2
-devalbo.ilc.v1.PlatformService.Version 1
-devalbo.ilc.v1.PlatformService.[reserved].3 3

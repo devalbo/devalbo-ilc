@@ -1,0 +1,35 @@
+version: v2
+# Reflection-free codegen (TinyGo-safe): Aperture Robotics' go-lite / es-lite.
+# NOTE: exact `opt` flags validated on the first `buf generate` under devbox (Spike 2).
+plugins:
+  - local: protoc-gen-go-lite
+    out: gen/go
+    opt:
+      - paths=source_relative
+  - local: protoc-gen-es-lite
+    out: gen/ts
+    opt:
+      - target=ts
+  # Command dispatch + method_id constants, generated from the service defs that
+  # go-lite ignores (it emits messages only). Also enforces the id lock — see
+  # cmd/protoc-gen-dlc-registry. `go run` keeps it buildable from a fresh clone
+  # with no install step; cwd here is proto/.
+  - local: ["go", "run", "github.com/devalbo/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: gen/go
+    # strategy: all — buf's DEFAULT is `directory`, which invokes a plugin once
+    # per directory. The id lock needs every service in ONE invocation, or each
+    # call writes a lock holding only its own directory's ids and the next call
+    # fails against it.
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lock=proto/method-ids.lock
+  # The same ids for the web tier. buf runs a plugin once per output directory,
+  # so this is a second invocation with lang=ts rather than one emitting both.
+  # No lock here — one writer is enough, and two would race on the same file.
+  - local: ["go", "run", "github.com/devalbo/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: gen/ts
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lang=ts

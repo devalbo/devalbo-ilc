@@ -1,11 +1,11 @@
 // Drives the web slot with NO engine (Decision 34).
 //
 // Imported by URL from `page.evaluate`, which runs in the BROWSER — where a bare
-// specifier like `@devalbo/ilc-web/testing` cannot resolve. A module fetched
+// specifier like `@devalbo/dlc-web/testing` cannot resolve. A module fetched
 // from the dev server can, because Vite transforms it on the way out.
 //
 // Nothing in the app imports this, so a production build never sees it.
-import { createFakePort, ok } from "@devalbo/ilc-web/testing";
+import { createFakePort, ok } from "@devalbo/dlc-web/testing";
 
 import { GreetResponse } from "@gen/{{.PkgName}}/v1/commands.pb";
 import { MethodGreet } from "@gen/{{.PkgName}}/v1/commands.registry.pb";

@@ -1,0 +1,28 @@
+{
+  "name": "@devalbo/dlc-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ILC web host: jco worker, OPFS-backed WASI root, Comlink adapter. Consumed by scaffolded apps as a dependency \u2014 never copied in, so the preview2-shim pin and the OPFS bridge stay fixable in one place.",
+  "exports": {
+    "./api": "./api.ts",
+    "./port": "./port.ts",
+    "./testing": "./testing.ts",
+    "./worker": "./worker.ts",
+    "./opfs": "./opfs.ts",
+    "./shim/filesystem": "./shim/filesystem.js",
+    "./vite": "./vite-preset.ts",
+    "./events": "./events.ts",
+    "./clispec": "./clispec.ts",
+    "./encode": "./encode.ts",
+    "./terminal": "./terminal.ts",
+    "./terminal-ui": "./terminal-ui.ts",
+    "./files": "./files.ts",
+    "./inspector": "./inspector.ts"
+  },
+  "peerDependencies": {
+    "@bytecodealliance/preview2-shim": "^0.19.0",
+    "comlink": "^4.4.2",
+    "vite": ">=5"
+  }
+}

@@ -14,7 +14,7 @@
 // SEMANTIC RENDER PATH: the engine emits what is TRUE (`game.state-changed`
 // carrying the whole state) and this decides what that looks like. No draw
 // commands, no widget tree, no Display capability.
-import type { EnginePort } from "@devalbo/ilc-web/port";
+import type { EnginePort } from "@devalbo/dlc-web/port";
 
 import { StateChangedEventTopic } from "@gen/tictactoe/v1/commands.events.pb";
 import {

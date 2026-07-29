@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/devalbo/devalbo-ilc/wit"
+	"github.com/devalbo/dlc-platform/wit"
 )
 
 // runBuild implements `dlc build <tier> [--out dir] [--web-out dir] [--entry pkg]`.
@@ -161,7 +161,7 @@ func buildWeb(component, webOut, entry string) error {
 	// web host, so apps get fixes on a version bump instead of carrying a copy.
 	// Every capability added later needs a line here.
 	if err := run("jco", "transpile", component, "-o", webOut,
-		"--map", "devalbo:ilc/events=@devalbo/ilc-web/events"); err != nil {
+		"--map", "devalbo:ilc/events=@devalbo/dlc-web/events"); err != nil {
 		return fmt.Errorf("build web: jco: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "build web: ok")

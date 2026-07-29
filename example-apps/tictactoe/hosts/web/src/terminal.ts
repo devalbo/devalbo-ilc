@@ -7,8 +7,8 @@
 //
 // A slot renders, it never decides (Decision 34) — the `render` map below is the
 // only per-command code here, and it only formats.
-import { enginePort } from "@devalbo/ilc-web/port";
-import { mountTerminal, terminalStyles } from "@devalbo/ilc-web/terminal-ui";
+import { enginePort } from "@devalbo/dlc-web/port";
+import { mountTerminal, terminalStyles } from "@devalbo/dlc-web/terminal-ui";
 
 import { GameServiceCLI } from "@gen/tictactoe/v1/commands.cli.pb";
 import { PlatformServiceCLI } from "@gen/devalbo/ilc/v1/platform.cli.pb";

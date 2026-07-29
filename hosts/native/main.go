@@ -19,8 +19,8 @@ package main
 import (
 	"os"
 
-	"github.com/devalbo/devalbo-ilc/engine/platform"
-	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/dlc-platform"
+	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	// Importing the engine is what REGISTERS dlc's commands; nothing else here
 	// touches it. The blank-ish import is load-bearing.

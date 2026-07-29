@@ -13,9 +13,9 @@
 // The engine arrives as an ARGUMENT (`EnginePort`), not as an import. That is
 // the whole reason this file is separate from main.ts: mount it against the real
 // port and it drives a wasm component in a worker; mount it against the fake in
-// `@devalbo/ilc-web/testing` and the same code renders with no engine, no
+// `@devalbo/dlc-web/testing` and the same code renders with no engine, no
 // worker, and no OPFS.
-import type { EnginePort } from "@devalbo/ilc-web/port";
+import type { EnginePort } from "@devalbo/dlc-web/port";
 
 import { RecordChangedEventTopic } from "@gen/notes/v1/commands.events.pb";
 import {

@@ -6,7 +6,7 @@ into its environment, the environment's capabilities are *injected* into a porta
 (**D**evalbo **L**ine of **C**ommand) is the CLI that scaffolds and drives ILC apps.
 
 > **Naming:** **ILC** is the framework/concept; **`dlc`** is the tool. Framework artifacts keep the `ilc`
-> name (`wit/ilc.wit`, the `devalbo:ilc` package, the `ilc-platform` module); the binary and its commands
+> name (`wit/ilc.wit`, the `devalbo:ilc` package, the `dlc-platform` module); the binary and its commands
 > are `dlc`.
 
 > ### 🚧 Bootstrapping — read the status tags
@@ -107,10 +107,11 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 
 ```
 engine/            ✅ dlc's own business logic (Go → wasm) — reflection-free / TinyGo-safe
-engine/platform/   ✅ what every app INHERITS: dispatch, fs root seam, path containment, BFT
+dlc-platform/      ✅ SEPARATE MODULE — what every app INHERITS: dispatch, fs root seam,
+                      path containment, BFT, the WIT world, codegen, and web/ (@devalbo/dlc-web)
 cmd/               ✅ thin entrypoints: wasip2 component shim, codegen plugin, dev tools
 hosts/native/      ✅ CLI host — engine linked in-process
-hosts/web/         ✅ browser host, published as @devalbo/ilc-web — jco worker, OPFS, Comlink, Vite preset
+hosts/web/         ✅ browser host, published as @devalbo/dlc-web — jco worker, OPFS, Comlink, Vite preset
 wit/               ✅ the ILC capability world (framework)
 proto/             ✅ message types + command services (go-lite + es-lite codegen)
 frontend/          ✅ dlc's own React + Vite UI (a scaffolded app gets a vanilla-TS one)
@@ -121,7 +122,7 @@ scripts/           ✅ preflight + the verify suites
 docs/              plan, tasks, prerequisites, test steps
 ```
 
-`engine/platform/` becomes the **`ilc-platform`** module (📋 not extracted or published yet). Method ids
+`dlc-platform/` **is** the module (✅ extracted; 📋 not published — resolved by `replace`). Method ids
 are band-reserved today so that extraction is not a breaking change: **1–9999 ILC** (subdivided by
 capability, with 600–9999 held for capabilities not yet shipped), **10000+ the app**. `dlc` claims no
 reserved block — it is an app like any other.
@@ -164,7 +165,7 @@ identical tree through the CLI.
 
 The honest gaps, in the order they matter:
 
-1. 📋 **`ilc-platform` and `@devalbo/ilc-web` are not published**, so every scaffold needs
+1. 📋 **`dlc-platform` and `@devalbo/dlc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
 2. 📋 **Desktop, embedded, and the remaining capabilities** (SQLite index, sync) are designed and
@@ -174,7 +175,7 @@ The honest gaps, in the order they matter:
    however that tier likes — the second costs no capability at all, so it goes first.
 3. 📋 **Per-app, per-tier host code has no agreed shape yet.** `hosts/web/` is inherited runtime,
    `hosts/native/` mixes runtime with `dlc`'s own code, and `frontend/` is app code under a third name.
-   The line `engine/` vs `engine/platform/` already draws is missing one directory over — that is the
+   The line `engine/` vs `dlc-platform/` already draws is missing one directory over — that is the
    current focus (`docs/HOST-LAYER-PLAN.md`).
 4. 📋 **Events do not cross a tab or a process.** Same graph only — worker → main thread, or native
    in-process. A second tab on the same OPFS origin does not see this one's writes; that needs a

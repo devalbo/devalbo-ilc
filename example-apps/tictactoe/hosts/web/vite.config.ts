@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ilcVite } from "@devalbo/ilc-web/vite";
+import { ilcVite } from "@devalbo/dlc-web/vite";
 
 const root = dirname(fileURLToPath(import.meta.url));
 

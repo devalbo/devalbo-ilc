@@ -91,10 +91,10 @@ message NewRequest {
     (devalbo.options.v1.help) = "storage layout"
   ];
   // BOOTSTRAP: path to a local devalbo-ilc checkout, written into the generated
-  // go.mod as a `replace`. Needed only until ilc-platform is published — see
+  // go.mod as a `replace`. Needed only until dlc-platform is published — see
   // platformReplace() in engine/scaffold.go.
   string platform_path = 7 [
-    (devalbo.options.v1.help) = "local devalbo-ilc checkout (bootstrap; until ilc-platform is published)"
+    (devalbo.options.v1.help) = "local devalbo-ilc checkout (bootstrap; until dlc-platform is published)"
   ];
 }
 message NewResponse {

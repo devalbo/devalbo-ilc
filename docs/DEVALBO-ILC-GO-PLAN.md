@@ -17,7 +17,7 @@ platform and a reference app** (§0.1); **§16** covers spinning up new apps fro
 > **Naming:** the framework/concept is **ILC** (Inverted Line of Command); its devalbo CLI is **`dlc`**
 > (**D**evalbo **L**ine of **C**ommand). The tool binary, its subcommands, and the project manifest
 > (`dlc.toml`) use `dlc`; **framework artifacts keep the `ilc` name** — `ilc.wit`, the `devalbo:ilc` WIT
-> package, and the `ilc-platform` module.
+> package, and the `dlc-platform` module.
 
 ---
 
@@ -926,7 +926,7 @@ Two concrete apps come before the platform is abstracted:
 2. **App #2 — notes/list** (the breadth pilot, §13). Generated *by* `dlc new`, then filled in. Proves the
    parts `dlc` doesn't touch: Display, SQLite-index, desktop, embedded, rich protobuf. Its tiers/caps are
    added to both the platform and `dlc new`'s flags as they land — the scaffolder **co-evolves**.
-3. **Extract `ilc-platform/`** once both apps share it (hosts, WIT, build seam, verify harness,
+3. **Extract `dlc-platform/`** once both apps share it (hosts, WIT, build seam, verify harness,
    scaffolder). **Concrete-first, extract-after** — two real consumers before the shared module.
 
 Caveat: `dlc` exercises only console + filesystem, so `dlc new`'s flags start minimal (`--tiers=cli,web`)
@@ -957,7 +957,7 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 
 ```
 /
-├── platform/     # the ILC framework (hosts, wit, caps seam, build pipeline, verify harness) → `ilc-platform` (§16.4)
+├── platform/     # the ILC framework (hosts, wit, caps seam, build pipeline, verify harness) → `dlc-platform` (§16.4)
 ├── templates/    # skeletons (+ later: per-skeleton git submodules) + local fragment overlays
 │   ├── component-model/  # full dlc-shaped CM skeleton (CLI + browser); bootstrap — in-tree first
 │   ├── wamr/             # WAMR skeleton; after embedded verify exists
@@ -972,14 +972,14 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 | # | Choice |
 | --- | --- |
 | **1 — Authorship** | **Author skeletons in-tree** under `templates/<name>/`. Lift each to its own git submodule **later** (when contribution/CI isolation pays for itself) — do not block B2 on repo/submodule choreography. |
-| **2 — `ilc-platform` depend** | **Defer** the versioned `ilc-platform` `go.mod` dependency until skeletons graduate to submodules (§16.4 extract). Until then the skeleton is a full tree in this repo; depend-on/never-inline remains the *target* rule, not a B2 prerequisite. |
+| **2 — `dlc-platform` depend** | **Defer** the versioned `dlc-platform` `go.mod` dependency until skeletons graduate to submodules (§16.4 extract). Until then the skeleton is a full tree in this repo; depend-on/never-inline remains the *target* rule, not a B2 prerequisite. |
 | **3 — Skeleton completeness** | Bootstrap `component-model/` is a **full `dlc`-shaped** project (engine + CLI host stubs + web host stubs + go.mod + devbox + wit + proto) — not a thin hello-world. B2 proves terminal; B3 completes browser on the same shape. |
 | **4 — Engine in the host** | Native `dlc` **embeds** `engine.component.wasm` in the host binary (§5.4); keep embed/load **lift-ready** (small package boundary). Templates for `dlc new` are separately `go:embed`’d into the engine so scaffolding works offline + in-browser. |
 
 #### Standing rules
 
-- **Depends-on, never inlines (destination).** After submodule + `ilc-platform` extract, a template’s
-  `go.mod` depends on `ilc-platform` as a **versioned module** + a thin `main`; it never copies framework
+- **Depends-on, never inlines (destination).** After submodule + `dlc-platform` extract, a template’s
+  `go.mod` depends on `dlc-platform` as a **versioned module** + a thin `main`; it never copies framework
   internals. Bootstrap may ship a fuller in-tree tree until that extract lands (see sequencing #2).
 - **Two skeleton families by ABI mode (Decision 25).** Rich/CM vs Portable/WAMR are different *project*
   shapes (guest target, host stub, capability ABI, build). Each is its **own skeleton directory** (and
@@ -1051,7 +1051,7 @@ the source of truth for everything an app *chose* (the two knobs of §16.1, plus
 [app]
 name     = "notes"
 module   = "github.com/me/notes"
-platform = "ilc-platform@0.3.1"        # the versioned framework dependency (§16.6)
+platform = "dlc-platform@0.3.1"        # the versioned framework dependency (§16.6)
 
 capabilities = ["console", "filesystem", "sqlite-index", "events", "display"]
 tiers        = ["cli", "web", "desktop", "esp32-s3"]   # an embedded tier ⇒ portable byte ABI (§5.6)

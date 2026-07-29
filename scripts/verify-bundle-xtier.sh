@@ -18,7 +18,7 @@ BUNDLE="$WORK/from-browser.bft.json"
 go build -buildvcs=false -o "$WORK/dlc" ./hosts/native || { echo "native build failed"; exit 1; }
 
 # 1. Browser: scaffold + export, saving the bundle to disk.
-( cd frontend \
+( cd hosts/web \
   && npm install --silent --no-audit --no-fund \
   && npx playwright install chromium >/dev/null 2>&1 \
   && XTIER_OUT="$BUNDLE" npx playwright test xtier.spec.ts >/dev/null 2>&1 ) \

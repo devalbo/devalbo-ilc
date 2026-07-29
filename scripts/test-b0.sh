@@ -15,15 +15,15 @@ exists() { [ -e "$1" ] && pass "$1" || bad "$1 (missing)"; }
 absent() { [ ! -e "$1" ] && pass "$1 removed" || bad "$1 still present — run the tri-language removal"; }
 
 echo "T-B0.4 — structure present:"
-for d in engine hosts/native hosts/web wit proto frontend templates spikes scripts docs; do exists "$d"; done
+for d in engine hosts/native hosts/web dlc-platform dlc-platform/web dlc-platform/wit proto templates spikes scripts docs; do exists "$d"; done
 
 echo; echo "T-B0.4 — core files present:"
 for f in go.mod devbox.json Makefile .gitignore AGENTS.md scripts/preflight.sh \
-         wit/ilc.wit proto/devalbo/ilc/v1/common.proto proto/devalbo/dlc/v1/commands.proto \
-         proto/buf.yaml proto/buf.gen.yaml; do exists "$f"; done
+         dlc-platform/wit/ilc.wit dlc-platform/proto/devalbo/ilc/v1/common.proto proto/devalbo/dlc/v1/commands.proto \
+         buf.yaml buf.gen.yaml buf.gen.platform.yaml dlc-platform/go.mod; do exists "$f"; done
 
 echo; echo "boundary READMEs present:"
-for r in engine hosts wit proto templates frontend spikes scripts; do exists "$r/README.md"; done
+for r in engine hosts dlc-platform/wit proto templates spikes scripts; do exists "$r/README.md"; done
 
 echo; echo ".gitignore behaves:"
 for p in gen/x engine/x.wasm node_modules/x .devbox/x; do
@@ -31,7 +31,7 @@ for p in gen/x engine/x.wasm node_modules/x .devbox/x; do
 done
 
 echo; echo "T-B0.3 — clean migration (retired tri-language paths stay gone):"
-for x in compiler packages Cargo.toml Cargo.lock wit/environment.wit wit/console-io.wit; do absent "$x"; done
+for x in compiler packages Cargo.toml Cargo.lock dlc-platform/wit/environment.wit dlc-platform/wit/console-io.wit; do absent "$x"; done
 # The phase1-tri-language tag is a local/history checkpoint only — not a CI gate.
 # Requiring it on every clone forced fetch-tags / a pushed tag for no ongoing value;
 # the absent-path checks above are what keep the migration honest.

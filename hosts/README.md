@@ -9,14 +9,17 @@ through here**, and until it was drawn this directory quietly held both:
 
 | Layer | Portability | What it is |
 | --- | --- | --- |
-| **host runtime** | inherited — identical for every app | instantiate the engine, wire capabilities, deliver events, turn native input into a request. `web/` is exactly this, published as `@devalbo/ilc-web`. |
+| **host runtime** | inherited — identical for every app | instantiate the engine, wire capabilities, deliver events, turn native input into a request. lives in `dlc-platform/web`, published as `@devalbo/dlc-web`. |
 | **tier slot** — `hosts/<tier>/` **in an app** | per app, per tier | that app's presentation and input on that tier |
 
-**In this repo the two collide, deliberately and temporarily.** `web/` is pure runtime, `native/` still
-mixes runtime (the in-process engine binding) with `dlc`'s own commands (`commands.go`, `build.go`,
-`gen.go`), and `dlc`'s web slot is `frontend/` at the repo root rather than `hosts/web/` — because that name
-is taken by the runtime until it is extracted (§16.4). An app has no such collision: `example-apps/notes/`
-carries `hosts/native/` and `hosts/web/` and nothing else.
+**The collision is GONE (§16.4, 2026-07-28).** The inherited runtime moved out to the `dlc-platform`
+module — Go in `dlc-platform/`, TypeScript in `dlc-platform/web` (`@devalbo/dlc-web`) — so `hosts/` in this
+repo now holds only `dlc`'s own slots, exactly like `example-apps/notes/`. `dlc`'s web slot moved from
+`frontend/` into `hosts/web/`, the name every app uses.
+
+`native/` still holds dlc's toolchain alongside its slot (`build.go`, `gen.go`, `manifest.go`), but that is
+no longer a runtime/slot collision: the runtime half is `dlc-platform/cli`, and an app owning its own
+toolchain is ordinary.
 
 **Every tier in `dlc.toml` names its slot, and the slot must exist.** That is the one thing `dlc.toml`
 actually gates — `dlc build`/`dlc gen` refuse a manifest whose `root` points nowhere, because a stale

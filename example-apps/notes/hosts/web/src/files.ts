@@ -7,8 +7,8 @@
 // It does subscribe to engine events, so a write from the app or the terminal
 // shows up here without a manual refresh. That is the same reactivity loop the
 // record list uses (§6.3), pointed at a filesystem view.
-import { onFlush } from "@devalbo/ilc-web/api";
-import { filesStyles, mountFiles } from "@devalbo/ilc-web/files";
+import { onFlush } from "@devalbo/dlc-web/api";
+import { filesStyles, mountFiles } from "@devalbo/dlc-web/files";
 
 document.head.appendChild(document.createElement("style")).textContent =
   filesStyles();

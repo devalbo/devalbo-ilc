@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"github.com/devalbo/devalbo-ilc/engine"
-	"github.com/devalbo/devalbo-ilc/engine/platform"
+	"github.com/devalbo/dlc-platform"
 )
 
 // rpc Foo(FooRequest) returns (FooResponse) { option (…method_id) = N; }
@@ -44,7 +44,7 @@ func protoIDs(t *testing.T, path string) map[string]uint32 {
 }
 
 func TestMethodIDsMatchProto(t *testing.T) {
-	platformIDs := protoIDs(t, "../proto/devalbo/ilc/v1/platform.proto")
+	platformIDs := protoIDs(t, "../dlc-platform/proto/devalbo/ilc/v1/platform.proto")
 	appIDs := protoIDs(t, "../proto/devalbo/dlc/v1/commands.proto")
 
 	for name, want := range map[string]struct {
@@ -72,7 +72,7 @@ func TestMethodIDsMatchProto(t *testing.T) {
 // The ranges are the platform/app contract; a stray id on the wrong side of the
 // line is exactly what the reserved range exists to prevent.
 func TestMethodIDsRespectRanges(t *testing.T) {
-	for name, id := range protoIDs(t, "../proto/devalbo/ilc/v1/platform.proto") {
+	for name, id := range protoIDs(t, "../dlc-platform/proto/devalbo/ilc/v1/platform.proto") {
 		if id == 0 || id >= platform.AppMethodBase {
 			t.Errorf("platform %s = %d, must be in 1–%d (ILC's band)",
 				name, id, platform.AppMethodBase-1)
@@ -95,8 +95,10 @@ func TestMethodIDsRespectRanges(t *testing.T) {
 // drifts from the original is the classic vendoring failure — an app would
 // generate against options the platform does not actually read.
 func TestTemplateOptionsProtoInSync(t *testing.T) {
+	// The vendored copies keep the path they had; the SOURCE now lives in the
+	// platform module, which is what they are a copy OF.
 	const rel = "proto/devalbo/options/v1/options.proto"
-	source, err := os.ReadFile("../" + rel)
+	source, err := os.ReadFile("../dlc-platform/" + rel)
 	if err != nil {
 		t.Fatal(err)
 	}

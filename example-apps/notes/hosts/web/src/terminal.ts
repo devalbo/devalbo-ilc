@@ -5,8 +5,8 @@
 // commands, their flags, which are required and the `-h` text all come from
 // commands.proto (Decision 29), so this page and the CLI cannot drift apart —
 // and the parse vectors in test/terminal.spec.ts assert that in bytes.
-import { enginePort } from "@devalbo/ilc-web/port";
-import { mountTerminal, terminalStyles } from "@devalbo/ilc-web/terminal-ui";
+import { enginePort } from "@devalbo/dlc-web/port";
+import { mountTerminal, terminalStyles } from "@devalbo/dlc-web/terminal-ui";
 
 import { NotesServiceCLI } from "@gen/notes/v1/commands.cli.pb";
 import { PlatformServiceCLI } from "@gen/devalbo/ilc/v1/platform.cli.pb";

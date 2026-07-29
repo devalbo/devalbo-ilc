@@ -5,7 +5,7 @@
 # WHY THIS EXISTS: example-apps/ are the only things that CONSUME the platform
 # rather than being it. dlc validates the platform against itself, which is a
 # friendly critic — the same design produced both sides. An app that merely
-# depends on `engine/platform` is what notices when an exported helper changes
+# depends on `platform` is what notices when an exported helper changes
 # shape, or when the template drifts from what apps actually use.
 #
 # The spikes did exactly this for the toolchain and rotted unnoticed for hours

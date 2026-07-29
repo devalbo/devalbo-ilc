@@ -25,7 +25,7 @@ BIN="$(mktemp -d)"
 go build -buildvcs=false -o "$BIN/parity-runner" ./cmd/parity-runner || { echo "runner build failed"; exit 1; }
 
 # 2. wasip2 component (wasip2-direct) + jco transpile
-tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+tinygo build -target=wasip2 --wit-package ./dlc-platform/wit --wit-world engine \
 	-o engine.component.wasm ./cmd/engine-component || { echo "component build failed"; exit 1; }
 ( cd verify/parity \
 	&& npm install --silent --no-audit --no-fund \

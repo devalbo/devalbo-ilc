@@ -1,0 +1,26 @@
+# Buf WORKSPACE for the repo (buf v2).
+#
+# Two modules, because the platform is being extracted (§16.4): its schema —
+# `devalbo/ilc/v1` and the shared `devalbo/options/v1` — belongs to
+# `dlc-platform`, and `devalbo/dlc/v1` is just an app's schema like any other.
+#
+# They stay in ONE workspace so that dlc's commands.proto can keep importing
+# `devalbo/options/v1/options.proto` directly. Splitting them into unrelated
+# buf modules would need a published BSR dependency for what is, today, a
+# directory two levels away.
+#
+# Generation is TWO runs with two templates (see the Makefile), because a
+# template has one output root per plugin and the two modules must land in two
+# different Go modules.
+version: v2
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
+modules:
+  - path: proto
+  - path: dlc-platform/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - WIRE_JSON # guard both binary + canonical-JSON compatibility

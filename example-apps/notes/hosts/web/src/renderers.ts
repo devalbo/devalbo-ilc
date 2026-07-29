@@ -7,7 +7,7 @@
 // two places for the same response to be formatted differently depending on
 // which page you happened to be looking at — and the one nobody looks at is the
 // one that drifts.
-import type { Renderer } from "@devalbo/ilc-web/terminal";
+import type { Renderer } from "@devalbo/dlc-web/terminal";
 
 import {
   CreateRecordResponse,

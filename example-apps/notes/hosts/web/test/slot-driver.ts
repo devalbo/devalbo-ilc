@@ -2,12 +2,12 @@
 //
 // Imported by URL from `page.evaluate`, exactly as `driver.ts` is: page.evaluate
 // runs in the BROWSER, which Vite never transformed, so a bare specifier like
-// `@devalbo/ilc-web/testing` cannot resolve there. A module fetched from the dev
+// `@devalbo/dlc-web/testing` cannot resolve there. A module fetched from the dev
 // server can, because Vite transforms it on the way out.
 //
 // Nothing in the app imports this, so a production build never sees it.
-import { createFakePort, ok, err } from "@devalbo/ilc-web/testing";
-import type { FakePort } from "@devalbo/ilc-web/testing";
+import { createFakePort, ok, err } from "@devalbo/dlc-web/testing";
+import type { FakePort } from "@devalbo/dlc-web/testing";
 
 import {
   ListRecordsResponse,

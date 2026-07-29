@@ -9,7 +9,7 @@
 // cannot check: it compares command results, the written filesystem, and the
 // event stream, all of which are engine-side. So the slot needs its own way to
 // be wrong out loud, and it only has one if the engine can be swapped out.
-import { enginePort } from "@devalbo/ilc-web/port";
+import { enginePort } from "@devalbo/dlc-web/port";
 
 import { mountNotes } from "./view";
 import type { NotesView } from "./view";
@@ -30,7 +30,7 @@ const view = mountNotes(enginePort);
 // Note what it is NOT: a way to reach the engine. It exposes the slot's own
 // operations, so anything you can do here, a user can do by clicking. To drive
 // the engine *underneath* the UI — a second writer, which is a different thing —
-// go through `@devalbo/ilc-web/api` directly, as `test/driver.ts` does.
+// go through `@devalbo/dlc-web/api` directly, as `test/driver.ts` does.
 declare global {
   interface Window {
     app: NotesView;

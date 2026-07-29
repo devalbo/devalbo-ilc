@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devalbo/devalbo-ilc/engine/platform"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+	"github.com/devalbo/dlc-platform"
 )
 
 // dlc's version, HARDCODED — and the one dogfood gap that is a real constraint
@@ -301,20 +301,23 @@ func identifier(app string) string {
 // platformReplace emits the go.mod line that lets a generated project resolve
 // the platform module.
 //
-// BOOTSTRAP ONLY: ilc-platform is not published yet, so a scaffolded project
+// BOOTSTRAP ONLY: dlc-platform is not published yet, so a scaffolded project
 // cannot `go get` it. A `replace` pointing at a local checkout is the smallest
 // thing that builds, and it is deliberately loud about being temporary — delete
 // it the day the module is tagged. Without a path we emit the instructions
 // rather than a broken build with no explanation.
 func platformReplace(path string) string {
-	const why = "// BOOTSTRAP: ilc-platform is not published yet. This `replace` points at a\n" +
-		"// local checkout of devalbo-ilc; delete it once the module is tagged and\n" +
-		"// `go get github.com/devalbo/devalbo-ilc` resolves on its own.\n"
+	const why = "// BOOTSTRAP: dlc-platform is not published yet. This `replace` points at the\n" +
+		"// platform inside a local devalbo-ilc checkout; delete it once the module is\n" +
+		"// tagged and `go get github.com/devalbo/dlc-platform` resolves on its own.\n"
 	if path == "" {
-		return why + "// replace github.com/devalbo/devalbo-ilc => /path/to/devalbo-ilc\n" +
+		return why + "// replace github.com/devalbo/dlc-platform => /path/to/devalbo-ilc/dlc-platform\n" +
 			"//\n// ^ uncomment and set the path, or re-run `dlc new` with --platform-path."
 	}
-	return why + "replace github.com/devalbo/devalbo-ilc => " + path
+	// PlatformPath names the devalbo-ilc checkout; the module is the platform
+	// directory inside it (§16.4). A scaffolded app depends on the PLATFORM and
+	// not on dlc — dlc is the tool that generated it, not something it links.
+	return why + "replace github.com/devalbo/dlc-platform => " + path + "/dlc-platform"
 }
 
 // scaffold renders the template tree and writes it. One implementation, reached

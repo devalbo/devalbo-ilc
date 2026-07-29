@@ -21,7 +21,7 @@ same sentence has no counterpart one directory over. Empirically:
 
 | Path | What it actually is |
 | --- | --- |
-| `hosts/web/` | pure inherited runtime — worker, OPFS, Comlink, `api.ts`, the pinned shim. Already `@devalbo/ilc-web`. |
+| `hosts/web/` | pure inherited runtime — worker, OPFS, Comlink, `api.ts`, the pinned shim. Already `@devalbo/dlc-web`. |
 | `hosts/native/` | **mixed** — the in-process engine binding is runtime; `commands.go`, `build.go`, `gen.go`, `manifest.go` are `dlc`'s own app code |
 | `frontend/` | `dlc`'s web-tier app code, under a name that says "web UI" rather than "web host" |
 | `example-apps/notes/hosts/native/` | app code |
@@ -53,7 +53,7 @@ Two layers, one name each:
 
 | Layer | Portability | Contents |
 | --- | --- | --- |
-| **host runtime** — inherited | same for every app | instantiate the engine, wire capabilities, deliver events, build requests from argv/forms. `@devalbo/ilc-web`, and a native equivalent. |
+| **host runtime** — inherited | same for every app | instantiate the engine, wire capabilities, deliver events, build requests from argv/forms. `@devalbo/dlc-web`, and a native equivalent. |
 | **tier slot** — `hosts/<tier>/`, per app | **per app, per tier** | this app's presentation and input on this tier |
 
 A **tier slot** is the unit: one directory per tier in `dlc.toml`, holding only this app's code for that
@@ -301,7 +301,7 @@ proves the point: creating from the console updates the list *by event*, exactly
 
 It is deliberately **not** a handle on the engine. Everything it can do, a user can do by clicking. Driving
 the engine *underneath* the UI — a second writer — is a different thing and goes through
-`@devalbo/ilc-web/api`, as `test/driver.ts` does.
+`@devalbo/dlc-web/api`, as `test/driver.ts` does.
 
 **The markup is fetched, not copied.** The harness page loads no app script; the driver fetches
 `/index.html`, parses it, and mounts the view into the real form. A duplicated `<form>` in the test would

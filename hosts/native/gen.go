@@ -66,14 +66,15 @@ func runGen(args []string) error {
 func copyPlatformTS(m *Manifest) error {
 	if m.PlatformPath == "" {
 		// No local platform checkout: nothing to copy, and nothing to say. When
-		// ilc-platform is published this becomes a package dependency instead.
+		// dlc-platform is published this becomes a package dependency instead.
 		return nil
 	}
-	// `devalbo/ilc` ONLY — the inherited platform surface. The platform's tree
-	// also holds `devalbo/dlc` (dlc's own commands) and leftover spike packages,
-	// and an app has no business carrying either: dlc is an app like any other,
-	// and its command surface is not part of what other apps inherit.
-	src := filepath.Join(m.PlatformPath, "gen", "ts", "devalbo", "ilc")
+	// From the PLATFORM MODULE's own generated tree (§16.4), not dlc's. Since the
+	// extraction those are two directories: `dlc-platform/gen/ts` holds the
+	// inherited surface and `gen/ts` holds dlc's own commands. An app inherits
+	// the first and has no business carrying the second — dlc is an app like any
+	// other, and its command surface is not part of what other apps inherit.
+	src := filepath.Join(m.PlatformPath, "dlc-platform", "gen", "ts", "devalbo", "ilc")
 	if _, err := os.Stat(src); err != nil {
 		// The platform has not generated its own TS yet. Not fatal: an app that
 		// never touches an inherited command still builds.

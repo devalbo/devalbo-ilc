@@ -3,8 +3,8 @@
 // Reads the filesystem DIRECTLY, not through the engine — which is the point: if
 // the store were only readable via the app, "the files are the truth" (§7.1)
 // would be a claim about an implementation detail rather than about the store.
-import { onFlush } from "@devalbo/ilc-web/api";
-import { filesStyles, mountFiles } from "@devalbo/ilc-web/files";
+import { onFlush } from "@devalbo/dlc-web/api";
+import { filesStyles, mountFiles } from "@devalbo/dlc-web/files";
 
 document.head.appendChild(document.createElement("style")).textContent =
   filesStyles();

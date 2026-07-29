@@ -3,6 +3,9 @@
 
 # Generated: wit-bindgen-go + buf output
 /gen/
+# dlc-platform/gen IS committed — a consumer of dlc-platform cannot run buf or
+# wit-bindgen (AGENTS.md §6). It is the one generated tree under version control.
+!dlc-platform/gen/
 
 # WASM build artifacts
 *.wasm

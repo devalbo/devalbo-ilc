@@ -3,9 +3,9 @@
 // The renderers are the same ones the terminal uses — deliberately shared rather
 // than re-listed, because a second copy would be a second place for a response
 // to be formatted differently depending on which page you were looking at.
-import { enginePort } from "@devalbo/ilc-web/port";
-import { setEnvironment, type CommandResult } from "@devalbo/ilc-web/api";
-import { inspectorStyles, mountInspector } from "@devalbo/ilc-web/inspector";
+import { enginePort } from "@devalbo/dlc-web/port";
+import { setEnvironment, type CommandResult } from "@devalbo/dlc-web/api";
+import { inspectorStyles, mountInspector } from "@devalbo/dlc-web/inspector";
 
 import { NotesServiceCLI } from "@gen/notes/v1/commands.cli.pb";
 import { PlatformServiceCLI } from "@gen/devalbo/ilc/v1/platform.cli.pb";

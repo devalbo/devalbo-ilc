@@ -6,9 +6,9 @@
 // guards, so nothing else in this repo can notice if the two disagree about what
 // `create --title "Buy milk"` means. Exporting the encoded bytes lets a test
 // compare them against what the Go runner builds for the same line.
-import { createFakePort, ok } from "@devalbo/ilc-web/testing";
-import { complete, createTerminal } from "@devalbo/ilc-web/terminal";
-import type { Terminal } from "@devalbo/ilc-web/terminal";
+import { createFakePort, ok } from "@devalbo/dlc-web/testing";
+import { complete, createTerminal } from "@devalbo/dlc-web/terminal";
+import type { Terminal } from "@devalbo/dlc-web/terminal";
 
 import {
   CreateRecordResponse,

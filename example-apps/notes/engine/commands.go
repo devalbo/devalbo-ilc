@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devalbo/devalbo-ilc/engine/platform"
+	"github.com/devalbo/dlc-platform"
 
 	"github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/dlcconfig"
 

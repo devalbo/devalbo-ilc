@@ -17,17 +17,16 @@ module  = "github.com/devalbo/devalbo-ilc"
 capabilities = ["console", "filesystem"]
 # NOTE THE COLLISION, and that it is deliberate. For an app, `hosts/native/` is
 # the tier slot. Here it is BOTH the slot (dlc's own commands.go, build.go,
-# gen.go) and the not-yet-extracted native runtime. Splitting them is the
-# "lift-ready package" task; until then this root names a directory doing two
-# jobs, which `hosts/README.md` records as debt rather than design.
+# gen.go). The RUNTIME half is gone — the CLI runner now lives in
+# `dlc-platform/cli` — so what is left is dlc's slot plus dlc's toolchain, which
+# is a normal thing for an app to have.
 root      = "hosts/native"
 
 [tiers.web]
 capabilities = ["console", "filesystem"]
-# `frontend/`, not `hosts/web/` — the other half of the same debt. `hosts/web/`
-# is the inherited RUNTIME (published as @devalbo/ilc-web), so dlc's own web slot
-# cannot take that name until the runtime is extracted (§16.4). Every app uses
-# `hosts/web/`; dlc is the exception, and it is a temporary one.
-root      = "frontend"
-assets    = "frontend/src/wasm"
+# `hosts/web/` — the same name every app uses. It was `frontend/` until the
+# platform extraction (§16.4) moved the inherited runtime to `dlc-platform/web`
+# and freed this name. dlc is no longer the exception it used to be here.
+root      = "hosts/web"
+assets    = "hosts/web/src/wasm"
 component = "engine.component.wasm"

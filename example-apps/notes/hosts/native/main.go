@@ -28,11 +28,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devalbo/devalbo-ilc/engine/platform"
-	"github.com/devalbo/devalbo-ilc/engine/platform/cli"
-	"github.com/devalbo/devalbo-ilc/engine/platform/clispec"
 	"github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/dlcconfig"
-	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/dlc-platform/cli"
+	"github.com/devalbo/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/notes/engine" // importing the engine registers its commands
 	notesv1 "github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/notes/v1"

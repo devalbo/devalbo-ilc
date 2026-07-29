@@ -12,9 +12,15 @@ HOST_SRC    := ./hosts/native           # native dlc host: engine linked in-proc
 
 .PHONY: gen
 gen: ## generate WIT + proto bindings (requires devbox shell)
-	wit-bindgen-go generate --world engine --out gen/go ./wit
-	wit-bindgen-go generate --world async-engine --out gen/go ./wit
-	cd proto && buf lint && buf generate
+	# The WIT world and the ILC schema belong to the PLATFORM module (§16.4), so
+	# their bindings are generated into it — and, unlike everything else under
+	# gen/, they are COMMITTED: a consumer of dlc-platform cannot run buf or
+	# wit-bindgen (AGENTS.md §6).
+	wit-bindgen-go generate --world engine --out dlc-platform/gen/go ./dlc-platform/wit
+	wit-bindgen-go generate --world async-engine --out dlc-platform/gen/go ./dlc-platform/wit
+	buf lint
+	buf generate --template buf.gen.platform.yaml dlc-platform/proto
+	buf generate --template buf.gen.yaml proto
 
 .PHONY: sync-template-proto
 sync-template-proto: ## copy the shared options.proto into the template AND the example apps
@@ -23,14 +29,14 @@ sync-template-proto: ## copy the shared options.proto into the template AND the 
 	# published to a schema registry. Kept a pure byte-copy (provenance lives in
 	# the README beside it) so TestTemplateOptionsProtoInSync is exact equality
 	# and the eventual swap to a registry dep is a clean delete.
-	@cp proto/devalbo/options/v1/options.proto \
+	@cp dlc-platform/proto/devalbo/options/v1/options.proto \
 		templates/component-model/proto/devalbo/options/v1/options.proto.tmpl
 	# The example apps vendor it too, and they went stale the first time this
 	# file gained an option: notes' codegen failed with an error naming neither
 	# the file nor the app, because buf cancels every plugin when one fails.
 	# An example app demonstrates current practice or it teaches the wrong thing.
 	@for app in example-apps/*/proto/devalbo/options/v1/options.proto; do \
-		[ -f "$$app" ] && cp proto/devalbo/options/v1/options.proto "$$app"; \
+		[ -f "$$app" ] && cp dlc-platform/proto/devalbo/options/v1/options.proto "$$app"; \
 	done
 
 .PHONY: build-host
@@ -39,7 +45,7 @@ build-host: sync-template-proto ## native dlc binary — engine linked in-proces
 
 .PHONY: build-engine
 build-engine: gen ## TinyGo -target=wasip2 -> engine.component.wasm (wasip2-direct, Spike 1)
-	tinygo build -target=wasip2 --wit-package ./wit --wit-world engine \
+	tinygo build -target=wasip2 --wit-package ./dlc-platform/wit --wit-world engine \
 		-o $(COMPONENT) $(ENGINE_SRC)
 
 .PHONY: component
@@ -75,35 +81,40 @@ build-wasm: component gen-web ## transpile the component for the web (jco)
 	# --map: jco emits `import { emit } from 'devalbo:ilc/events'` for the custom
 	# capability import, which no bundler resolves on its own. Same mapping that
 	# `dlc build web` applies for scaffolded apps.
-	jco transpile $(COMPONENT) -o frontend/src/wasm \
-		--map 'devalbo:ilc/events=@devalbo/ilc-web/events'
+	jco transpile $(COMPONENT) -o hosts/web/src/wasm \
+		--map 'devalbo:ilc/events=@devalbo/dlc-web/events'
 
 .PHONY: gen-web
 gen-web: gen ## copy generated es-lite messages into the Vite root
 	# Bundlers resolve @aptre/* from the IMPORTING file's directory tree, and
-	# gen/ts sits outside frontend/ — so the generated messages are copied in
+	# gen/ts sits outside hosts/web/ — so the generated messages are copied in
 	# rather than aliased (same workaround as spike-proto; Spike 2 finding).
-	rm -rf frontend/src/gen
-	mkdir -p frontend/src/gen
-	cp -R gen/ts/devalbo frontend/src/gen/
+	rm -rf hosts/web/src/gen
+	mkdir -p hosts/web/src/gen
+	# TWO sources now: the platform's schema generates into the platform module
+	# (§16.4) and dlc's own into gen/. Both land under one @gen root because an
+	# importing file should not have to know which module a message came from —
+	# that is exactly the detail the extraction is meant to hide.
+	cp -R dlc-platform/gen/ts/devalbo hosts/web/src/gen/
+	cp -R gen/ts/devalbo/* hosts/web/src/gen/devalbo/
 
 .PHONY: dev-web
 dev-web: build-wasm ## run the web tier dev server (Vite)
 	# `npm run vite` (not `npm run dev`) — the dev script delegates back here, so
 	# calling it would recurse. This target is the one that owns the build order.
-	cd frontend && npm install --silent --no-audit --no-fund && npm run vite
+	cd hosts/web && npm install --silent --no-audit --no-fund && npm run vite
 
 .PHONY: verify-web
 verify-web: build-wasm ## B3: dlc new in the browser, persisted in OPFS (headless)
-	cd frontend && npm install --silent --no-audit --no-fund
-	cd frontend && npx playwright install chromium
-	cd frontend && npx playwright test
+	cd hosts/web && npm install --silent --no-audit --no-fund
+	cd hosts/web && npx playwright install chromium
+	cd hosts/web && npx playwright test
 
 .PHONY: verify-web-watch
 verify-web-watch: build-wasm ## verify-web headed + slowMo, so you can watch it
-	cd frontend && npm install --silent --no-audit --no-fund
-	cd frontend && npx playwright install chromium
-	cd frontend && DLC_WEB_WATCH=1 npx playwright test --headed
+	cd hosts/web && npm install --silent --no-audit --no-fund
+	cd hosts/web && npx playwright install chromium
+	cd hosts/web && DLC_WEB_WATCH=1 npx playwright test --headed
 
 .PHONY: test-b0
 test-b0: ## Phase B0 repo-integrity checks (no toolchain needed)

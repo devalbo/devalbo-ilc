@@ -25,7 +25,7 @@ reach custom-option values, which is why this option exists.
 **Never write an id in Go or TypeScript.** They are generated (`*.registry.pb.go`, `*.registry.pb.ts`).
 Hand-mirroring is how an id ends up living in two places that silently disagree.
 
-**Bands are permanent** (Decision 32 / `engine/platform/registry.go`):
+**Bands are permanent** (Decision 32 / `dlc-platform/registry.go`):
 
 | Range | Owner |
 | --- | --- |
@@ -55,8 +55,9 @@ containment is inherited rather than re-implemented per command.
 
 ## 3. The platform boundary
 
-`engine/platform/` is what every app **inherits**; `engine/` is `dlc`'s own app code. It becomes the
-`ilc-platform` module, so:
+`dlc-platform/` is what every app **inherits**; `engine/` is `dlc`'s own app code. It **is** a separate Go
+module — `github.com/devalbo/dlc-platform`, named for where it is going and resolved by `replace` until it
+gets there (§16.4). So:
 
 **Templates depend on the platform; they never inline it.** Code copied into a scaffold is frozen there
 forever — a path-containment fix inlined into a template could never reach an already-generated app. The
@@ -162,7 +163,7 @@ to the surface vectors too.
 ## 3a. The host layer
 
 **`hosts/` splits the same way `engine/` does** (Decision 34): inherited **host runtime** (`hosts/web/` —
-`@devalbo/ilc-web`) versus an app's **tier slot**, `hosts/<tier>/`, holding that app's presentation and
+`@devalbo/dlc-web`) versus an app's **tier slot**, `hosts/<tier>/`, holding that app's presentation and
 input for one tier. Every tier in `dlc.toml` names its slot as `root`, and `dlc` refuses a manifest whose
 slot is missing — the one field that file actually gates.
 
@@ -171,9 +172,9 @@ event stream — all engine-side — so a slot is invisible to it *by constructi
 compute the same conclusion will eventually disagree on one tier only, with every check still green. The
 engine decides `winner`; a slot may highlight the line the engine named and may not find one.
 
-**`frontend/` at the repo root is `dlc`'s own web slot**, not runtime, and keeps that name only until the
-runtime is extracted (§16.4) and frees `hosts/web/`. Apps have no such collision — see
-`example-apps/notes/`.
+**`hosts/` in this repo holds `dlc`'s own slots and nothing else**, since the runtime moved out to
+`dlc-platform` (§16.4). `dlc`'s web slot is `hosts/web/`, the same name every app uses — it was `frontend/`
+while that name was taken.
 
 ## 3b. The command surface is generated, not hand-written
 
@@ -242,5 +243,12 @@ repo root, two of them inside a commit. Use `go build -o "$(mktemp -d)/x" ./cmd/
 only want to know it compiles. The `.gitignore` has an entry per main package as a backstop, but the
 backstop only works for names someone remembered to add.
 
-**Generated code is not committed** (`/gen/` is ignored) — but the **id lock is**. Note that publishing
-`ilc-platform` will require committing its generated proto code, since consumers cannot run `buf`.
+**Generated code is not committed** (`/gen/` is ignored) — with ONE exception: **`dlc-platform/gen/` is
+committed**, because a consumer of that module cannot run `buf` or `wit-bindgen`. The **id locks are
+committed too**, and there are now two — `dlc-platform/proto/method-ids.lock` for the framework band
+(1–9999) and `proto/method-ids.lock` for dlc's own app ids.
+
+**Anything a scaffolded app needs belongs in `dlc-platform`.** An app depends on the platform and NOT on
+`dlc`: the module, the WIT world, and `protoc-gen-dlc-registry` all live there, so a generated project
+builds and generates without the dlc repo at all. If you find yourself adding a `devalbo-ilc` import to the
+template, the thing you are importing is in the wrong module.

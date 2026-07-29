@@ -3,7 +3,7 @@
 // Chooses an engine and publishes a handle. The view takes an `EnginePort`, so
 // the only difference between the real app and a slot test is which port is
 // passed — no build flag, no mock injection, no branch inside the view.
-import { enginePort } from "@devalbo/ilc-web/port";
+import { enginePort } from "@devalbo/dlc-web/port";
 
 import { gameStyles, mountGame } from "./view";
 import type { GameView } from "./view";

@@ -12,11 +12,11 @@
 // The engine arrives as an ARGUMENT (`EnginePort`), not as an import. That is
 // why this file is separate from main.ts: mount it against the real port and it
 // drives a wasm component in a worker; mount it against the fake in
-// `@devalbo/ilc-web/testing` and the same code renders with no engine at all.
+// `@devalbo/dlc-web/testing` and the same code renders with no engine at all.
 // A slot is the one part of an ILC app that parity cannot check — parity
 // compares command results, the written filesystem, and the event stream, all
 // engine-side — so it needs its own way to be wrong out loud.
-import type { EnginePort } from "@devalbo/ilc-web/port";
+import type { EnginePort } from "@devalbo/dlc-web/port";
 
 // Two generated files, two generators: es-lite emits the MESSAGES, and
 // protoc-gen-dlc-registry emits the permanent method IDS. Neither is hand-written.

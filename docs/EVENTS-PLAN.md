@@ -283,7 +283,7 @@ await expect(page.getByTestId("count")).toHaveText("2");
 **Landed. One deviation, from a constraint the plan's snippet could not satisfy.**
 
 **The driver is a module, not an inline import.** `page.evaluate` runs in the BROWSER, which Vite never
-transformed — so `import("@devalbo/ilc-web/api")` inside it cannot resolve a bare specifier. The write
+transformed — so `import("@devalbo/dlc-web/api")` inside it cannot resolve a bare specifier. The write
 therefore comes from `test/driver.ts`, imported by URL (`/test/driver.ts`), which the dev server transforms
 on fetch. Nothing in the app imports it, so a production build never sees it; it shares the page's engine
 because both modules import the same api URL and ES modules are singletons per graph. This is a stronger

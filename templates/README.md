@@ -65,7 +65,7 @@ templates stay logic-free and the derivation stays testable.
 
 **Bootstrap sequencing (locked):**
 1. Author skeletons **in-tree**; lift to per-skeleton git submodules later.
-2. **Defer** versioned `ilc-platform` `go.mod` depends until that submodule graduation. Until then
+2. **Defer** versioned `dlc-platform` `go.mod` depends until that submodule graduation. Until then
    `dlc new --platform-path` writes a `replace` directive, clearly marked in the generated `go.mod`.
 3. `component-model/` is a **full `dlc`-shaped app**, not a thin hello-world.
 4. Template trees are **`go:embed`'d into the engine** so `dlc new` works offline *and* in the
@@ -75,7 +75,7 @@ templates stay logic-free and the derivation stays testable.
 before the change takes effect.
 
 **Rules:**
-- **Depend-on, never inline.** The scaffold requires `ilc-platform` as a module; it never copies
+- **Depend-on, never inline.** The scaffold requires `dlc-platform` as a module; it never copies
   platform code, so upstream fixes arrive on a version bump instead of being frozen at scaffold time.
   The one deliberate exception is `proto/devalbo/options/v1/options.proto`, vendored because a
   generated project has no other way to resolve `method_id` until the platform is published — kept a

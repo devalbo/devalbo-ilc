@@ -21,7 +21,7 @@ while every filesystem verb on both tiers was broken.
 
 **Current focus: nothing is claimed.** The candidates, roughly ordered: the **SQLite index** (§6.2, now
 unblocked — the manifest makes `unavailable` expressible and it is the second consumer that will catch a
-wrong schema shape), the §16.4 `ilc-platform` extraction (which unblocks dlc's hardcoded version, the
+wrong schema shape), the §16.4 `dlc-platform` extraction (which unblocks dlc's hardcoded version, the
 `frontend/` → `hosts/web/` move, and the `hosts/native` runtime/slot split), and the embedded tier.
 
 _Created 2026-07-25. Re-anchored 2026-07-27 — several boxes below were stale, ticked against what is
@@ -107,7 +107,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 
 ### Templates (its own area, §16.6 — bootstrap sequencing locked)
 - [x] Author **`templates/component-model/` in-tree** — **full `dlc`-shaped** skeleton (engine + CLI/web host stubs + go.mod + devbox + proto; the WIT world is supplied by `dlc build`, so a scaffolded app carries none and cannot be stranded on a stale one). **Do not** create the skeleton git submodule yet (lift later). **Note for the host layer:** the skeleton currently ships `frontend/` *and* `hosts/native/` — two names for one layer, which `HOST-LAYER-PLAN.md` Phase 1/5 unifies.
-- [ ] **Defer** versioned `ilc-platform` `go.mod` depend until submodule graduation (§16.4 / §16.6 #2)
+- [ ] **Defer** versioned `dlc-platform` `go.mod` depend until submodule graduation (§16.4 / §16.6 #2)
 - [ ] `templates/fragments/` in-tree for overlay packs (`--caps` / `--tiers` / …) — ABI mode picks the skeleton, not a fragment
 - [x] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates — `templates/templates.go`, `//go:embed all:component-model`
 - [ ] **`templates/wamr/`** — Backlog until embedded verify exists; do not add an unverifiable stub in B2
@@ -247,7 +247,7 @@ owns parsing and history. A slot renders, it never decides (Decision 34).
 **Framework: a plain core, with an optional React wrapper — not React in the runtime.** It is tempting to
 say "we already use React", but that is only true of **`dlc`'s own `frontend/`**: the template and notes are
 vanilla TS, and `dlc new --ui REACT` is unimplemented (the engine rejects `UI_KIND_REACT` — the web tier
-scaffolds vanilla TS). Putting React in `@devalbo/ilc-web` would push it onto every scaffolded app that
+scaffolds vanilla TS). Putting React in `@devalbo/dlc-web` would push it onto every scaffolded app that
 deliberately has none, and make the runtime's dependency set depend on a UI choice apps have not made.
 
 So: the terminal core is framework-free — it is parse → dispatch → render text, which needs no framework —
@@ -492,7 +492,7 @@ usability cost, a tier-dependent one is a parity failure.
 ### Capabilities
 - [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan. **Unblocked (2026-07-28):** the manifest makes `unavailable` expressible — add an `Index` field, register the index block from it, and the fallback becomes a branch on `platform.HasIndex()` rather than a linking problem. Two things the manifest work says to carry over: the fallback must return IDENTICAL results to the fast path (a fallback that answers differently is a second implementation), and adding a capability means adding it to the **surface** parity vectors, because parity cannot see registration
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
-- [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/ilc-web/api` was enough, and notes' UI is not React
+- [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/dlc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes
   - [ ] follow-up: no desktop tier to wire `runtime.EventsEmit` into yet (§6.3)
 - [x] **An app cannot ask whether it HAS a filesystem, and absence is not survivable.** *CLOSED 2026-07-28 by the manifest.* `platform.HasFilesystem()` answers it, `Availability` distinguishes "nobody said" from "there is none", and an app on `RegisterDiscovered` never registers verbs it cannot serve. §6.5's promise is now partly kept and partly reframed: the platform REPORTS and the app DECIDES (plan D10), so there is no inherited degradation mechanism — only an inherited way to ask. Original note: §6.5 promises graceful degradation when a capability is missing, and for the filesystem there is no degradation path at all: `engine/platform` exposes no availability API — no `Available()`, no `unavailable` — so an app calls `WriteTree` and either it works or it returns an error it had no way to anticipate. `dlc.toml`'s `capabilities = ["console", "filesystem"]` does not help; it has one writer and zero readers. Today apps *assume*. The **query/verify** half is exactly what the manifest below is for, and it is the first concrete demand on it that is not about Display — which matters, since Decision 34 removed the Display argument for building it.
@@ -511,7 +511,7 @@ usability cost, a tier-dependent one is a parity failure.
 - [ ] **RP2040** — native TinyGo build (no wasm) — §5.3
 - [ ] WAMR embedded spike (the deferred §11 spike 3)
 - [ ] **WAMR skeleton** (`templates/wamr/`) — wasip1 + native-fn caps; only after the WAMR spike can `verify` (§16.6, Decision 25); in-tree first, submodule later
-- [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `ilc-platform` depends (§16.6 sequencing #1–#2)
+- [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `dlc-platform` depends (§16.6 sequencing #1–#2)
 
 ### Filesystem export/import (§7.3)
 - [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive) — declared in `BundleFormat` and **explicitly refused** today rather than silently returning BFT
@@ -519,7 +519,7 @@ usability cost, a tier-dependent one is a parity failure.
 - [ ] Two-apps/versions **BFT interchange** workflow (diff/migrate/merge). **Foundation landed:** `make verify-bundle-xtier` proves a bundle exported in the **browser** imports in the **terminal** and rebuilds a byte-identical tree; the diff/migrate/merge workflows build on that.
 
 ### Platform & tooling
-- [~] Extract **`ilc-platform`** module once App #2 shares it (§16.4) — templates depend-on, never inline. **Package boundary landed early** as `engine/platform/` (a later module extraction is a directory move): dispatch, fs root seam, `SafeJoin`/`WriteTree`, BFT, and the inherited verbs. Driven by the template work — a template built against the wrong boundary would teach it to every scaffolded app. **Method id bands reserved: 1–9999 ILC (capability sub-blocks, 600–9999 held for capabilities not yet shipped), 10000+ the app** (`platform.AppMethodBase`); settled before the id-lock existed, when renumbering was still free. **`dlc` claims no reserved block — it is an app like any other** (`New`=10000): it never shares a registry with a scaffolded app, so a block would be signalling not protection, and keeping it in the app band is the dogfooding (plan §8).
+- [x] Extract **`dlc-platform`** module once App #2 shares it (§16.4) — **DONE 2026-07-28.** A real nested Go module at `dlc-platform/`, named `github.com/devalbo/dlc-platform` for where it is going and resolved by `replace` until it gets there. Carries the Go platform, the protos + **committed** generated code (consumers cannot run `buf`), the WIT world, `protoc-gen-dlc-registry`, and the TS runtime `dlc-platform/web` (`@devalbo/dlc-web`). **A scaffolded app now depends on the platform and not on `dlc` at all.** Two id locks, one per band. `dlc`'s web slot moved `frontend/` → `hosts/web/`, so dlc finally has the layout it scaffolds. Original note: — templates depend-on, never inline. **Package boundary landed early** as `engine/platform/` (a later module extraction is a directory move): dispatch, fs root seam, `SafeJoin`/`WriteTree`, BFT, and the inherited verbs. Driven by the template work — a template built against the wrong boundary would teach it to every scaffolded app. **Method id bands reserved: 1–9999 ILC (capability sub-blocks, 600–9999 held for capabilities not yet shipped), 10000+ the app** (`platform.AppMethodBase`); settled before the id-lock existed, when renumbering was still free. **`dlc` claims no reserved block — it is an app like any other** (`New`=10000): it never shares a registry with a scaffolded app, so a block would be signalling not protection, and keeping it in the app band is the dogfooding (plan §8).
 - [ ] **Periodic dogfood review — where is `dlc` not using its own framework?** `AGENTS.md` §3 already says "`dlc` is an app like any other; if `dlc` needs special treatment, the template is teaching something `dlc` does not do." Nothing enforces it, and drift is **one-directional and invisible**: a capability gets built, notes and the template adopt it, and `dlc` keeps the old shape — so the tool that teaches the pattern is the one app not following it, and nobody notices because everything is green.
 
   **Cadence: when a capability or plan phase LANDS**, not on a calendar. That is when drift is created, and the diff is still fresh enough to fix cheaply.
@@ -540,9 +540,15 @@ usability cost, a tier-dependent one is a parity failure.
         would import it. Needs a standalone generator, which needs the manifest parser out of
         `hosts/native` (package main). Until then the version lives in two places and this review is what
         catches them diverging.
-  - [ ] **`hosts/native/` is still both the slot and the un-extracted runtime**, and `frontend/` is still
-        dlc's web slot rather than `hosts/web/` — the two halves of the §16.4 extraction debt, now written
-        into `dlc.toml` where they are visible rather than implied.
+  - [x] **`hosts/native/` was both the slot and the un-extracted runtime, and `frontend/` was dlc's web
+        slot rather than `hosts/web/`** — both halves CLOSED 2026-07-28 by the §16.4 extraction. The
+        runtime is `dlc-platform/` (Go) and `dlc-platform/web` (TS); `hosts/` now holds dlc's own slots and
+        nothing else, and dlc's web slot is `hosts/web/` like every app's. What remains in `hosts/native/`
+        is dlc's slot plus dlc's toolchain, which is ordinary.
+  - [ ] **still open: dlc's hardcoded version.** The extraction did NOT unblock this — the cycle is
+        `dlcconfig` being written by the dlc binary that is built from the package that would import it,
+        and the manifest parser is still in `hosts/native` (package main). Unchanged by moving the
+        platform out.
 
   **Second review run, 2026-07-28 — after the environment manifest (all four phases).** The two open items
   above are unchanged. What this capability created and the review caught:

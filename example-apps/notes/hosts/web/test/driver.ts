@@ -12,10 +12,10 @@
 // in `main.ts` is on the stack, and the list still has to update.
 //
 // It shares the app's engine rather than starting a second one: both modules
-// import the same `@devalbo/ilc-web/api` URL, and ES modules are singletons per
+// import the same `@devalbo/dlc-web/api` URL, and ES modules are singletons per
 // graph, so this goes through the same worker and the same subscription the page
 // already installed.
-import { execute } from "@devalbo/ilc-web/api";
+import { execute } from "@devalbo/dlc-web/api";
 import { CreateRecordRequest } from "@gen/notes/v1/commands.pb";
 import { MethodCreateRecord } from "@gen/notes/v1/commands.registry.pb";
 

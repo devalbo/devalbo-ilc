@@ -3,7 +3,7 @@
 //
 // A slot renders, it never decides: every one of these formats what the engine
 // returned and works nothing out.
-import type { Renderer } from "@devalbo/ilc-web/terminal";
+import type { Renderer } from "@devalbo/dlc-web/terminal";
 
 import {
   GetStateResponse,
