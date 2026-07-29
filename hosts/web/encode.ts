@@ -132,11 +132,11 @@ function twosComplement(n: bigint): bigint {
   return n < 0n ? (1n << 64n) + n : n;
 }
 
-function appendTag(out: number[], field: number, wire: number): void {
+export function appendTag(out: number[], field: number, wire: number): void {
   appendVarint(out, BigInt((field << 3) | wire));
 }
 
-function appendVarint(out: number[], n: bigint): void {
+export function appendVarint(out: number[], n: bigint): void {
   let v = n;
   while (v > 0x7fn) {
     out.push(Number((v & 0x7fn) | 0x80n));

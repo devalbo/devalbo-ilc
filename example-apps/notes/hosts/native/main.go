@@ -45,7 +45,10 @@ func main() {
 	// `./.notes/`: project-local like git, so running in two projects keeps
 	// two stores, but CONFINED — which matters because `reset-fs` is inherited
 	// and would otherwise clear whatever directory you happened to be in.
-	if err := platform.SetRoot(platform.AppRoot(dlcconfig.Name)); err != nil {
+	if err := platform.Boot(platform.BootOptions{
+		Root:           platform.AppRoot(dlcconfig.Name),
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
+	}); err != nil {
 		os.Stderr.WriteString("notes: " + err.Error() + "\n")
 		os.Exit(2)
 	}

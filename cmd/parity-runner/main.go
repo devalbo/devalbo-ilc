@@ -50,15 +50,67 @@ type marshaler interface{ MarshalVT() ([]byte, error) }
 // agree on all of them, error strings included.
 //
 // Every `new` fixture uses a DISTINCT app name. `new` writes a real tree and
-// refuses to overwrite one, so sharing a name would make each vector's result
-// depend on whether an earlier vector already created it — the vectors must be
-// order-independent within a run.
+// refuses to overwrite one, so sharing a name would make two vectors race for
+// the same tree.
+//
+// Vectors DO run in order and later ones may rely on earlier ones — the
+// export-fs vectors bundle trees the `new` vectors created, and everything
+// after the first vector relies on it having delivered the environment
+// manifest. What must not happen is two vectors contending for the same name.
+//
+// THE MANIFEST GOES FIRST, and not as housekeeping. dlc's engine registers its
+// filesystem verbs FROM it (RegisterDiscovered), so without it every
+// filesystem vector would answer "unknown method_id 100" — identically on both
+// tiers, leaving parity green while comparing two equally broken engines. That
+// is the blind spot D7 predicts: parity cannot see registration, only results.
+// Sending the manifest as vector #1 makes the ordering part of what is
+// compared instead of an assumption underneath it.
 var fixtures = []struct {
 	name    string
 	method  uint32
 	request marshaler
 	raw     string // hex, for deliberately malformed bytes (wins over request)
 }{
+	{name: "set-environment (launch)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{
+			Revision:   1,
+			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_PRESENT, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD},
+		},
+	}},
+	// applied=false: the revision is what decides, so contradicting the facts
+	// while keeping the number must change nothing. Both tiers must agree on
+	// that, or one of them would quietly re-register its command surface.
+	{name: "set-environment (unchanged revision)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{
+			Revision:   1,
+			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT},
+		},
+	}},
+	{name: "set-environment revision 0 (envelope error)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{Revision: 0},
+	}},
+	// THE ABSENT BRANCH, exercised on the real component and not only reasoned
+	// about. A capability going away must unregister its verbs identically on
+	// both tiers — and then come back, because a browser can lose an OPFS
+	// handle mid-session and regain one on the next grant.
+	//
+	// This is where the OPFS-denied case is actually proven. A Playwright stub
+	// of navigator.storage.getDirectory cannot reach it: the probe runs in the
+	// WORKER, whose global scope page-level init scripts do not touch. Here the
+	// same engine code runs, driven by the manifest rather than by a probe.
+	{name: "set-environment (filesystem goes away)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{
+			Revision:   2,
+			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT},
+		},
+	}},
+	{name: "export-fs with no filesystem (verb is not registered)", method: platform.MethodExportFs, request: &ilcv1.ExportFsRequest{}},
+	{name: "set-environment (filesystem returns)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{
+			Revision:   3,
+			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_PRESENT, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD},
+		},
+	}},
 	{name: "version", method: platform.MethodVersion, request: &ilcv1.VersionRequest{}},
 	{name: "echo hello world", method: engine.MethodEcho, request: &dlcv1.EchoRequest{Args: []string{"hello", "world"}}},
 	{name: "echo empty", method: engine.MethodEcho, request: &dlcv1.EchoRequest{}},

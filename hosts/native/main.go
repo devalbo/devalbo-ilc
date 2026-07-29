@@ -20,6 +20,7 @@ import (
 	"os"
 
 	"github.com/devalbo/devalbo-ilc/engine/platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/ilc/v1"
 
 	// Importing the engine is what REGISTERS dlc's commands; nothing else here
 	// touches it. The blank-ish import is load-bearing.
@@ -33,6 +34,10 @@ var toolchainVerbs = map[string]func([]string) error{
 }
 
 func main() {
+	// The whole startup sequence, in the one order that works (§2.5). Owned by
+	// the platform so a fix to the order reaches every app rather than only the
+	// ones scaffolded after it.
+	//
 	// dlc GRANTS ITSELF the working directory, overriding the `./.<app>/`
 	// convention every other app follows.
 	//
@@ -42,7 +47,10 @@ func main() {
 	// must bundle the tree in front of you. An app whose output belongs to the
 	// user rather than to itself should do the same; one that keeps a private
 	// store (notes, tictactoe) should not.
-	if err := platform.SetRoot("."); err != nil {
+	if err := platform.Boot(platform.BootOptions{
+		Root:           ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+	}); err != nil {
 		os.Stderr.WriteString("dlc: " + err.Error() + "\n")
 		os.Exit(2)
 	}

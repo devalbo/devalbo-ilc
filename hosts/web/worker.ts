@@ -24,6 +24,12 @@ import {
   _setFileData,
 } from "@bytecodealliance/preview2-shim/filesystem";
 import {
+  encodeSetEnvironment,
+  probeOPFS,
+  FILESYSTEM_KIND_OPFS,
+  METHOD_SET_ENVIRONMENT,
+} from "./environment";
+import {
   clearOPFS,
   flushTreeToOPFS,
   listOPFS,
@@ -88,11 +94,45 @@ setForwarder((topic, payload) => {
 
 async function boot(): Promise<EngineModule> {
   if (engine) return engine;
-  // 1. OPFS → in-memory FileData tree → the WASI root the guest will see.
-  _setFileData(await loadTreeFromOPFS());
-  // 2. Instantiate only now, so the preopen it captures is the hydrated tree.
+
+  // 1. Ask whether this browser will actually give us a filesystem. Not a
+  //    formality: getDirectory() rejects on denied storage and in some private
+  //    windows, and until this probe existed the worker booted an engine whose
+  //    every write failed with an error the app had no way to anticipate.
+  const hasFilesystem = await probeOPFS();
+
+  // 2. OPFS → in-memory FileData tree → the WASI root the guest will see.
+  //    With no OPFS there is nothing to hydrate FROM, and the empty tree is
+  //    what the guest gets: the engine still runs, it just has nowhere durable
+  //    to write — which is exactly what the manifest below is about to say.
+  _setFileData(hasFilesystem ? await loadTreeFromOPFS() : { dir: {} });
+
+  // 3. Instantiate only now, so the preopen it captures is the hydrated tree.
   //    Built by `make build-wasm` (TinyGo → jco transpile → frontend/src/wasm).
-  engine = (await import("@wasm/engine.component.js")) as unknown as EngineModule;
+  const mod = (await import("@wasm/engine.component.js")) as unknown as EngineModule;
+
+  // 4. State the facts BEFORE any other command (docs/ENVIRONMENT-PLAN.md
+  //    §2.5). Ordering is a correctness requirement, not a convention: an app
+  //    on RegisterDiscovered registers its filesystem verbs FROM this, so a
+  //    command sent first would find export-fs missing. Revision 1 — this is
+  //    launch, so there is nothing to be newer than.
+  const res = mod.execute(
+    METHOD_SET_ENVIRONMENT,
+    encodeSetEnvironment({
+      revision: 1,
+      filesystem: hasFilesystem
+        ? { available: true, kind: FILESYSTEM_KIND_OPFS }
+        : { available: false },
+    }),
+  );
+  if (!res.success) {
+    // Fail loudly rather than continue with an engine that half-exists: every
+    // command after this would fail for a reason that looks nothing like the
+    // cause.
+    throw new Error(`engine rejected the environment manifest: ${res.error ?? "unknown"}`);
+  }
+
+  engine = mod;
   return engine;
 }
 

@@ -1,5 +1,35 @@
 [
   {
+    "name": "set-environment (launch)",
+    "method": 2,
+    "request": "0a080801120408021001"
+  },
+  {
+    "name": "set-environment (unchanged revision)",
+    "method": 2,
+    "request": "0a06080112020801"
+  },
+  {
+    "name": "set-environment revision 0 (envelope error)",
+    "method": 2,
+    "request": "0a00"
+  },
+  {
+    "name": "set-environment (filesystem goes away)",
+    "method": 2,
+    "request": "0a06080212020801"
+  },
+  {
+    "name": "export-fs with no filesystem (verb is not registered)",
+    "method": 100,
+    "request": ""
+  },
+  {
+    "name": "set-environment (filesystem returns)",
+    "method": 2,
+    "request": "0a080803120408021001"
+  },
+  {
     "name": "version",
     "method": 1,
     "request": ""

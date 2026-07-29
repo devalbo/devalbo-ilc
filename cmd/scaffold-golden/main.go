@@ -104,9 +104,15 @@ func snapshot() ([]byte, error) {
 	if err := os.Chdir(dir); err != nil {
 		return nil, err
 	}
-	// GRANT the root, as a host does — the engine panics without one, because
-	// falling back to the working directory is what let `reset-fs` clear it.
-	if err := platform.SetRoot("."); err != nil {
+	// BOOT, as a host does. Granting the root is no longer enough: dlc's engine
+	// registers its filesystem verbs from the environment manifest
+	// (RegisterDiscovered), so a caller that skipped it would get `export-fs:
+	// unknown method_id 100` — which is what this tool started reporting the
+	// moment discovery landed. Every in-process caller is a host.
+	if err := platform.Boot(platform.BootOptions{
+		Root:           ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+	}); err != nil {
 		return nil, err
 	}
 	defer os.Chdir(prev)

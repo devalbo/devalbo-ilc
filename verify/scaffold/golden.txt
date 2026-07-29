@@ -12,7 +12,7 @@ dlc.toml                                             1683  d84653ce0a76515e
 engine/commands.go                                   2029  7127e5a530c8bbd9
 engine/commands_test.go                               779  081f9b781e4d7dd7
 go.mod                                                680  b3854e856cf82826
-hosts/native/main.go                                 5254  463c0239f29c1dd2
+hosts/native/main.go                                 5359  db7df9dea974d21e
 hosts/web/commands.html                               793  e8a9ac3548976c8f
 hosts/web/files.html                                  802  9f020f72437f6ea7
 hosts/web/index.html                                 1150  09e1f94ed0aef63d

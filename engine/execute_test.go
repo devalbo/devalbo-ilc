@@ -62,10 +62,16 @@ func inTempRoot(t *testing.T) string {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
-	// GRANT the root, as a host does. There is no implicit "wherever you are
-	// standing" any more: `Root()` panics without a grant, because falling back
-	// to the cwd is what let `reset-fs` clear a user's directory.
-	if err := platform.SetRoot("."); err != nil {
+	// BOOT, as a host does — not merely SetRoot. dlc's engine registers its
+	// filesystem verbs from the manifest (RegisterDiscovered), so a test that
+	// only granted a root would find `export-fs` reporting "unknown method_id
+	// 100". That is the mandatory ordering in docs/ENVIRONMENT-PLAN.md §2.5
+	// biting exactly where it should: a caller that skips the manifest gets a
+	// half-registered engine, and a test is a caller like any other.
+	if err := platform.Boot(platform.BootOptions{
+		Root:           ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chdir(prev) })

@@ -314,23 +314,56 @@ existing ids → re-sync panics; `syncCapabilityVerbs` never unregistering → t
 drop `cli_hidden` from the rpc → `set-environment` reappears in the surface. The id lock also fired
 unprompted when the reservation became an rpc, and was re-blessed deliberately.
 
-### Phase 2 — the hosts send it, and the web host detects OPFS failure
+### Phase 2 — the hosts send it, and the web host detects OPFS failure — **LANDED (2026-07-28)**
 
 | File | Change |
 | --- | --- |
-| `engine/platform/boot.go` | `Boot(Options{…})` owning steps 1–5 of §2.5 (§2.5a) |
-| `hosts/native/main.go` | call `Boot` — the root kind is a fact it now knows |
-| `hosts/web/worker.ts` | **probe OPFS at startup**; send `filesystem: absent` when it fails |
-| `templates/…/hosts/native/main.go.tmpl` | one `Boot` call, not a copied sequence |
-| `hosts/web/test/` | stub `navigator.storage.getDirectory` to reject, before the worker boots |
-| parity | the manifest must be IDENTICAL across tiers for the same fixture |
+| `engine/platform/boot.go` + `boot_test.go` | `Boot(BootOptions{…})` owning §2.5 steps 1–5; 5 tests |
+| `engine/commands.go` | `dlc` switches to `RegisterDiscovered` |
+| `hosts/native/main.go` | `Boot`, root kind `CWD` |
+| `hosts/web/environment.ts` | the manifest encoder and the OPFS probe |
+| `hosts/web/worker.ts` | probe → hydrate → instantiate → **manifest** → commands |
+| `example-apps/{notes,tictactoe}/hosts/native`, `templates/…` | `Boot`, root kind `APP_DIR` |
+| `cmd/{parity-runner,scaffold-golden}`, `engine/execute_test.go` | every in-process caller is a host |
+| `verify/parity/method-vectors.json` | 21 → 27 vectors |
 
-Tests stub the OPFS call rather than using a production test seam: no production code learns about testing,
-at the cost that what runs is the host reacting to a faked API rather than to a genuine denial. Worth
-knowing that limit rather than discovering it.
+**`Version` was dropped from `BootOptions`.** Every app calls `SetVersion` from its ENGINE's init, which
+runs on every tier; a host-supplied version would exist natively and be missing in a browser tab, where no
+Go host runs at all.
 
-*Falsification:* make the stub reject and confirm the app reaches a filesystem-less surface — a real host
-code path, not a double.
+**Making the manifest mandatory broke three callers, exactly as predicted** — `engine/execute_test.go`,
+`cmd/scaffold-golden`, and the parity runner all granted a root without sending a manifest and got
+`unknown method_id 100`. The lesson worth keeping: *every in-process caller is a host*, and `Boot` is what
+they all now share.
+
+#### What the falsifications actually showed
+
+**The manifest had to become parity vector #1, and proving why was the most valuable thing in this phase.**
+Removing the `set-environment` vectors leaves parity **green** — 21 vectors, "native == component", "70
+files written, trees identical" — while every filesystem verb on both tiers answers `unknown method_id
+100`. Two equally broken engines agreeing perfectly. Sending the manifest as vector #1 puts the ordering
+inside what is compared instead of underneath it.
+
+**And parity cannot check the absent branch either.** Breaking `unregisterBlock` so a capability never goes
+away leaves parity green as well: both tiers break identically. The absent-branch vectors (revision 2
+removes the filesystem, `export-fs` is then unregistered, revision 3 restores it) are still worth having —
+they prove the real wasm component behaves like native — but **they pin agreement, not correctness**. What
+pins correctness is `TestDiscoveredRegistrationFollowsTheManifest`, which does go red under that patch.
+This is D7's blind spot showing up twice in one phase, in both directions.
+
+#### Not done: the OPFS probe is untested end-to-end
+
+The plan said to stub `navigator.storage.getDirectory` from Playwright. **That cannot work here.** The probe
+runs in the WORKER, and page-level init scripts do not touch a worker's global scope — the stub was
+installed, the worker never saw it, and `export-fs` happily returned an empty tree. The test was removed
+rather than left passing for the wrong reason.
+
+So the *engine* half of absence is proven (Go tests + parity vectors, on the real component) and the
+*probe→manifest* link is not. Two ways to close it, neither done:
+
+- **move the probe to the main thread** and pass the fact into the worker — stubbable from Playwright, no
+  production test seam, at the cost that the thread doing the probing is not the one using the filesystem;
+- **a worker-visible switch** (`?ilc-no-fs=1`) — the production test seam previously declined.
 
 ### Phase 3 — the surface reflects the environment
 

@@ -69,3 +69,4 @@ test("window.app drives the React slot from the console", async ({ page }) => {
   // The same path the button takes, so the file list updates by the same route.
   await expect(page.getByTestId("files")).toContainText("fromconsole", { timeout: 30_000 });
 });
+

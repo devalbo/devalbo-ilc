@@ -51,7 +51,20 @@ const (
 // platform's verbs, tell it who you are, then register your own — and never
 // write an id down, because the generated Handlers map carries them.
 func init() {
-	platform.RegisterAll()
+	// DISCOVERED rather than eager (Decision 32, plan D7): dlc's filesystem
+	// verbs register when a host says there is a filesystem, and not before.
+	//
+	// Registration policy is an engine-side choice but the reason to discover is
+	// a host-side fact, and the engine is ONE artifact across every tier
+	// (Decision 26) — so an app cannot be eager natively and discovering in a
+	// browser. dlc picks discovery because its web tier can genuinely lose OPFS,
+	// and the price is that every dlc host must now send a manifest before
+	// anything else: miss it and `export-fs` does not exist. platform.Boot is
+	// what makes that safe to depend on.
+	//
+	// notes and tictactoe deliberately stay on RegisterAll, which keeps one app
+	// on each policy and proves both work.
+	platform.RegisterDiscovered()
 	platform.SetVersion(version)
 
 	platform.RegisterRaw(dlcv1.DlcServiceHandlers(handleNew, handleEcho))
