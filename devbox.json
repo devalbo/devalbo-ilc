@@ -16,7 +16,7 @@
       "export NPM_CONFIG_PREFIX=\"$PWD/.devbox/npm-global\"",
       "export PATH=\"$GOBIN:$NPM_CONFIG_PREFIX/bin:$PWD/node_modules/.bin:$PATH\"",
       "command -v wit-bindgen-go   >/dev/null || go install go.bytecodealliance.org/cmd/wit-bindgen-go@latest",
-      "command -v protoc-gen-go-lite >/dev/null || go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@latest",
+      "go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@v0.15.0",
       "command -v jco              >/dev/null || npm i -g @bytecodealliance/jco",
       "command -v protoc-gen-es-lite >/dev/null || npm i -g @aptre/protobuf-es-lite"
     ],
