@@ -1,0 +1,16 @@
+{
+  "name": "spike-sqlite-sync",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 gate for the SQLite index (docs/SQLITE-INDEX-PLAN.md D2): can sqlite-wasm answer a query SYNCHRONOUSLY, in the worker where the engine runs, over OPFS?",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.50.1-build1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.1",
+    "vite": "^7.0.5"
+  }
+}

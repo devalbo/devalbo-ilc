@@ -191,7 +191,32 @@ verification tightening, not a capability, so it did not hold the milestone.
 
 Deferred until after the bootstrap. Grouped; roughly priority-ordered within each group.
 
-### 🎯 CURRENT — the host layer (Decision 34) — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md)
+### 🎯 CURRENT — the SQLite index (§6.2, §7.1) — [`SQLITE-INDEX-PLAN.md`](./SQLITE-INDEX-PLAN.md)
+
+The last unbuilt item in Decision 12's capability set, and the first capability that can be **present on
+one tier and absent on another while both stay correct**. The filesystem's absence unregisters its verbs;
+an index going away must change nothing a user can observe, only how long it took — a harder contract that
+nothing in the repo tests yet.
+
+Unblocked by the two things it was waiting on: the environment manifest makes `unavailable` expressible
+(`ENVIRONMENT-PLAN.md` D6 deferred the field explicitly — *"the index lands with the index"*), and notes'
+`handleListRecords` is already the scan fallback, exercised by every test in the repo, so the index is the
+branch being **added** rather than the path being replaced.
+
+- [x] **Phase 0 — the synchronous-query spike, a GATE** ✅ 🟢 GREEN (2026-07-29) — `spikes/sqlite-sync/`, `make spike-sqlite-sync`. sqlite-wasm 3.50.1 under the **`opfs-sahpool`** VFS answers `ORDER BY` in a worker with **no microtask having run**; survives a reload; needs **no COOP/COEP** (`crossOriginIsolated === false` throughout). Falsified with one injected `await`. The jco half was deliberately not rebuilt — Spike 5 already measured that a *sync* import returning a value is green, and its failure was Promise-specific. **Turned up the real Phase 3 work (plan D9):** the SAH pool lives in the OPFS root, so today's bridge hydrates ~48 KB of its opaque files into the engine's tree (which would put a disposable index inside `export-fs` bundles) and then throws `NoModificationAllowedError` on every flush. Both sides need to skip the pool directory, and the platform names it `.ilc-index` so the exclusion matches a name we chose
+- [ ] **Phase 1 — the manifest field** — `Index` + `HasIndex()` + `BootOptions.Index`; nothing queries yet, so the schema lands before two things depend on it
+- [ ] **Phase 2 — the seam and the native binding** — the WIT import, `IndexRequest`/`IndexRow`, `rebuild-index` (id 200), `modernc.org/sqlite` **host-side**; the second capability through `caps_native`/`caps_wasip2`, which is what tells us whether that pattern generalizes
+- [ ] **Phase 3 — the web binding** — sqlite-wasm in the worker; inherits the OPFS probe's known test gap and must not invent a production seam to close it
+- [ ] **Phase 4 — notes uses it** — the scan stays verbatim as the `unavailable` branch; `RebuildIndex` claims reserved 10005
+- [ ] **Phase 5 — index parity** — same vectors, index on and off, byte-identical results. The only check that can see this capability at all: the command surface barely moves (plan D4), so surface parity is blind here
+- [ ] **Phase 6 — write it down + dogfood** — the registration rule, the never-authoritative rule, the write order
+
+**Three decisions worth knowing before reading the plan:** an engine-built index file is rejected on the
+"a fallback must return identical results" rule (it would make three implementations, the third one ours to
+write under TinyGo); §6.2's sketched WIT changes shape because `result<>` strands WAMR; and §7.1's lock
+file is **deliberately deferred** until a second writer exists.
+
+### The host layer (Decision 34) — COMPLETE — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md)
 
 Per-app, per-tier host code gets a name, a contract, and a slot. The line `engine/` vs `engine/platform/`
 already draws is missing one directory over, and `hosts/native/` currently mixes runtime with `dlc`'s own
@@ -503,7 +528,7 @@ is the portable option. Being occasionally coarse beats being tier-dependent: a 
 usability cost, a tier-dependent one is a parity failure.
 
 ### Capabilities
-- [ ] **SQLite-index** (§6.2): native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan. **Unblocked (2026-07-28):** the manifest makes `unavailable` expressible — add an `Index` field, register the index block from it, and the fallback becomes a branch on `platform.HasIndex()` rather than a linking problem. Two things the manifest work says to carry over: the fallback must return IDENTICAL results to the fast path (a fallback that answers differently is a second implementation), and adding a capability means adding it to the **surface** parity vectors, because parity cannot see registration
+- [ ] **SQLite-index** (§6.2) — **planned, see [`SQLITE-INDEX-PLAN.md`](./SQLITE-INDEX-PLAN.md) and the CURRENT section above; the phases live there, not here.** Native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan. **Unblocked (2026-07-28):** the manifest makes `unavailable` expressible — add an `Index` field, register the index block from it, and the fallback becomes a branch on `platform.HasIndex()` rather than a linking problem. Two things the manifest work says to carry over: the fallback must return IDENTICAL results to the fast path (a fallback that answers differently is a second implementation), and adding a capability means adding it to the **surface** parity vectors, because parity cannot see registration
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
 - [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/dlc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes

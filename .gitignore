@@ -37,6 +37,8 @@ spikes/proto/spike.pb.ts
 spikes/opfs/test-results/
 spikes/opfs/playwright-report/
 spikes/opfs/blob-report/
+spikes/**/test-results/
+spikes/**/playwright-report/
 
 # Go
 /bin/

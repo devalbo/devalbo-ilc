@@ -130,6 +130,10 @@ test-b0: ## Phase B0 repo-integrity checks (no toolchain needed)
 spike-async: gen ## Spike 5 (T-B1.5): async probe Rich/CM + Portable/WAMR-shaped
 	@./scripts/spike-async.sh
 
+.PHONY: spike-sqlite-sync
+spike-sqlite-sync: ## SQLite index Phase 0 GATE: sync query over OPFS in a worker
+	@./scripts/spike-sqlite-sync.sh
+
 
 
 .PHONY: test-b1

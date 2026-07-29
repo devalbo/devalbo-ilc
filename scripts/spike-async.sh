@@ -17,7 +17,7 @@ echo "======== Spike 5 / Rich/CM (jco + Promise host) ========"
   cd "$SPIKE"
   echo "node $(node -v)"
   npm install --silent --no-audit --no-fund
-  tinygo build -target=wasip2 --wit-package "$ROOT/wit" --wit-world async-engine \
+  tinygo build -target=wasip2 --wit-package "$ROOT/dlc-platform/wit" --wit-world async-engine \
     -o "$SPIKE/engine.component.wasm" "$SPIKE"
   npx jco transpile engine.component.wasm -o out-sync \
     --map 'devalbo:ilc/host-delay=../host-delay.js'

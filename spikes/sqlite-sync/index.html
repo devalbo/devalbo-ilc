@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>spike: synchronous sqlite over OPFS</title>
+<pre id="log">booting…</pre>
+<script type="module">
+  // The page exists only to own the worker and expose an RPC to Playwright. The
+  // spike itself is entirely in worker.js — which is the point: this is where
+  // the engine lives.
+  const worker = new Worker(new URL("./worker.js", import.meta.url), {
+    type: "module",
+  });
+
+  let next = 0;
+  const pending = new Map();
+  worker.onmessage = (event) => {
+    const { id, ok, value, error } = event.data;
+    const settle = pending.get(id);
+    pending.delete(id);
+    ok ? settle.resolve(value) : settle.reject(new Error(error));
+  };
+
+  window.spike = (op, ...args) =>
+    new Promise((resolve, reject) => {
+      const id = ++next;
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ id, op, args });
+    });
+
+  document.getElementById("log").textContent = "ready";
+</script>
