@@ -123,22 +123,6 @@ message Filesystem {
   bool ephemeral = 3;
 }
 
-// The derived SQLite index (§6.2, §7.1) — an ACCELERATOR, never a source of
-// truth, and absent on more tiers than it is present on.
-//
-// No kind, no dialect, no version: an app writes SQL against whatever this host
-// opened, and there is exactly one implementation per tier. A field here would
-// be one an app could branch on, and branching on WHICH index you have is a
-// short walk from branching on which tier you are (Decision 33 D3).
-//
-// Contrast with Filesystem, which carries a kind: the filesystem's kind changes
-// what an app should PROMISE a user (does this survive the tab closing). An
-// index promises nothing — it is allowed to vanish, and §7.1 requires the app to
-// survive that.
-message Index {
-  Availability availability = 1;
-}
-
 // Environment is what the host can do, as of `revision`.
 //
 // Deliberately small (plan D6): a field here is a branch somewhere, and a
@@ -157,7 +141,19 @@ message Environment {
   // still current.
   uint32 revision = 1;
   Filesystem filesystem = 2;
-  Index index = 3;
+
+  // 3 held an `Index { availability }` for one afternoon, when the derived index
+  // was going to be a host-provided SQLite database that a tier could lack. It
+  // is not: the index is a projection the engine owns, present wherever a
+  // filesystem is, so there is nothing for a manifest to report
+  // (docs/INDEX-PLAN.md D8).
+  //
+  // Reserved rather than reused, because the field a host store would eventually
+  // want is a DIFFERENT question — "does this host provide a key-value store"
+  // (that plan's Phase 6) — and giving an old number new semantics is how a
+  // stale decoder silently reads the wrong fact.
+  reserved 3;
+  reserved "index";
 }
 
 message GetCommandSurfaceRequest {}

@@ -63,23 +63,10 @@ func HasFilesystem() bool {
 	return Env().GetFilesystem().GetAvailability() == ilcv1.Availability_AVAILABILITY_PRESENT
 }
 
-// HasIndex reports whether this host opened a derived SQLite index (§6.2).
-//
-// THE ANSWER TO THIS IS NOT THE ANSWER TO HasFilesystem, and the difference is
-// the whole reason the index is worth building next. No filesystem removes an
-// ABILITY: export-fs cannot do anything, so its verb unregisters and the command
-// stops existing. No index removes only ACCELERATION: every command still works,
-// still returns the same rows, and takes longer. So an app branches on this to
-// pick a STRATEGY — index query or directory scan — and the two must be
-// indistinguishable in their results (INDEX-PLAN.md D3, D8: under the revised
-// design there is no branch at all, and this accessor is slated for removal).
-//
-// Which makes this the one accessor whose caller can quietly break the
-// architecture: a scan that sorts differently from the SQL is a tier-dependent
-// answer, and no existing check would see it. verify-index-parity is what does.
-func HasIndex() bool {
-	return Env().GetIndex().GetAvailability() == ilcv1.Availability_AVAILABILITY_PRESENT
-}
+// There is deliberately no HasIndex here (docs/INDEX-PLAN.md D8). The derived
+// index is a projection the ENGINE owns, so it exists wherever a filesystem
+// does, and an app has nothing to branch on — which is the whole reason the
+// index stopped being a host capability.
 
 // applyEnvironment installs a manifest, reporting whether anything changed.
 //

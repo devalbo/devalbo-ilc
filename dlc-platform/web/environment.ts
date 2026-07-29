@@ -31,14 +31,6 @@ export interface Manifest {
   /** Monotonic and NON-ZERO. Zero is rejected by the engine. */
   revision: number;
   filesystem: { available: boolean; kind?: number; ephemeral?: boolean };
-  /**
-   * The derived SQLite index (§6.2). Required rather than optional, because the
-   * Go host STATES it in both directions (`platform.Boot`) and two host runtimes
-   * implementing one sequence should not disagree about whether silence counts
-   * as an answer. Nothing reads it as anything but false until Phase 3 opens a
-   * database here.
-   */
-  index: { available: boolean };
 }
 
 /**
@@ -69,21 +61,12 @@ export function encodeSetEnvironment(m: Manifest): Uint8Array {
     appendVarint(fs, 1n);
   }
 
-  // Index.availability — stated in both directions, never omitted, so
-  // UNSPECIFIED keeps meaning "no manifest arrived" on this tier too.
-  const index: number[] = [];
-  appendTag(index, 1, WIRE_VARINT); // Index.availability
-  appendVarint(index, BigInt(m.index.available ? AVAILABILITY_PRESENT : AVAILABILITY_ABSENT));
-
   const env: number[] = [];
   appendTag(env, 1, WIRE_VARINT); // Environment.revision
   appendVarint(env, BigInt(m.revision));
   appendTag(env, 2, WIRE_BYTES); // Environment.filesystem
   appendVarint(env, BigInt(fs.length));
   env.push(...fs);
-  appendTag(env, 3, WIRE_BYTES); // Environment.index
-  appendVarint(env, BigInt(index.length));
-  env.push(...index);
 
   const req: number[] = [];
   appendTag(req, 1, WIRE_BYTES); // SetEnvironmentRequest.environment

@@ -47,41 +47,6 @@ func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 	}
 }
 
-// A host that has booted has STATED whether it has an index, including when the
-// answer is no. UNSPECIFIED must therefore keep meaning "no manifest has arrived
-// at all" — collapse the two and a host that forgot to report becomes
-// indistinguishable from a host that genuinely has none, and only one of those
-// is a bug worth finding.
-func TestBootStatesTheIndexEvenWhenItIsAbsent(t *testing.T) {
-	if err := bootIn(t, BootOptions{
-		Root:           ".",
-		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
-	}); err != nil {
-		t.Fatalf("boot: %v", err)
-	}
-	if HasIndex() {
-		t.Fatal("index present after a Boot that did not ask for one")
-	}
-	if got := Env().GetIndex().GetAvailability(); got != ilcv1.Availability_AVAILABILITY_ABSENT {
-		t.Fatalf("index availability = %v, want ABSENT (stated, not blank)", got)
-	}
-}
-
-// And the other direction, which is the only way to tell the flag is wired to
-// anything at all.
-func TestBootReportsAnIndexWhenTheHostHasOne(t *testing.T) {
-	if err := bootIn(t, BootOptions{
-		Root:           ".",
-		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
-		Index:          true,
-	}); err != nil {
-		t.Fatalf("boot: %v", err)
-	}
-	if !HasIndex() {
-		t.Fatal("index absent after a Boot that granted one")
-	}
-}
-
 // A root is GRANTED, never assumed (§3·5). Boot refusing an empty one keeps
 // that rule at the entry point every host now goes through, rather than
 // relying on Root() panicking later, somewhere that does not name the cause.

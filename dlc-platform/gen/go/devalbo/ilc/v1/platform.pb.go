@@ -244,36 +244,6 @@ func (x *Filesystem) GetEphemeral() bool {
 	return false
 }
 
-// The derived SQLite index (§6.2, §7.1) — an ACCELERATOR, never a source of
-// truth, and absent on more tiers than it is present on.
-//
-// No kind, no dialect, no version: an app writes SQL against whatever this host
-// opened, and there is exactly one implementation per tier. A field here would
-// be one an app could branch on, and branching on WHICH index you have is a
-// short walk from branching on which tier you are (Decision 33 D3).
-//
-// Contrast with Filesystem, which carries a kind: the filesystem's kind changes
-// what an app should PROMISE a user (does this survive the tab closing). An
-// index promises nothing — it is allowed to vanish, and §7.1 requires the app to
-// survive that.
-type Index struct {
-	unknownFields []byte
-	Availability  Availability `protobuf:"varint,1,opt,name=availability,proto3" json:"availability,omitempty"`
-}
-
-func (x *Index) Reset() {
-	*x = Index{}
-}
-
-func (*Index) ProtoMessage() {}
-
-func (x *Index) GetAvailability() Availability {
-	if x != nil {
-		return x.Availability
-	}
-	return Availability_AVAILABILITY_UNSPECIFIED
-}
-
 // Environment is what the host can do, as of `revision`.
 //
 // Deliberately small (plan D6): a field here is a branch somewhere, and a
@@ -293,7 +263,6 @@ type Environment struct {
 	// still current.
 	Revision   uint32      `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
 	Filesystem *Filesystem `protobuf:"bytes,2,opt,name=filesystem,proto3" json:"filesystem,omitempty"`
-	Index      *Index      `protobuf:"bytes,3,opt,name=index,proto3" json:"index,omitempty"`
 }
 
 func (x *Environment) Reset() {
@@ -312,13 +281,6 @@ func (x *Environment) GetRevision() uint32 {
 func (x *Environment) GetFilesystem() *Filesystem {
 	if x != nil {
 		return x.Filesystem
-	}
-	return nil
-}
-
-func (x *Environment) GetIndex() *Index {
-	if x != nil {
-		return x.Index
 	}
 	return nil
 }
@@ -649,22 +611,6 @@ func (m *Filesystem) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
-func (m *Index) CloneVT() *Index {
-	if m == nil {
-		return (*Index)(nil)
-	}
-	r := new(Index)
-	r.Availability = m.Availability
-	if len(m.unknownFields) > 0 {
-		r.unknownFields = slices.Clone(m.unknownFields)
-	}
-	return r
-}
-
-func (m *Index) CloneMessageVT() protobuf_go_lite.CloneMessage {
-	return m.CloneVT()
-}
-
 func (m *Environment) CloneVT() *Environment {
 	if m == nil {
 		return (*Environment)(nil)
@@ -672,7 +618,6 @@ func (m *Environment) CloneVT() *Environment {
 	r := new(Environment)
 	r.Revision = m.Revision
 	r.Filesystem = protobuf_go_lite.CloneVTValue(m.Filesystem)
-	r.Index = protobuf_go_lite.CloneVTValue(m.Index)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -938,25 +883,6 @@ func (this *Filesystem) EqualMessageVT(thatMsg any) bool {
 	}
 	return this.EqualVT(that)
 }
-func (this *Index) EqualVT(that *Index) bool {
-	if this == that {
-		return true
-	} else if this == nil || that == nil {
-		return false
-	}
-	if this.Availability != that.Availability {
-		return false
-	}
-	return string(this.unknownFields) == string(that.unknownFields)
-}
-
-func (this *Index) EqualMessageVT(thatMsg any) bool {
-	that, ok := thatMsg.(*Index)
-	if !ok {
-		return false
-	}
-	return this.EqualVT(that)
-}
 func (this *Environment) EqualVT(that *Environment) bool {
 	if this == that {
 		return true
@@ -967,9 +893,6 @@ func (this *Environment) EqualVT(that *Environment) bool {
 		return false
 	}
 	if !protobuf_go_lite.IsEqualVT(this.Filesystem, that.Filesystem) {
-		return false
-	}
-	if !protobuf_go_lite.IsEqualVT(this.Index, that.Index) {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1510,48 +1433,6 @@ func (x *Filesystem) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
-// MarshalProtoJSON marshals the Index message to JSON.
-func (x *Index) MarshalProtoJSON(s *json.MarshalState) {
-	if x == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	var wroteField bool
-	if x.Availability != 0 || s.HasField("availability") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("availability")
-		x.Availability.MarshalProtoJSON(s)
-	}
-	s.WriteObjectEnd()
-}
-
-// MarshalJSON marshals the Index to JSON.
-func (x *Index) MarshalJSON() ([]byte, error) {
-	return json.DefaultMarshalerConfig.Marshal(x)
-}
-
-// UnmarshalProtoJSON unmarshals the Index message from JSON.
-func (x *Index) UnmarshalProtoJSON(s *json.UnmarshalState) {
-	if s.ReadNil() {
-		return
-	}
-	s.ReadObject(func(key string) {
-		switch key {
-		default:
-			s.Skip() // ignore unknown field
-		case "availability":
-			s.AddField("availability")
-			x.Availability.UnmarshalProtoJSON(s)
-		}
-	})
-}
-
-// UnmarshalJSON unmarshals the Index from JSON.
-func (x *Index) UnmarshalJSON(b []byte) error {
-	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
-}
-
 // MarshalProtoJSON marshals the Environment message to JSON.
 func (x *Environment) MarshalProtoJSON(s *json.MarshalState) {
 	if x == nil {
@@ -1569,11 +1450,6 @@ func (x *Environment) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteMoreIf(&wroteField)
 		s.WriteObjectField("filesystem")
 		x.Filesystem.MarshalProtoJSON(s.WithField("filesystem"))
-	}
-	if x.Index != nil || s.HasField("index") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("index")
-		x.Index.MarshalProtoJSON(s.WithField("index"))
 	}
 	s.WriteObjectEnd()
 }
@@ -1602,13 +1478,6 @@ func (x *Environment) UnmarshalProtoJSON(s *json.UnmarshalState) {
 			}
 			x.Filesystem = &Filesystem{}
 			x.Filesystem.UnmarshalProtoJSON(s.WithField("filesystem", true))
-		case "index":
-			if s.ReadNil() {
-				x.Index = nil
-				return
-			}
-			x.Index = &Index{}
-			x.Index.UnmarshalProtoJSON(s.WithField("index", true))
 		}
 	})
 }
@@ -2274,43 +2143,6 @@ func (m *Filesystem) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *Index) MarshalVT() (dAtA []byte, err error) {
-	if m == nil {
-		return nil, nil
-	}
-	size := m.SizeVT()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *Index) MarshalToVT(dAtA []byte) (int, error) {
-	size := m.SizeVT()
-	return m.MarshalToSizedBufferVT(dAtA[:size])
-}
-
-func (m *Index) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
-	if m == nil {
-		return 0, nil
-	}
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.unknownFields != nil {
-		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
-	}
-	if m.Availability != 0 {
-		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Availability))
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
 func (m *Environment) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -2339,16 +2171,6 @@ func (m *Environment) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
-	}
-	if m.Index != nil {
-		size, err := m.Index.MarshalToSizedBufferVT(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
-		i--
-		dAtA[i] = 0x1a
 	}
 	if m.Filesystem != nil {
 		size, err := m.Filesystem.MarshalToSizedBufferVT(dAtA[:i])
@@ -2952,43 +2774,6 @@ func (m *Filesystem) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *Index) MarshalVTStrict() (dAtA []byte, err error) {
-	if m == nil {
-		return nil, nil
-	}
-	size := m.SizeVT()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *Index) MarshalToVTStrict(dAtA []byte) (int, error) {
-	size := m.SizeVT()
-	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
-}
-
-func (m *Index) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
-	if m == nil {
-		return 0, nil
-	}
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.unknownFields != nil {
-		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
-	}
-	if m.Availability != 0 {
-		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Availability))
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
 func (m *Environment) MarshalVTStrict() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -3017,16 +2802,6 @@ func (m *Environment) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
-	}
-	if m.Index != nil {
-		size, err := m.Index.MarshalToSizedBufferVTStrict(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
-		i--
-		dAtA[i] = 0x1a
 	}
 	if m.Filesystem != nil {
 		size, err := m.Filesystem.MarshalToSizedBufferVTStrict(dAtA[:i])
@@ -3548,17 +3323,6 @@ func (m *Filesystem) SizeVT() (n int) {
 	return n
 }
 
-func (m *Index) SizeVT() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	n += protobuf_go_lite.SizeVarintNonZero(1, m.Availability)
-	n += len(m.unknownFields)
-	return n
-}
-
 func (m *Environment) SizeVT() (n int) {
 	if m == nil {
 		return 0
@@ -3568,10 +3332,6 @@ func (m *Environment) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Revision)
 	if m.Filesystem != nil {
 		l = m.Filesystem.SizeVT()
-		n += protobuf_go_lite.SizeMessage(1, l)
-	}
-	if m.Index != nil {
-		l = m.Index.SizeVT()
 		n += protobuf_go_lite.SizeMessage(1, l)
 	}
 	n += len(m.unknownFields)
@@ -3771,19 +3531,6 @@ func (x *Filesystem) MarshalProtoText() string {
 func (x *Filesystem) String() string {
 	return x.MarshalProtoText()
 }
-func (x *Index) MarshalProtoText() string {
-	var sb protobuf_go_lite.TextBuilder
-	initialLen := protobuf_go_lite.TextStartMessage(&sb, "Index")
-	if x.Availability != 0 {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "availability")
-		protobuf_go_lite.TextWriteStringer(&sb, Availability(x.Availability))
-	}
-	return protobuf_go_lite.TextFinishMessage(&sb)
-}
-
-func (x *Index) String() string {
-	return x.MarshalProtoText()
-}
 func (x *Environment) MarshalProtoText() string {
 	var sb protobuf_go_lite.TextBuilder
 	initialLen := protobuf_go_lite.TextStartMessage(&sb, "Environment")
@@ -3794,10 +3541,6 @@ func (x *Environment) MarshalProtoText() string {
 	if x.Filesystem != nil {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "filesystem")
 		protobuf_go_lite.TextWriteTextMarshaler(&sb, x.Filesystem)
-	}
-	if x.Index != nil {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "index")
-		protobuf_go_lite.TextWriteTextMarshaler(&sb, x.Index)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -4153,59 +3896,6 @@ func (m *Filesystem) UnmarshalVT(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *Index) UnmarshalVT(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	var err error
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-		if err != nil {
-			return err
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: Index: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: Index: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Availability", wireType)
-			}
-			m.Availability = 0
-			var _v uint64
-			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-			m.Availability = Availability(_v)
-			if err != nil {
-				return err
-			}
-		default:
-			iNdEx = preIndex
-			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return protobuf_go_lite.ErrInvalidLength
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
 func (m *Environment) UnmarshalVT(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -4247,21 +3937,6 @@ func (m *Environment) UnmarshalVT(dAtA []byte) error {
 				m.Filesystem = &Filesystem{}
 			}
 			if err := m.Filesystem.UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
-			}
-			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			if m.Index == nil {
-				m.Index = &Index{}
-			}
-			if err := m.Index.UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -5130,59 +4805,6 @@ func (m *Filesystem) UnmarshalVTUnsafe(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *Index) UnmarshalVTUnsafe(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	var err error
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-		if err != nil {
-			return err
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: Index: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: Index: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Availability", wireType)
-			}
-			m.Availability = 0
-			var _v uint64
-			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-			m.Availability = Availability(_v)
-			if err != nil {
-				return err
-			}
-		default:
-			iNdEx = preIndex
-			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return protobuf_go_lite.ErrInvalidLength
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
 func (m *Environment) UnmarshalVTUnsafe(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -5224,21 +4846,6 @@ func (m *Environment) UnmarshalVTUnsafe(dAtA []byte) error {
 				m.Filesystem = &Filesystem{}
 			}
 			if err := m.Filesystem.UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
-			}
-			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			if m.Index == nil {
-				m.Index = &Index{}
-			}
-			if err := m.Index.UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
