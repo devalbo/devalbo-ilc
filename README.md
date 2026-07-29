@@ -168,11 +168,12 @@ The honest gaps, in the order they matter:
 1. 📋 **`dlc-platform` and `@devalbo/dlc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
-2. 📋 **Desktop, embedded, and the remaining capabilities** (SQLite index, sync) are designed and
-   unbuilt — see the tasks doc. The **SQLite index is the current focus** and has a plan
-   (`docs/SQLITE-INDEX-PLAN.md`); it is the first capability that can be present on one tier and absent on
-   another while both stay correct. Events is the one that landed, and it built the `caps_native` /
-   `caps_wasip2` seam the rest of them inherit. **Display is now optional** (Decision 34): an app either
+2. 📋 **Desktop, embedded, and the remaining capabilities** (the derived index, sync) are designed and
+   unbuilt — see the tasks doc. The **index is the current focus** and has a plan
+   (`docs/INDEX-PLAN.md`); it was re-scoped away from SQLite once it became clear that `ORDER BY` was the
+   only argument for SQL, and that moving the sort into Go makes the index a projection cache the engine
+   can own on every tier — including embedded, which SQLite could never reach. Events is the capability
+   that landed, and it built the `caps_native` / `caps_wasip2` seam the rest of them inherit. **Display is now optional** (Decision 34): an app either
    renders app-side through that capability, or emits a *semantic* event and lets each host draw it
    however that tier likes — the second costs no capability at all, so it goes first.
 3. ✅ **Per-app, per-tier host code has a shape** (Decision 34, `docs/HOST-LAYER-PLAN.md`): inherited

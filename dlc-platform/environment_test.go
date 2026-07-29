@@ -36,6 +36,14 @@ func manifest(revision uint32, fs ilcv1.Availability) *ilcv1.SetEnvironmentReque
 	}
 }
 
+// withIndex is the same manifest plus an index availability. A separate helper
+// rather than another parameter on `manifest`, because every existing test is
+// about the filesystem and would gain an argument it does not care about.
+func withIndex(req *ilcv1.SetEnvironmentRequest, index ilcv1.Availability) *ilcv1.SetEnvironmentRequest {
+	req.Environment.Index = &ilcv1.Index{Availability: index}
+	return req
+}
+
 // send dispatches SetEnvironment the way a host does — through Execute, not by
 // calling the handler. Natively the engine is linked in-process and a direct
 // call would work, but then the native tier would never exercise the command
@@ -60,9 +68,84 @@ func TestUnsetEnvironmentReadsAsAbsent(t *testing.T) {
 	if HasFilesystem() {
 		t.Fatal("unset manifest reports a filesystem")
 	}
+	if HasIndex() {
+		t.Fatal("unset manifest reports an index")
+	}
 	if got := Env().GetRevision(); got != 0 {
 		t.Fatalf("unset revision = %d, want 0", got)
 	}
+}
+
+// --- the index (INDEX-PLAN phase 1 — SLATED FOR REVERT, see that plan's D8) --
+
+// The accessor reports what the host said, in both directions. An index can go
+// away mid-session for the same reasons a filesystem can — a browser tab losing
+// its storage takes both with it.
+func TestIndexFollowsTheManifest(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	send(t, withIndex(manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT), ilcv1.Availability_AVAILABILITY_PRESENT))
+	if !HasIndex() {
+		t.Fatal("index reported absent after the host said PRESENT")
+	}
+
+	send(t, withIndex(manifest(2, ilcv1.Availability_AVAILABILITY_PRESENT), ilcv1.Availability_AVAILABILITY_ABSENT))
+	if HasIndex() {
+		t.Fatal("index still reported present after the host said ABSENT")
+	}
+}
+
+// A manifest that mentions a filesystem and says nothing about an index reports
+// no index — the same conservative default as an unset manifest, and the reason
+// a host adding the index later breaks nothing that shipped before it.
+func TestUnmentionedIndexReadsAsAbsent(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
+	if HasIndex() {
+		t.Fatal("a manifest with no index field reports an index")
+	}
+	if !HasFilesystem() {
+		t.Fatal("the filesystem went missing from a manifest that granted it")
+	}
+}
+
+// THE D4 RULE, asserted before there is anything to break it: an index appearing
+// or vanishing must not change which commands exist. Absence of a filesystem
+// removes an ability, so its verbs unregister; absence of an index removes only
+// speed, so nothing may.
+//
+// Phase 2 adds `rebuild-index` — the one verb that IS index-dependent, because
+// it has nothing to rebuild without one — and this test is what will force that
+// exception to be deliberate rather than incidental.
+func TestIndexDoesNotChangeTheCommandSurface(t *testing.T) {
+	cleanEnv(t)
+	RegisterDiscovered()
+
+	send(t, withIndex(manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT), ilcv1.Availability_AVAILABILITY_ABSENT))
+	without := surfaceIDs()
+
+	send(t, withIndex(manifest(2, ilcv1.Availability_AVAILABILITY_PRESENT), ilcv1.Availability_AVAILABILITY_PRESENT))
+	with := surfaceIDs()
+
+	if len(with) != len(without) {
+		t.Fatalf("the surface changed when an index appeared: %v -> %v", without, with)
+	}
+	for id := range without {
+		if _, ok := with[id]; !ok {
+			t.Fatalf("method %d disappeared when an index appeared", id)
+		}
+	}
+}
+
+func surfaceIDs() map[uint32]bool {
+	ids := map[uint32]bool{}
+	for id := range registry {
+		ids[id] = true
+	}
+	return ids
 }
 
 func TestSetEnvironmentRoundTrips(t *testing.T) {

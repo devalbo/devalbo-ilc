@@ -1,10 +1,18 @@
 # Phase 0 gate — synchronous SQLite over OPFS
 
 `make spike-sqlite-sync` → [`scripts/spike-sqlite-sync.sh`](../../scripts/spike-sqlite-sync.sh).
-The gate for [`docs/SQLITE-INDEX-PLAN.md`](../../docs/SQLITE-INDEX-PLAN.md) **D2**, run 2026-07-29.
+Run 2026-07-29 as the gate for what was then the SQLite index plan.
 
 **Result: 🟢 GREEN.** A query returns rows with **no `await` in the call path**, so a synchronous
-component import can answer one. The plan proceeds as written — no JSPI, no async engine API.
+component import can answer one.
+
+> **The plan it gated has since been re-scoped** — [`docs/INDEX-PLAN.md`](../../docs/INDEX-PLAN.md) §0.
+> The index is now a projection the engine owns, stored behind a `wasi:keyvalue`-shaped seam that is
+> file-backed, so **nothing is host-provided today and neither finding below is on the critical path**.
+> Both become prerequisites again the day a host-provided store lands (that plan's D9 and Phase 6):
+> a store bound as an import must answer synchronously — which is why this spike still rules out
+> IndexedDB on the web tier — and anything storing files in the OPFS root collides with the engine's
+> bridge in the two ways measured under Finding 3.
 
 **Pins measured:** `@sqlite.org/sqlite-wasm` **3.50.1-build1** · SQLite **3.50.1** · Chromium via
 Playwright 1.54 · VFS **`opfs-sahpool`** (`installOpfsSAHPoolVfs`), **not** the `opfs` VFS.

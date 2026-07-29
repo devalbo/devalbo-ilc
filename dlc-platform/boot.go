@@ -56,9 +56,31 @@ type BootOptions struct {
 	// still write; it should not promise the user durability.
 	Ephemeral bool
 
+	// Index says whether this host opened a derived SQLite index (§6.2).
+	//
+	// A plain bool, and NOT required the way FilesystemKind is, because the
+	// honest default is false: no tier has an index today, and most never will —
+	// embedded cannot. A required field whose answer is "no" everywhere would be
+	// ceremony that teaches nothing.
+	//
+	// False is still STATED, not left blank (see Boot): a host that has run
+	// reports ABSENT, so UNSPECIFIED keeps meaning "no manifest has arrived at
+	// all". Collapsing those two would make a forgetful host indistinguishable
+	// from a host without an index — and only one of them is a bug.
+	Index bool
+
 	// Sink receives emitted events, or nil on a tier where nothing listens —
 	// which an app must not be able to detect (Decision 33).
 	Sink EventSink
+}
+
+// availability turns a host's yes/no into the three-state wire enum, which never
+// receives UNSPECIFIED from here: that value is reserved for "no manifest".
+func availability(present bool) ilcv1.Availability {
+	if present {
+		return ilcv1.Availability_AVAILABILITY_PRESENT
+	}
+	return ilcv1.Availability_AVAILABILITY_ABSENT
 }
 
 // Boot runs the startup sequence in the one order that works.
@@ -97,6 +119,8 @@ func Boot(opts BootOptions) error {
 				Kind:         opts.FilesystemKind,
 				Ephemeral:    opts.Ephemeral,
 			},
+			// Always stated, in both directions — see BootOptions.Index.
+			Index: &ilcv1.Index{Availability: availability(opts.Index)},
 		},
 	}).MarshalVT()
 	if err != nil {

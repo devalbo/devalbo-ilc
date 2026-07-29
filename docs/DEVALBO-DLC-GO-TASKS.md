@@ -191,30 +191,41 @@ verification tightening, not a capability, so it did not hold the milestone.
 
 Deferred until after the bootstrap. Grouped; roughly priority-ordered within each group.
 
-### 🎯 CURRENT — the SQLite index (§6.2, §7.1) — [`SQLITE-INDEX-PLAN.md`](./SQLITE-INDEX-PLAN.md)
+### 🎯 CURRENT — the derived index (§6.2, §7.1) — [`INDEX-PLAN.md`](./INDEX-PLAN.md)
 
-The last unbuilt item in Decision 12's capability set, and the first capability that can be **present on
-one tier and absent on another while both stay correct**. The filesystem's absence unregisters its verbs;
-an index going away must change nothing a user can observe, only how long it took — a harder contract that
-nothing in the repo tests yet.
+**Re-scoped 2026-07-29 — it is no longer SQLite.** A **projection index the engine owns**, stored behind a
+**`wasi:keyvalue`-shaped seam** that is file-backed today. The plan doc's §0 carries the full argument; the
+short version:
 
-Unblocked by the two things it was waiting on: the environment manifest makes `unavailable` expressible
-(`ENVIRONMENT-PLAN.md` D6 deferred the field explicitly — *"the index lands with the index"*), and notes'
-`handleListRecords` is already the scan fallback, exercised by every test in the repo, so the index is the
-branch being **added** rather than the path being replaced.
+- **`ORDER BY` was the entire case for SQL** (§6.2 rejects `wasi:keyvalue` in one sentence for it). A KV
+  store cannot order, so the sort moves into Go — where it is the *same sort the fallback already uses*.
+  Under SQLite the two paths were SQL collation vs `sort.Slice`, two implementations of ordering that had
+  to agree forever, and the check to catch that divergence was self-inflicted work.
+- **With Go doing the querying, the index is a cache of projections — which is a file.** That was the
+  rejected alternative, rejected on the grounds that it would be a third *query engine*. It is not a query
+  engine, so the rejection was aimed at the wrong target.
+- **The app-facing branch disappears entirely.** The index is always present (its floor is a file), so
+  `list-records` has ONE implementation, no `HasIndex()`, and no "the fallback must return identical
+  results" rule — there is no second path. The scan moves into `rebuild-index`, where it belongs.
+- **`wasi:keyvalue` earns its place at the STORAGE layer**, not the query layer: a whole-file rewrite per
+  write is fine on web and native and is what §5.6 tells you not to do to flash, so the seam mirrors the
+  standard's shape and a host binds a real store later with no app or query code changing.
 
-- [x] **Phase 0 — the synchronous-query spike, a GATE** ✅ 🟢 GREEN (2026-07-29) — `spikes/sqlite-sync/`, `make spike-sqlite-sync`. sqlite-wasm 3.50.1 under the **`opfs-sahpool`** VFS answers `ORDER BY` in a worker with **no microtask having run**; survives a reload; needs **no COOP/COEP** (`crossOriginIsolated === false` throughout). Falsified with one injected `await`. The jco half was deliberately not rebuilt — Spike 5 already measured that a *sync* import returning a value is green, and its failure was Promise-specific. **Turned up the real Phase 3 work (plan D9):** the SAH pool lives in the OPFS root, so today's bridge hydrates ~48 KB of its opaque files into the engine's tree (which would put a disposable index inside `export-fs` bundles) and then throws `NoModificationAllowedError` on every flush. Both sides need to skip the pool directory, and the platform names it `.ilc-index` so the exclusion matches a name we chose
-- [ ] **Phase 1 — the manifest field** — `Index` + `HasIndex()` + `BootOptions.Index`; nothing queries yet, so the schema lands before two things depend on it
-- [ ] **Phase 2 — the seam and the native binding** — the WIT import, `IndexRequest`/`IndexRow`, `rebuild-index` (id 200), `modernc.org/sqlite` **host-side**; the second capability through `caps_native`/`caps_wasip2`, which is what tells us whether that pattern generalizes
-- [ ] **Phase 3 — the web binding** — sqlite-wasm in the worker; inherits the OPFS probe's known test gap and must not invent a production seam to close it
-- [ ] **Phase 4 — notes uses it** — the scan stays verbatim as the `unavailable` branch; `RebuildIndex` claims reserved 10005
-- [ ] **Phase 5 — index parity** — same vectors, index on and off, byte-identical results. The only check that can see this capability at all: the command surface barely moves (plan D4), so surface parity is blind here
-- [ ] **Phase 6 — write it down + dogfood** — the registration rule, the never-authoritative rule, the write order
+**Dropped:** `sqlite-host` from Decision 12, `modernc.org/sqlite`, `@sqlite.org/sqlite-wasm`, the
+per-tier capability binding, and the index's permanent absence on embedded — which now gets the same index
+as everything else.
 
-**Three decisions worth knowing before reading the plan:** an engine-built index file is rejected on the
-"a fallback must return identical results" rule (it would make three implementations, the third one ours to
-write under TinyGo); §6.2's sketched WIT changes shape because `result<>` strands WAMR; and §7.1's lock
-file is **deliberately deferred** until a second writer exists.
+- [x] **Phase 0 — the synchronous-answer spike** ✅ 🟢 GREEN (2026-07-29) — `spikes/sqlite-sync/`, `make spike-sqlite-sync`. Ran against sqlite-wasm because that was the plan at the time; what it established outlives it. A browser **can** answer a host capability synchronously (`opfs-sahpool`, no microtask ran, no COOP/COEP needed — falsified with one injected `await`), and **anything storing files in the OPFS root collides with the engine's bridge**: hydrate pulls them into the engine's tree (so they would ride along in `export-fs` bundles) and the flush then throws `NoModificationAllowedError` on every command. Both are now prerequisites for the deferred host-store phase (plan D9), not current work
+- [x] **Phase 1 — the manifest field** ✅ landed, then **SUPERSEDED** (2026-07-29) — `Index` + `Environment.index` + `HasIndex()` + `BootOptions.Index`, five tests, three falsifications. **Recommended for revert** (plan D8): the index is always present under the revised design, so the field has nothing to say, and a field nothing sets is what `ENVIRONMENT-PLAN.md` D6 exists to prevent. The finding worth keeping: `Boot` states availability in both directions so `UNSPECIFIED` can keep meaning "no manifest yet", and the **TS encoder had to move with it** — two host runtimes would otherwise disagree in bytes with no check able to see it, since the parity vectors are hand-built requests rather than host-generated ones. That asymmetry recurs for every manifest field
+- [ ] **Phase 2 — the seam and the file backend** — `Store` (`Put`/`Delete`/`Scan`/`Clear`, mirroring `wasi:keyvalue`), the file-backed implementation, `rebuild-index` at id 200, `SetIndexRebuilder` (same shape as `SetVersion`: platform owns the verb, app owns the knowledge), and the export exclusion
+- [ ] **Phase 3 — notes uses it** — create/delete maintain the index; `list-records` queries it **with no branch**; the scan becomes the rebuilder. Its current comment ("becomes the `unavailable` branch") is now wrong and should say why
+- [ ] **Phase 4 — the checks worth a script** — vectors that create/list/delete/rebuild, plus a browser test that a bundle carries no index. **No `verify-index-parity.sh`**: existing native↔wasm parity covers engine-side code for free, and rebuild-equivalence replaces the SQL-vs-Go comparison entirely
+- [ ] **Phase 5 — write it down + dogfood** — never-authoritative, write order, "the index never travels"; §6.2/§6.6 record that SQL was reconsidered and why; `dlc` does not adopt it (no collection to list) and that is recorded as a legitimate answer
+- [ ] **Phase 6 (deferred, unscheduled) — a host-provided KV store** — embedded first, because whole-file rewrites are a flash-endurance problem before they are a speed one. **The app and its queries must not change**, which is the test of whether this design was right
+
+**The one invariant that replaces most of the old plan's machinery:** the maintained index equals a rebuilt
+one. It catches a create that forgets to index, a delete that leaves a row, and a projection that drifts —
+with no second tier, no second backend and no golden file.
 
 ### The host layer (Decision 34) — COMPLETE — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md)
 
@@ -528,7 +539,7 @@ is the portable option. Being occasionally coarse beats being tier-dependent: a 
 usability cost, a tier-dependent one is a parity failure.
 
 ### Capabilities
-- [ ] **SQLite-index** (§6.2) — **planned, see [`SQLITE-INDEX-PLAN.md`](./SQLITE-INDEX-PLAN.md) and the CURRENT section above; the phases live there, not here.** Native `modernc.org/sqlite`; web `@sqlite.org/sqlite-wasm` (OPFS); `unavailable` fallback → file scan. **Unblocked (2026-07-28):** the manifest makes `unavailable` expressible — add an `Index` field, register the index block from it, and the fallback becomes a branch on `platform.HasIndex()` rather than a linking problem. Two things the manifest work says to carry over: the fallback must return IDENTICAL results to the fast path (a fallback that answers differently is a second implementation), and adding a capability means adding it to the **surface** parity vectors, because parity cannot see registration
+- [ ] **Derived index** (§6.2) — **re-scoped away from SQLite 2026-07-29; see [`INDEX-PLAN.md`](./INDEX-PLAN.md) and the CURRENT section above. The phases live there, not here.** A projection index the engine owns, queried in Go, stored behind a `wasi:keyvalue`-shaped seam that is file-backed today. Present on every tier including embedded, so there is no `unavailable` branch in app code at all — the scan survives only inside `rebuild-index`. The old note here (native `modernc.org/sqlite`, web `@sqlite.org/sqlite-wasm`, a `platform.HasIndex()` fallback branch, and index verbs in the surface parity vectors) is superseded in every particular except one: adding a capability still means adding it to the surface vectors, because parity cannot see registration.
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
 - [x] **Events** capability + reactivity loop (§6.3): `ilc.data-changed` / `notes.record-changed` → UI re-reads. Decision 33; plan + findings in `docs/EVENTS-PLAN.md`. Built the `caps_native`/`caps_wasip2` seam (§5.3) and the first custom WIT import. No `useEngineEvent` hook — `subscribe()` from `@devalbo/dlc-web/api` was enough, and notes' UI is not React
   - [ ] follow-up: cross-tab delivery (`BroadcastChannel`) — a second tab does not see this one's writes

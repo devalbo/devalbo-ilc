@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// One row of SQLITE-INDEX-PLAN.md's Phase 0 matrix per step, in the shape
+// One row of INDEX-PLAN.md's Phase 0 matrix per step, in the shape
 // spikes/async/README.md uses. The gate is S1.3: if a query cannot be answered
 // without reaching the event loop, a synchronous component import cannot return
 // rows and the capability's whole shape is wrong.

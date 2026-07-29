@@ -226,14 +226,45 @@ export const Filesystem: MessageType<Filesystem> = /* @__PURE__ */ createMessage
 });
 
 /**
+ * The derived SQLite index (§6.2, §7.1) — an ACCELERATOR, never a source of
+ * truth, and absent on more tiers than it is present on.
+ *
+ * No kind, no dialect, no version: an app writes SQL against whatever this host
+ * opened, and there is exactly one implementation per tier. A field here would
+ * be one an app could branch on, and branching on WHICH index you have is a
+ * short walk from branching on which tier you are (Decision 33 D3).
+ *
+ * Contrast with Filesystem, which carries a kind: the filesystem's kind changes
+ * what an app should PROMISE a user (does this survive the tab closing). An
+ * index promises nothing — it is allowed to vanish, and §7.1 requires the app to
+ * survive that.
+ *
+ * @generated from message devalbo.ilc.v1.Index
+ */
+export interface Index {
+  /**
+   * @generated from field: devalbo.ilc.v1.Availability availability = 1;
+   */
+  availability?: Availability;
+
+};
+
+export const Index: MessageType<Index> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.Index",
+    fields: [
+        { no: 1, name: "availability", kind: "enum", T: Availability_Enum },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * Environment is what the host can do, as of `revision`.
  *
  * Deliberately small (plan D6): a field here is a branch somewhere, and a
- * capability nothing reads yet is a branch nothing tests. The index lands with
- * the index; display may never land at all now that Decision 34 made the
- * semantic render path the default. Events are absent BY RULE, not by
- * omission — emitting carries nothing back, so its absence is unobservable and
- * Decision 33 forbids an app branching on it.
+ * capability nothing reads yet is a branch nothing tests. Display may never land
+ * at all now that Decision 34 made the semantic render path the default. Events
+ * are absent BY RULE, not by omission — emitting carries nothing back, so its
+ * absence is unobservable and Decision 33 forbids an app branching on it.
  *
  * @generated from message devalbo.ilc.v1.Environment
  */
@@ -255,6 +286,10 @@ export interface Environment {
    * @generated from field: devalbo.ilc.v1.Filesystem filesystem = 2;
    */
   filesystem?: Filesystem;
+  /**
+   * @generated from field: devalbo.ilc.v1.Index index = 3;
+   */
+  index?: Index;
 
 };
 
@@ -263,6 +298,7 @@ export const Environment: MessageType<Environment> = /* @__PURE__ */ createMessa
     fields: [
         { no: 1, name: "revision", kind: "scalar", T: ScalarType.UINT32 },
         { no: 2, name: "filesystem", kind: "message", T: () => Filesystem },
+        { no: 3, name: "index", kind: "message", T: () => Index },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

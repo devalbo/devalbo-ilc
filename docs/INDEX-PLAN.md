@@ -1,0 +1,355 @@
+# The derived index — implementation plan (§6.2, §7.1)
+
+**Status: REVISED 2026-07-29** — was `SQLITE-INDEX-PLAN.md`, and the reversal is §0. Phase 0 (the
+synchronous-query gate) ran and is kept for its findings; Phase 1 shipped and is now recommended for
+**revert**. No other code has moved. Written in the shape of [`EVENTS-PLAN.md`](./EVENTS-PLAN.md),
+[`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md) and [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md): design
+decisions first, phases that each leave the tree green, and nothing claimed until it has been broken on
+purpose.
+
+How an app stops reading every file to answer a question — **without the answer depending on which tier it
+is running on**.
+
+---
+
+## 0. What changed, and why (2026-07-29)
+
+The plan was SQLite: a host-provided database, imported per tier, absent on embedded, with every app
+carrying an index path and a scan fallback that had to agree forever. It is now a **projection index the
+engine owns**, stored behind a **`wasi:keyvalue`-shaped seam** that is file-backed today.
+
+**The argument that turned it**, in the order it landed:
+
+1. **`ORDER BY` was the whole case for SQL** (§6.2 rejects `wasi:keyvalue` in one sentence for it). But a
+   KV store cannot order, so the sort would move into Go — and once the sort is in Go it is the **same
+   sort** the fallback already uses. Under SQLite the two paths are SQL collation versus `sort.Slice`, two
+   implementations of ordering that must agree forever; the old D7 existed to catch that and predicted its
+   own first failure would be a collation mismatch. That entire bug class was self-inflicted.
+2. **If Go does the querying, the "index" is a cache of projections** — and a cache of projections is a
+   file. Which was §1.1's *rejected* alternative. The rejection argued that an engine-built index would be
+   a third implementation of every query, written under TinyGo without reflection. That argument is sound
+   only if the index does querying. It does not. **The argument was aimed at the wrong target.**
+3. **The app-facing branch disappears.** This is the part that was not obvious from either option alone:
+   with the index always present, `handleListRecords` has ONE implementation. There is no `HasIndex()`
+   check, no fallback path in app code, and no "the fallback must return identical results" rule to
+   enforce — because there is no second path to be identical to. The scan survives only inside
+   `rebuild-index`.
+4. **Storage is where `wasi:keyvalue` earns its place.** A whole-file projection index rewrites everything
+   on every write, which is fine for bounded data on web and native and is exactly what §5.6 tells you not
+   to do to flash. So the projection is written behind a narrow byte-KV seam — the standard's shape — and a
+   host that has a real KV store binds it later without any app or query code changing.
+
+**What survives from the SQLite plan:** the method-id block (200–299), `rebuild-index` at id 200, the
+never-authoritative rule, the write ordering, the export exclusion, and both Phase 0 findings — the
+synchronous-answer gate and the OPFS collision — which stop being urgent and start being **prerequisites
+for the day a host-provided store lands** (D9).
+
+**What it costs:** Phase 1's manifest field, which should be reverted (D8), and the sqlite-wasm dependency
+that never got added. The Phase 0 spike is not wasted: it settled that a browser *can* answer a host
+capability synchronously, which any host-provided store needs, and it found a collision any host-side
+store in the OPFS root would hit.
+
+---
+
+## 1. Why now
+
+- **`list-records` reads every file to show a list of titles.** At notes' size that is free; the shape is
+  what is wrong, and it is the shape every app scaffolded from the template will copy.
+- **Notes' `open` / `update` / `rebuild-index` are blocked on it** (`DEVALBO-DLC-GO-TASKS.md`), and
+  `rebuild-index` has held reserved id 10005 since the app was written.
+- **§7.1 has promised a disposable index since the beginning** and nothing has ever built one, so the
+  "disposable" half — rebuild, exclusion from bundles, never authoritative — is entirely untested prose.
+
+### 1.1 Settled: the engine owns the projection and the query; only storage is a seam
+
+| | Engine (portable, one implementation) | Seam (per tier, byte-shaped) |
+| --- | --- | --- |
+| what a projection contains | **app-defined proto message** | opaque bytes |
+| ordering, filtering, paging | **Go, in the app's handler** | — |
+| rebuild by scanning files | **platform + app rebuilder** | — |
+| where projections are stored | — | **file today; host KV later** |
+
+The load-bearing property: **a storage backend cannot change a result, only a duration.** Ordering and
+filtering happen above the seam, so substituting the backend is a performance change by construction — not
+a correctness one that a test has to chase. That is the difference from SQL, where the backend *was* the
+query engine and every backend swap was a semantics risk.
+
+---
+
+## 2. Design decisions
+
+### D1 — The engine owns the projection and the query; no query language crosses any boundary
+
+The app defines its projection as an ordinary proto message in its own schema:
+
+```proto
+message RecordEntry {
+  string id = 1;          // → records/<id>.json
+  string title = 2;
+  int64 created_at = 3;
+}
+```
+
+…and queries it in Go: `sort.Slice`, a filter loop, a slice for paging. There is no SQL string, no query
+DSL, and nothing for the platform to specify or evolve. The old D1 had SQL text crossing a byte boundary
+because the app owned its schema and the platform could not know its columns; with the query in the app,
+the platform does not need to know — it stores bytes.
+
+**This is the decision that removes the most future work.** A query API is a language: it needs a grammar,
+an evolution story, and a second implementation per backend. `sort.Slice` needs none of those.
+
+### D2 — Storage is a narrow byte-KV seam, shaped like `wasi:keyvalue`
+
+```go
+// dlc-platform/index — the seam, not the API apps call
+type Store interface {
+    Put(key string, value []byte) error
+    Delete(key string) error
+    Scan() ([]Pair, error)   // unordered, like wasi:keyvalue's list-keys
+    Clear() error            // rebuild starts from nothing
+}
+```
+
+Four operations, all of which `wasi:keyvalue` already has (`set` / `delete` / `list-keys` + `get` /
+—). §6.6's rule is **mirror the standard even when implementing it ourselves**, so adopting or bridging
+to `wasi:keyvalue` later is wiring rather than redesign.
+
+**Deliberate omissions, each with a reason rather than an oversight:** no `Get(key)` — a point lookup reads
+the *record*, not the index (D6), and a list query wants everything anyway; no cursor on `Scan` — the
+standard has one for unbounded stores, and §5.6 says assume bounded data, so a cursor now would be an
+untested branch; no `exists`, no atomics, no batch — nothing needs them.
+
+**Scan returns everything, and that is not a defect.** Every query materializes the collection to sort it.
+The index's win is not avoiding *n* — it is avoiding *n* file opens, decodes of full records, and (on
+embedded) *n* flash reads.
+
+### D3 — The app has ONE code path; there is no fallback branch in app code
+
+`handleListRecords` queries the index. Always, on every tier. No `HasIndex()`, no degraded mode, no
+`unavailable` variant to handle.
+
+This is a direct reversal of §6.2's "graceful degradation to a file scan", and it is a *simplification*
+rather than a regression: the index is now always available, because its floor is a file on the filesystem
+the app already has. Degradation was only ever necessary because the index was a host capability that
+could be missing.
+
+**The scan does not disappear — it moves.** It lives in `rebuild-index`, where it has always belonged: the
+one operation whose job is to reconstruct the index from the source of truth.
+
+**What this deletes:** the old D5 (fallback must return identical results) and most of the old D7 (index
+parity), because there is no second query implementation to be identical to. What remains worth checking is
+narrower and stated in D4.
+
+### D4 — Rebuild is the correctness anchor, and the only check the index really needs
+
+The invariant: **the maintained index equals the rebuilt index.** Mutate a collection through the app's
+own verbs, then rebuild from the files, and the two must be byte-identical.
+
+That one property catches the whole class this plan is exposed to — a create that forgets to index, a
+delete that leaves a row, a projection that drifts from the record it projects — and it needs no second
+tier, no second backend, and no golden file. It is also cheap enough to assert after every mutation test
+rather than in one dedicated place.
+
+The old plan needed a whole new verification script for this. This needs a helper.
+
+### D5 — The index never travels
+
+It is derived, so it must not be in an `export-fs` bundle (§7.1) and must not make two stores that differ
+only in their index compare unequal.
+
+One known path, excluded in one place, in Go — and testable natively *and* in the browser against the same
+code. Worth contrasting with the SQLite version of this problem (old D9): there, the exclusion lived in the
+web host's OPFS bridge, had to be repeated in any second host runtime, and was invisible to parity.
+
+### D6 — The index is never authoritative
+
+An index query returns **identifiers and ordering**. The record itself is read from its file.
+
+The moment a handler renders a *value* out of the index, the index is a second source of truth and a stale
+row gets served to a user. Where that genuinely bites — a list view showing titles for 10,000 records — the
+projection is a **cache**, and a cache that disagrees with a file is a bug that D4's rebuild fixes. Start
+with what a list view needs to render and widen deliberately, never with fields a stale value could
+mislead someone about.
+
+### D7 — Write order, and no lock file yet
+
+**File first, index second, event last.** A subscriber that re-reads on the event must find both already
+consistent; if the process dies in between, the truth is on disk and only the derived thing is behind —
+which is what `rebuild-index` is for.
+
+No lock file (§7.1 describes one), deliberately: commands are serialized within an instance, the lock
+guards a second writer that does not exist yet, and a lock nothing can contend for is a branch nothing
+tests. The failure it actually prevents is a torn *file*, which is a different problem with a different fix
+(write-then-rename), worth doing when something can tear.
+
+### D8 — The KV capability is DEFERRED, and the manifest field goes with it
+
+Nothing in the repo has a host-provided KV store, so binding one now would be a capability with no
+consumer — and `ENVIRONMENT-PLAN.md` D6 is explicit that a manifest field nothing sets is a branch nothing
+tests.
+
+**Therefore Phase 1 should be reverted:** `Environment.index`, `HasIndex()`, `BootOptions.Index`, and the
+TS encoder field. Under this design the index is always present, so the field has nothing to say. When a
+host does bring a KV store, the honest field is not "is there an index" but "does this host provide a
+key-value store" — a different question, in a different message, added with its first consumer.
+
+The falsifications Phase 1 produced stay recorded in §3; they cost an afternoon and the D4 registration
+rule they exercised is still true.
+
+**Where a host store would actually pay off, when it comes:** native at scale and embedded flash
+endurance. Notably **not** web — the browser tier hydrates the entire OPFS into memory at boot, so a
+file-backed index there is already memory-speed. That is the inverse of the SQLite story, where web was
+the hard part.
+
+### D9 — What the SQLite spike still binds, for the day a host store lands
+
+Both Phase 0 findings survive as prerequisites rather than as current work:
+
+- **A host-provided store must answer synchronously.** Measured green for sqlite-wasm under
+  `opfs-sahpool` ([`spikes/sqlite-sync/`](../spikes/sqlite-sync/README.md)); the same requirement applies
+  to any KV store bound as an import, and rules out IndexedDB on the web tier, which is async.
+- **Anything storing files in the OPFS root collides with the bridge.** Hydrate pulls its files into the
+  engine's tree (so they would ride along in bundles), and the flush then fails on every command with
+  `NoModificationAllowedError`. A host-side store needs an exclusion on both sides of `opfs.ts`.
+
+### D10 — Write amplification is the thing that pulls the KV backend forward
+
+The file backend rewrites the whole projection file on every `Put`. At 10k entries × ~100 bytes that is
+~1 MB per write — fine on web (an in-memory tree) and native, and precisely what §5.6 lists under *avoid*
+for embedded flash.
+
+So the ordering of future work is set by physics rather than preference: **embedded is the first tier that
+needs a real KV backend**, and it is also the tier with the least demanding one to write (littlefs, a small
+append-and-compact store). Naming this now is what keeps the seam honest — a seam whose second
+implementation is hypothetical tends to grow file-shaped assumptions.
+
+---
+
+## 3. Phases
+
+Each leaves the tree green. **No phase is done until something can be broken on purpose and observed going
+red** (`AGENTS.md` §5).
+
+### Phase 0 — the synchronous-query gate — **🟢 GREEN (2026-07-29), and now a prerequisite rather than a gate**
+
+`spikes/sqlite-sync/` · `make spike-sqlite-sync` · [findings](../spikes/sqlite-sync/README.md).
+
+Ran against sqlite-wasm because that was the plan at the time. What it established outlives the plan: a
+browser **can** answer a host capability synchronously (no COOP/COEP required), and anything that stores
+files in the OPFS root collides with the engine's bridge in two specific, loud ways. Both are D9.
+
+*Keep or retire?* Keep until something binds a host-provided store, since it is the only evidence for D9.
+Retire it then, per `spikes/README.md`'s rule about spikes that duplicate a live check.
+
+### Phase 1 — the manifest field — **LANDED, then SUPERSEDED (2026-07-29)**
+
+Shipped: `Index { availability }`, `Environment.index = 3`, `HasIndex()`, `BootOptions.Index`, the TS
+encoder field, five tests, three falsifications (`UNSPECIFIED`-as-present, blank-instead-of-`ABSENT`, and a
+D4-registration violation).
+
+**Recommended for revert** — D8. The index is now always present, so the field has nothing to say. The one
+finding worth carrying forward: `Boot` states availability in both directions so `UNSPECIFIED` can keep
+meaning "no manifest has arrived", and the *TS encoder* had to move with it, because the two host runtimes
+would otherwise have disagreed in bytes with no check in the repo able to see it — the parity vectors are
+hand-built requests, not host-generated ones. That asymmetry will recur for every manifest field.
+
+### Phase 2 — the seam and the file backend
+
+| File | Change |
+| --- | --- |
+| `dlc-platform/index/store.go` | the `Store` seam (D2) + the file-backed implementation |
+| `dlc-platform/index/index.go` | `Put` / `Delete` / `Scan` / `Rebuild`, over a store |
+| `dlc-platform/proto/devalbo/ilc/v1/platform.proto` | `RebuildIndex` claiming **id 200** (index block) |
+| `dlc-platform/commands.go` | `handleRebuildIndex`; `SetIndexRebuilder`, mirroring `SetVersion` |
+| `dlc-platform/fs.go` or `bft.go` | **D5** — the index path is excluded from `ReadTree` |
+| `dlc-platform/proto/method-ids.lock` | one new line, re-blessed deliberately |
+| `dlc-platform/index/*_test.go` | round-trip, rebuild equivalence, exclusion |
+
+`SetIndexRebuilder` is the same shape as `SetVersion`: the platform owns the *verb*, the app supplies the
+*knowledge*, because only the app knows its records live under `records/` and what is worth projecting.
+
+*Falsify:* drop a key from `Clear` → rebuild does not match a fresh build; include the index in `ReadTree`
+→ the bundle test goes red; have `Put` write without flushing → a reopened store loses the last write.
+
+### Phase 3 — notes uses it, and its scan moves into rebuild
+
+| File | Change |
+| --- | --- |
+| `example-apps/notes/proto/notes/v1/commands.proto` | `RecordEntry` projection; `RebuildIndex` claiming reserved **10005** |
+| `example-apps/notes/engine/commands.go` | create/delete maintain the index; **`handleListRecords` queries it, with no branch**; the scan becomes the rebuilder |
+| `example-apps/notes/engine/commands_test.go` | D4 after every mutation; ordering is stable |
+
+The comment in `handleListRecords` today says the scan *"becomes the `unavailable` branch rather than being
+rewritten"*. Under this plan that is wrong and the comment should say why: there is no branch, and the scan
+moves to the rebuilder.
+
+*Falsify:* delete the index-maintenance call from `handleCreateRecord` → the D4 assertion fires
+immediately, in the app's own tests, with no new harness.
+
+### Phase 4 — the checks that are worth a script
+
+| File | Change |
+| --- | --- |
+| `verify/parity/method-vectors.json` | vectors that create, list, delete and rebuild |
+| a browser test | an exported bundle contains no index file (D5), asserted on the tier where the bridge is |
+
+Existing native↔wasm parity does most of the work here for free: the index is engine-side, so both tiers
+run the same code over the same files, and a divergence would show up in the vectors already being
+compared. **No `verify-index-parity.sh`** — the old plan needed one because SQL and Go had to agree; D4's
+rebuild equivalence replaces it and lives in unit tests.
+
+### Phase 5 — write it down, and the dogfood pass
+
+- `AGENTS.md`: the never-authoritative rule (D6), the write order (D7), and "the index never travels" (D5).
+- `DEVALBO-ILC-GO-PLAN.md` §6.2 / §7.1 / §6.6: **§6.2's SQLite capability becomes this**, and §6.6's
+  "keep custom `sqlite-host`, needs `ORDER BY`" row is the sentence this plan overturned — it should say so
+  rather than being quietly edited. Decision 12's capability list loses `sqlite-host`.
+- **Dogfood review:** `dlc` will not adopt this — it has no collection to list — and that is a legitimate
+  answer, recorded so the next reviewer does not re-derive it. notes is the consumer; tictactoe has no
+  persistence at all.
+
+### Phase 6 (deferred, not scheduled) — a host-provided KV store
+
+Only when a tier needs it, which D10 says will be embedded first. Binds `wasi:keyvalue`-shaped imports
+behind the same `Store` seam, and inherits D9's two constraints. **The app and its queries do not change**
+— that is the test of whether this design was right.
+
+---
+
+## 4. Risks
+
+| Risk | Why it bites | Mitigation |
+| --- | --- | --- |
+| **The index drifts from the files** | a create forgets to index; the list is quietly wrong forever | D4 rebuild equivalence, asserted after every mutation test |
+| **The index becomes authoritative** | one handler renders a value from it and a stale row reaches a user | D6; ids and ordering only, widen deliberately |
+| **Write amplification** | a whole-file rewrite per `Put`; on flash it is an endurance problem, not a speed one | D10 names it; bounded data until the KV backend lands |
+| **The index travels in a bundle** | two identical stores compare unequal; a disposable thing becomes state | D5, one path, one exclusion, tested on both tiers |
+| **The seam grows file-shaped assumptions** | its only implementation is a file, and the second one is hypothetical | D2 mirrors `wasi:keyvalue` deliberately; D10 says which tier forces it |
+| **`Scan` returning everything stops being viable** | ~10k entries is fine, ~100k is 10 MB materialized per query | the same wall split storage hits from the other side; a cursor is a known, deferred addition |
+| **Apps branching on the tier** | the old plan's biggest hazard | mostly **designed out** — there is no capability to branch on (D3) |
+
+---
+
+## 5. What this plan does NOT do
+
+- **No SQLite.** Not natively, not in the browser. Decision 12's `sqlite-host` is dropped; §6.6's
+  `ORDER BY` justification is overturned (D1).
+- **No query language on any boundary** — no SQL text, no DSL, nothing to specify or evolve.
+- **No host capability, no new WIT import, no manifest field** (D8), until a tier needs one (Phase 6).
+- **No full-text search.** The projection would have to hold every body, which is the whole store.
+- **No lock file, no write-then-rename** (D7) — until a second writer exists.
+- **No sync.** §9 operates on the JSON documents and each node rebuilds locally; unchanged.
+
+---
+
+## 6. Definition of done
+
+1. [ ] `./scripts/ci.sh full` green.
+2. [x] The synchronous-answer question is settled in writing — Phase 0, and it now binds Phase 6.
+3. [ ] `list-records` answers from the index on every tier, with **no branch in app code**.
+4. [ ] The maintained index equals a rebuilt one, asserted after every mutation, **watched going red**.
+5. [ ] An exported bundle contains no index file, asserted natively and in the browser.
+6. [ ] `rebuild-index` reconstructs an index deleted out from under a running app.
+7. [ ] No handler renders a value out of the index (D6), by inspection.
+8. [ ] The `Store` seam has been read as if implementing it on littlefs, and nothing in it assumes a file.
+9. [ ] `AGENTS.md` carries D5, D6 and D7; the plan's §6.2/§6.6 record that SQL was reconsidered and why.

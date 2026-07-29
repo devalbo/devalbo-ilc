@@ -2,7 +2,7 @@
 #
 # Phase 0 gate for the SQLite index — can sqlite-wasm answer a query
 # SYNCHRONOUSLY, in the worker where the engine runs, over OPFS?
-# See docs/SQLITE-INDEX-PLAN.md D2 and spikes/sqlite-sync/README.md.
+# See docs/INDEX-PLAN.md D9 and spikes/sqlite-sync/README.md.
 #
 # Needs a Chromium from Playwright (the same one the web suites use).
 #

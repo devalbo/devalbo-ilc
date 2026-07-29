@@ -2,7 +2,7 @@
 // the engine runs in the real web host (dlc-platform/web/worker.ts) and also the
 // only place `createSyncAccessHandle` has ever been available.
 //
-// The claim under test (SQLITE-INDEX-PLAN.md D2): a query can be answered with
+// The claim under test (INDEX-PLAN.md D9): a query can be answered with
 // NO await in the call path, so a synchronous component import can return rows.
 // Everything else in the plan rests on it.
 

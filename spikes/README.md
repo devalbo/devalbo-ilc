@@ -9,7 +9,7 @@ one of them (`preview2-shim` mangling TinyGo writes) is still load-bearing in sh
 | Spike | State |
 | --- | --- |
 | `async/` (Spike 5) | **live** — Rich JSPI ✅ · Portable ✅. Nothing else covers it: there is no async capability yet, so this remains the only evidence for how one would work. |
-| `sqlite-sync/` (index Phase 0) | **live** — 🟢 GREEN. The gate for [`SQLITE-INDEX-PLAN.md`](../docs/SQLITE-INDEX-PLAN.md) D2: sqlite-wasm answers a query with no `await` in the call path, over OPFS, in a worker. Retire it when the real index does the same thing on every build. It also composes with Spike 5 rather than repeating it — that spike already measured that a **sync** JS import returning a value is fine under sync jco, so this one deliberately builds no component. |
+| `sqlite-sync/` (index Phase 0) | **live** — 🟢 GREEN. The gate for [`INDEX-PLAN.md`](../docs/INDEX-PLAN.md) D9: sqlite-wasm answers a query with no `await` in the call path, over OPFS, in a worker. Retire it when the real index does the same thing on every build. It also composes with Spike 5 rather than repeating it — that spike already measured that a **sync** JS import returning a value is fine under sync jco, so this one deliberately builds no component. |
 
 ## What was retired, and why
 
