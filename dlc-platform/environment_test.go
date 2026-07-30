@@ -65,6 +65,69 @@ func TestUnsetEnvironmentReadsAsAbsent(t *testing.T) {
 	}
 }
 
+// --- isolation (§3·5) -------------------------------------------------------
+
+// isolated builds a manifest whose filesystem carries an isolation claim.
+func isolated(revision uint32, iso ilcv1.Isolation) *ilcv1.SetEnvironmentRequest {
+	req := manifest(revision, ilcv1.Availability_AVAILABILITY_PRESENT)
+	req.Environment.Filesystem.Isolation = iso
+	return req
+}
+
+// The conservative default, and the reason this field could be added without
+// touching a single existing host: silence is not a promise of privacy.
+func TestUnstatedIsolationReadsAsShared(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	if Isolated() {
+		t.Fatal("an unset manifest claims isolation")
+	}
+	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
+	if Isolated() {
+		t.Fatal("a manifest that says nothing about isolation claims it")
+	}
+}
+
+// An explicit SHARED is a claim a host CAN make, and it must read the same as
+// silence — the difference is diagnostic ("did the host think about this?"),
+// never behavioural.
+func TestExplicitSharedIsNotIsolated(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	send(t, isolated(1, ilcv1.Isolation_ISOLATION_SHARED))
+	if Isolated() {
+		t.Fatal("SHARED reported as isolated")
+	}
+	if got := Env().GetFilesystem().GetIsolation(); got != ilcv1.Isolation_ISOLATION_SHARED {
+		t.Fatalf("isolation = %v, want SHARED preserved on the wire", got)
+	}
+}
+
+func TestPerUserIsIsolated(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	send(t, isolated(1, ilcv1.Isolation_ISOLATION_PER_USER))
+	if !Isolated() {
+		t.Fatal("PER_USER reported as not isolated")
+	}
+}
+
+// Isolation can change mid-session for the same reason a filesystem can: a host
+// may re-grant a narrower root, and an app holding private data has to notice.
+func TestIsolationCanBeWithdrawn(t *testing.T) {
+	cleanEnv(t)
+	RegisterCore()
+
+	send(t, isolated(1, ilcv1.Isolation_ISOLATION_PER_USER))
+	send(t, isolated(2, ilcv1.Isolation_ISOLATION_SHARED))
+	if Isolated() {
+		t.Fatal("isolation survived a manifest that withdrew it")
+	}
+}
+
 func TestSetEnvironmentRoundTrips(t *testing.T) {
 	cleanEnv(t)
 	RegisterCore()

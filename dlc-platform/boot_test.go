@@ -47,6 +47,38 @@ func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 	}
 }
 
+// A host that says nothing about isolation is not making a claim, and Boot must
+// not invent one on its behalf — the whole point of the safe default.
+func TestBootDefaultsToNoIsolationClaim(t *testing.T) {
+	if err := bootIn(t, BootOptions{
+		Root:           ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+	}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	if Isolated() {
+		t.Fatal("Boot claimed isolation the host never stated")
+	}
+	if got := Env().GetFilesystem().GetIsolation(); got != ilcv1.Isolation_ISOLATION_UNSPECIFIED {
+		t.Fatalf("isolation = %v, want UNSPECIFIED (no claim)", got)
+	}
+}
+
+// And a host that DID grant a per-user root can say so — the case a partitioned
+// host would use.
+func TestBootCarriesAnIsolationClaim(t *testing.T) {
+	if err := bootIn(t, BootOptions{
+		Root:           ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
+		Isolation:      ilcv1.Isolation_ISOLATION_PER_USER,
+	}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	if !Isolated() {
+		t.Fatal("Boot dropped the host's isolation claim")
+	}
+}
+
 // A root is GRANTED, never assumed (§3·5). Boot refusing an empty one keeps
 // that rule at the entry point every host now goes through, rather than
 // relying on Root() panicking later, somewhere that does not name the cause.

@@ -115,12 +115,51 @@ enum FilesystemKind {
   FILESYSTEM_KIND_OPFS = 3;     // the browser's origin-private filesystem
 }
 
+// Whether this root belongs to ONE person, or is shared with others.
+//
+// Separate from FilesystemKind rather than a fourth value of it, because it is
+// an orthogonal dimension: `kind` already mixes WHERE the root is (cwd, app dir)
+// with WHAT backs it (OPFS), and a per-user OPFS subtree is genuinely both OPFS
+// and per-user. An enum can only say one thing.
+//
+// Three states for the same reason Availability has three: "nobody said" is not
+// "somebody said it is shared", and only the second is a claim.
+enum Isolation {
+  ISOLATION_UNSPECIFIED = 0; // nobody said; treated as SHARED
+  ISOLATION_SHARED = 1;      // other people may see this store
+  ISOLATION_PER_USER = 2;    // this root was granted for one person
+}
+
 message Filesystem {
   Availability availability = 1;
   FilesystemKind kind = 2;
   // Ephemeral means the store does not survive the process/tab. An app may
   // still write; it should not promise the user durability.
   bool ephemeral = 3;
+
+  // Whether the host isolated this store per user (§3·5).
+  //
+  // WHO READS THIS, since no app in this repo does yet: an app that holds
+  // PRIVATE data and needs to know whether privacy is its problem. If the host
+  // granted a per-user root, everything the app can see belongs to one person
+  // and it may be naive. If it did not, the app is responsible for access
+  // control, and an app that assumed otherwise leaks — silently, and only
+  // discoverably by leaking.
+  //
+  // That asymmetry is why this field exists ahead of its first consumer, where
+  // ENVIRONMENT-PLAN.md D6 would normally say to wait: an unused field costs one
+  // field, and a missing one costs someone else's data.
+  //
+  // UNSPECIFIED IS SAFE, which is what makes it addable without touching a
+  // single existing host: no claim reads as "not isolated", so an app that
+  // requires privacy refuses to run rather than assuming it has it. A host that
+  // forgets to declare isolation therefore fails LOUDLY instead of leaking.
+  //
+  // NOT A SECURITY BOUNDARY. This is the host's word. A host that grants a
+  // shared root and reports PER_USER is lying, and nothing engine-side can
+  // detect it — see AGENTS.md §3·5. It lets an honest host tell an app what it
+  // is getting; it does not enforce anything.
+  Isolation isolation = 4;
 }
 
 // Environment is what the host can do, as of `revision`.

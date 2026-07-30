@@ -64,7 +64,7 @@ func (a App) Run(args []string) int {
 		fmt.Fprintf(a.Stderr, "%s: %v\n", a.Name, err)
 		return 2
 	}
-	if err := root.ParseAndRun(context.Background(), args); err != nil {
+	if err := root.ParseAndRun(context.Background(), a.permute(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0 // -h is what the user asked for, not a failure
 		}
@@ -359,4 +359,98 @@ func usageSuffix(cmd clispec.Command) string {
 		return " [flags]"
 	}
 	return " " + strings.Join(parts, " ") + " [flags]"
+}
+
+// permute moves a subcommand's flags ahead of its positionals.
+//
+// WHY THIS IS NEEDED. Go's `flag` stops parsing at the first non-flag argument
+// and hands everything after it to the command as positionals. So the spelling
+// the generated usage line advertises — `dlc new <name> --tiers native` — failed
+// with `unexpected argument "--tiers"`, while the same flags placed BEFORE the
+// name worked. A tool whose own `--help` prints a command that does not run is
+// worse than one with a documented restriction, and "flags may only come first"
+// is a restriction nobody expects from a modern CLI.
+//
+// ONLY THE TAIL, and only after a recognised subcommand: the root FlagSet has no
+// flags of its own, and routing depends on the subcommand name being the first
+// non-flag token. Reordering across that boundary would break dispatch.
+//
+// ONLY KNOWN FLAGS ARE MOVED. An unrecognised `-x` stays where it is so
+// `flag` reports it as undefined, rather than being silently reinterpreted; and
+// because every generated flag takes a value (they are all registered with
+// `flag.Func`), a known flag carries the token after it along.
+//
+// `--` ENDS IT, which is the escape hatch for a positional that begins with a
+// dash — `db add -- --weird-title`.
+func (a App) permute(args []string) []string {
+	// Find the subcommand: the first token that is not a flag.
+	name := -1
+	for i, t := range args {
+		if !strings.HasPrefix(t, "-") {
+			name = i
+			break
+		}
+	}
+	if name < 0 {
+		return args
+	}
+	var cmd *clispec.Command
+	for i := range a.Commands {
+		if a.Commands[i].Name == args[name] {
+			cmd = &a.Commands[i]
+			break
+		}
+	}
+	if cmd == nil {
+		return args // unknown command: let the root Exec say so
+	}
+
+	known := map[string]bool{}
+	for _, f := range cmd.Flags {
+		known[f.Name] = true
+		if f.Short != "" {
+			known[f.Short] = true
+		}
+	}
+
+	tail := args[name+1:]
+	flags := make([]string, 0, len(tail))
+	pos := make([]string, 0, len(tail))
+	terminated := false
+	for i := 0; i < len(tail); i++ {
+		t := tail[i]
+		if t == "--" {
+			// Kept, not consumed: the tokens after it may look like flags, and
+			// `flag` needs the terminator to know they are not. Dropping it here
+			// re-exposed exactly what the escape hatch exists to prevent.
+			terminated = true
+			pos = append(pos, tail[i+1:]...)
+			break
+		}
+		if len(t) > 1 && strings.HasPrefix(t, "-") {
+			bare := strings.TrimLeft(t, "-")
+			if base, _, split := strings.Cut(bare, "="); split {
+				// `--flag=value` carries its own value.
+				_ = base
+				flags = append(flags, t)
+				continue
+			}
+			if known[bare] && i+1 < len(tail) {
+				flags = append(flags, t, tail[i+1])
+				i++
+				continue
+			}
+			flags = append(flags, t) // -h, or an unknown flag `flag` will reject
+			continue
+		}
+		pos = append(pos, t)
+	}
+
+	out := make([]string, 0, len(args)+1)
+	out = append(out, args[:name+1]...)
+	out = append(out, flags...)
+	if terminated {
+		out = append(out, "--")
+	}
+	return append(out, pos...)
 }

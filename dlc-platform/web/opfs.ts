@@ -16,6 +16,33 @@ export interface FileDataEntry {
   source?: Uint8Array | string;
 }
 
+/**
+ * Top-level OPFS entries the ENGINE never sees — reserved for the HOST.
+ *
+ * WHY A HOST NEEDS THIS. A host owns things an app must not: which user is
+ * driving, what they last selected, anything remembered between sessions.
+ * Natively that is trivial — a host is an ordinary program and writes to
+ * ~/.config. In a browser the host and the engine share one OPFS, and this
+ * bridge hydrates EVERYTHING under the root into the engine's tree, so
+ * host-owned state would become app data: visible to any command, and carried
+ * inside `export-fs` bundles that are supposed to be portable between people.
+ *
+ * Skipped on BOTH sides, and the flush side is the one that matters. `writeDir`
+ * mirrors — it deletes whatever OPFS has that the tree does not — so a directory
+ * the engine never hydrated would be deleted on the next command. Reading past
+ * it is a nicety; not deleting it is the requirement.
+ *
+ * TOP LEVEL ONLY. A `.ilc-host` directory nested deeper is ordinary app data and
+ * is treated as such — the reservation is a property of the root, not of the
+ * name.
+ *
+ * NAMESPACED so an app cannot plausibly collide, which matters because the
+ * failure would be silent: an engine that wrote `.ilc-host/x` would find it
+ * dropped on flush rather than refused. `.ilc-index` (docs/INDEX-PLAN.md D9)
+ * joins this list if a host-provided store ever lands.
+ */
+export const HOST_RESERVED: readonly string[] = [".ilc-host"];
+
 export async function opfsRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory();
 }
@@ -26,7 +53,7 @@ export async function loadTreeFromOPFS(
 ): Promise<FileDataEntry> {
   const dir = root ?? (await opfsRoot());
   const tree: FileDataEntry = { dir: {} };
-  await readDir(dir, tree);
+  await readDir(dir, tree, HOST_RESERVED);
   return tree;
 }
 
@@ -45,7 +72,7 @@ export async function flushTreeToOPFS(
   root?: FileSystemDirectoryHandle,
 ): Promise<void> {
   const dir = root ?? (await opfsRoot());
-  await writeDir(dir, tree);
+  await writeDir(dir, tree, HOST_RESERVED);
 }
 
 /**
@@ -102,8 +129,12 @@ export async function clearOPFS(root?: FileSystemDirectoryHandle): Promise<void>
 async function readDir(
   handle: FileSystemDirectoryHandle,
   entry: FileDataEntry,
+  // Only the top-level call passes these; recursion deliberately does not, so
+  // the reservation applies to the root and not to every directory.
+  skip: readonly string[] = [],
 ): Promise<void> {
   for await (const [name, child] of (handle as any).entries()) {
+    if (skip.includes(name)) continue;
     if (child.kind === "directory") {
       entry.dir![name] = { dir: {} };
       await readDir(child as FileSystemDirectoryHandle, entry.dir![name]);
@@ -117,6 +148,7 @@ async function readDir(
 async function writeDir(
   handle: FileSystemDirectoryHandle,
   entry: FileDataEntry,
+  skip: readonly string[] = [],
 ): Promise<void> {
   const wanted = entry.dir ?? {};
 
@@ -126,12 +158,16 @@ async function writeDir(
   const present: string[] = [];
   for await (const [name] of (handle as any).entries()) present.push(name);
   for (const name of present) {
+    // The reservation's whole job: the engine's tree never contained this, so
+    // without the guard the mirror would delete the host's own state.
+    if (skip.includes(name)) continue;
     if (!(name in wanted)) {
       await handle.removeEntry(name, { recursive: true });
     }
   }
 
   for (const [name, child] of Object.entries(wanted)) {
+    if (skip.includes(name)) continue;
     if (child.dir) {
       const sub = await handle.getDirectoryHandle(name, { create: true });
       await writeDir(sub, child);

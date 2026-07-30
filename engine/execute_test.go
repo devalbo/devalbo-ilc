@@ -3,6 +3,7 @@
 package engine_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/devalbo/devalbo-ilc/engine"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+	"github.com/devalbo/devalbo-ilc/templates"
 	"github.com/devalbo/dlc-platform"
 	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 )
@@ -321,16 +323,25 @@ func TestExportImportRejectEscapingPrefix(t *testing.T) {
 func TestNewRejectsUnsupportedOptions(t *testing.T) {
 	inTempRoot(t)
 
-	cases := map[string]*dlcv1.NewRequest{
-		// "web" is supported now; an unknown tier still is not.
-		"tier": {Name: "a", Tiers: []string{"embedded"}},
+	// Each refusal asserts its OWN wording rather than a phrase shared by all
+	// four. The shared "not supported yet" was a proxy for "helpful", and it
+	// stopped being one when tiers grew a third answer: a DECLARED-but-unbuilt
+	// tier is a different mistake from a name that is not a tier at all, and a
+	// test that cannot tell them apart cannot notice if they get collapsed again.
+	cases := map[string]struct {
+		req   *dlcv1.NewRequest
+		wants string
+	}{
+		// Not a tier at all — "embedded" is a category, and a tier is a binding.
+		"tier": {&dlcv1.NewRequest{Name: "a", Tiers: []string{"embedded"}}, "is not a tier"},
 		// The others carry a valid tier set, so the refusal under test is the
 		// one named — not the missing-tiers refusal standing in for it.
-		"cap":     {Name: "b", Tiers: []string{"native"}, Caps: []string{"sqlite"}},
-		"ui":      {Name: "c", Tiers: []string{"native"}, Ui: dlcv1.UiKind_UI_KIND_REACT},
-		"storage": {Name: "d", Tiers: []string{"native"}, Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT},
+		"cap":     {&dlcv1.NewRequest{Name: "b", Tiers: []string{"native"}, Caps: []string{"sqlite"}}, "not supported yet"},
+		"ui":      {&dlcv1.NewRequest{Name: "c", Tiers: []string{"native"}, Ui: dlcv1.UiKind_UI_KIND_REACT}, "not supported yet"},
+		"storage": {&dlcv1.NewRequest{Name: "d", Tiers: []string{"native"}, Storage: dlcv1.StorageKind_STORAGE_KIND_SPLIT}, "not supported yet"},
 	}
-	for name, req := range cases {
+	for name, tc := range cases {
+		req := tc.req
 		in, err := req.MarshalVT()
 		if err != nil {
 			t.Fatal(err)
@@ -340,8 +351,8 @@ func TestNewRejectsUnsupportedOptions(t *testing.T) {
 			t.Errorf("%s: expected refusal", name)
 			continue
 		}
-		if !strings.Contains(r.Err, "not supported yet") {
-			t.Errorf("%s: unhelpful error %q", name, r.Err)
+		if !strings.Contains(r.Err, tc.wants) {
+			t.Errorf("%s: error %q does not say %q", name, r.Err, tc.wants)
 		}
 		// A refused request must not leave a half-written tree behind.
 		if _, err := os.Stat(req.Name); err == nil {
@@ -420,5 +431,86 @@ func TestNewTiersSelectFiles(t *testing.T) {
 	if len(both.Files) <= len(nativeOnly.Files) {
 		t.Errorf("both-tier scaffold (%d files) should exceed native-only (%d)",
 			len(both.Files), len(nativeOnly.Files))
+	}
+}
+
+// THE TIER LANDSCAPE AND THE TEMPLATE MUST AGREE, in both directions.
+//
+// `engine/tiers.go` names every tier; the template's `hosts/*` directories decide
+// which can be emitted. Neither is the single source: the landscape alone cannot
+// know whether a skeleton exists, and derivation alone leaves no place that names
+// a tier — a typo'd `hosts/webb/` would silently become one.
+//
+// Invariants rather than a pinned list, so the next tier is not a regression
+// (AGENTS.md §5).
+func TestLandscapeAndTemplateAgree(t *testing.T) {
+	slots := map[string]bool{}
+	entries, err := fs.ReadDir(templates.FS, templates.Root+"/hosts")
+	if err != nil {
+		t.Fatalf("reading template host slots: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			slots[e.Name()] = true
+		}
+	}
+	if len(slots) == 0 {
+		t.Fatal("the template has no hosts/ slots — every tier would be refused")
+	}
+
+	declared := map[string]bool{}
+	for _, spec := range engine.TierLandscape {
+		declared[spec.Name] = true
+		if spec.What == "" {
+			t.Errorf("tier %q has no description; the landscape is also the docs", spec.Name)
+		}
+	}
+
+	// Every slot the template ships must be a tier we have named. A directory
+	// nobody declared is a template that outgrew its vocabulary.
+	for slot := range slots {
+		if !declared[slot] {
+			t.Errorf("the template has hosts/%s/ but no tier is declared for it", slot)
+		}
+	}
+
+	// And every row that CLAIMS availability must have a slot to emit from.
+	//
+	// This iterates the landscape, not SupportedTiers() — which was the first
+	// version and was a tautology: SupportedTiers() is already filtered by the
+	// slots, so it could not disagree with them. Falsification caught it (mark
+	// `desktop` available and the test stayed green), which is the whole reason
+	// for the practice. A row lying about availability is silently downgraded at
+	// run time, so this assertion is the only thing that can see it.
+	for _, spec := range engine.TierLandscape {
+		if spec.Status == engine.TierAvailable && !slots[spec.Name] {
+			t.Errorf("tier %q claims TierAvailable but the template has no hosts/%s/",
+				spec.Name, spec.Name)
+		}
+	}
+}
+
+// A tier that is DECLARED but unbuilt is refused differently from a nonexistent
+// one, because they are different mistakes: one is the roadmap, the other is a
+// typo.
+func TestPlannedTierIsRefusedByName(t *testing.T) {
+	for _, tc := range []struct{ tier, wants string }{
+		{engine.TierBadgeNative, "declared but has no template slot"},
+		{"hologram", "is not a tier"},
+	} {
+		in, err := (&dlcv1.NewRequest{Name: "t-" + tc.tier, Tiers: []string{"native", tc.tier}}).MarshalVT()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := engine.ExecuteMethod(engine.MethodNew, in)
+		if r.Success {
+			t.Fatalf("scaffolded with tier %q", tc.tier)
+		}
+		if !strings.Contains(r.Err, tc.tier) {
+			t.Errorf("error for %q does not name it: %q", tc.tier, r.Err)
+		}
+		if !strings.Contains(r.Err, tc.wants) {
+			t.Errorf("error for %q = %q, want it to say %q", tc.tier, r.Err, tc.wants)
+		}
 	}
 }

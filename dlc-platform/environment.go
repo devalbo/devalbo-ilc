@@ -63,6 +63,26 @@ func HasFilesystem() bool {
 	return Env().GetFilesystem().GetAvailability() == ilcv1.Availability_AVAILABILITY_PRESENT
 }
 
+// Isolated reports whether the host granted a root belonging to ONE person
+// (§3·5), rather than one others may also see.
+//
+// FOR APPS THAT HOLD PRIVATE DATA, and only those. It answers "is privacy my
+// problem?": a per-user root means everything visible belongs to one person; a
+// shared one means access control is the app's own responsibility. An app that
+// assumes the first while running in the second leaks, and leaks quietly.
+//
+// Only PER_USER counts. UNSPECIFIED — nobody said — reads as NOT isolated, the
+// same conservative direction HasFilesystem takes, and here the conservatism is
+// the point: an app that requires privacy refuses to run rather than assuming
+// it. A host that forgot to declare fails loudly instead of exposing data.
+//
+// THIS IS THE HOST'S WORD, NOT A GUARANTEE. A host that grants a shared root
+// and reports PER_USER is lying, and no engine-side check can catch it. Use it
+// to decide what an honest host is offering, never as a security boundary.
+func Isolated() bool {
+	return Env().GetFilesystem().GetIsolation() == ilcv1.Isolation_ISOLATION_PER_USER
+}
+
 // There is deliberately no HasIndex here (docs/INDEX-PLAN.md D8). The derived
 // index is a projection the ENGINE owns, so it exists wherever a filesystem
 // does, and an app has nothing to branch on — which is the whole reason the

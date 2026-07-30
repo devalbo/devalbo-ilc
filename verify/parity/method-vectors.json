@@ -10,6 +10,11 @@
     "request": "0a06080112020801"
   },
   {
+    "name": "set-environment (per-user root)",
+    "method": 2,
+    "request": "0a0a08051206080210022002"
+  },
+  {
     "name": "set-environment revision 0 (envelope error)",
     "method": 2,
     "request": "0a00"

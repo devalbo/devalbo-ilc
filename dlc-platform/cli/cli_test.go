@@ -617,3 +617,95 @@ func TestAvailableCommandIsNotMarked(t *testing.T) {
 		t.Fatalf("export-fs marked unavailable on a host that has a filesystem: %q", help)
 	}
 }
+
+// --- flags after positionals (the permute step) -----------------------------
+
+// positionalCmd is `t go <name> [--title x]` — one positional, one plain flag.
+func positionalCmd() clispec.Command {
+	return clispec.Command{
+		Name: "go", Method: methodTest,
+		Flags: []clispec.Flag{
+			{Name: "name", Field: 1, Kind: clispec.KindString, Positional: 1},
+			{Name: "title", Field: 2, Kind: clispec.KindString, Short: "T"},
+		},
+	}
+}
+
+// THE BUG: `t go myapp --title x` failed with `unexpected argument "--title"`,
+// because Go's flag stops at the first non-flag argument and hands the rest over
+// as positionals. The generated usage line advertises exactly this order.
+func TestFlagsMayFollowPositionals(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, positionalCmd(), port, "")
+
+	if code := app.Run([]string{"go", "myapp", "--title", "hello"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q (present=%v), want myapp", s, ok)
+	}
+	if s, _, ok := field(t, port.request, 2); !ok || s != "hello" {
+		t.Errorf("flag after positional: %q (present=%v), want hello", s, ok)
+	}
+}
+
+// The order that always worked must keep working — a permutation that fixed one
+// spelling by breaking the other would be no improvement.
+func TestFlagsMayStillPrecedePositionals(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, positionalCmd(), port, "")
+
+	if code := app.Run([]string{"go", "-T", "hello", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q, want myapp", s)
+	}
+	if s, _, ok := field(t, port.request, 2); !ok || s != "hello" {
+		t.Errorf("short flag: %q, want hello", s)
+	}
+}
+
+// `--flag=value` carries its own value, so permuting must not drag the next
+// token along with it — that token is the positional.
+func TestJoinedFlagFormKeepsItsPositional(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, positionalCmd(), port, "")
+
+	if code := app.Run([]string{"go", "--title=hello", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q, want myapp", s)
+	}
+	if s, _, ok := field(t, port.request, 2); !ok || s != "hello" {
+		t.Errorf("joined flag: %q, want hello", s)
+	}
+}
+
+// `--` is the escape hatch for a positional that begins with a dash. Without it
+// there is no way to name a task "--weird", and permuting makes the need sharper
+// rather than creating it.
+func TestDoubleDashEndsFlags(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, positionalCmd(), port, "")
+
+	if code := app.Run([]string{"go", "--title", "x", "--", "--weird"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "--weird" {
+		t.Errorf("positional after --: %q, want --weird", s)
+	}
+}
+
+// An unrecognised flag must still be reported as one. Permuting only moves flags
+// the command actually declares, so an unknown token cannot be quietly
+// reinterpreted as a positional — which would turn a typo into a wrong value.
+func TestUnknownFlagStillFails(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, positionalCmd(), port, "")
+
+	if code := app.Run([]string{"go", "myapp", "--nope", "x"}); code == 0 {
+		t.Fatalf("unknown flag accepted; stderr: %s", errOut.String())
+	}
+}

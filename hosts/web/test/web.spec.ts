@@ -198,6 +198,64 @@ test("exports a BFT bundle and re-imports it", async ({ page }) => {
   }
 });
 
+// Host-owned OPFS storage — the engine never sees it, and the flush never eats it.
+//
+// A host owns state an app must not: which user is driving, what they last
+// selected. Natively that is ~/.config; in a browser the host and engine share
+// one OPFS, and this bridge hydrates everything under the root into the engine's
+// tree. So `dlc-platform/web/opfs.ts` reserves a top-level prefix.
+//
+// The dangerous half is the FLUSH, not the read: writeDir mirrors, deleting
+// whatever OPFS has that the engine's tree lacks — and the engine's tree can
+// never contain a directory it was never shown. Without the guard, the host's
+// own state is deleted by the next command that writes anything.
+test("a host-reserved OPFS directory survives the engine and stays out of bundles", async ({
+  page,
+}) => {
+  // Write host state directly, the way a host would — bypassing the engine
+  // entirely, because that is the point.
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(".ilc-host", { create: true });
+    const file = await dir.getFileHandle("prefs.json", { create: true });
+    const w = await file.createWritable();
+    await w.write(new TextEncoder().encode('{"user":"alice"}'));
+    await w.close();
+  });
+
+  // Now make the engine write, which triggers a flush over the whole root.
+  await page.getByTestId("name").fill("hostapp");
+  await page.getByTestId("new").click();
+  await expectScaffolded(page, "hostapp");
+
+  // 1. The flush did not prune it.
+  const survived = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(".ilc-host");
+    const file = await dir.getFileHandle("prefs.json");
+    return new TextDecoder().decode(await (await file.getFile()).arrayBuffer());
+  });
+  expect(survived).toBe('{"user":"alice"}');
+
+  // 2. The engine cannot see it: an export bundles the engine's whole root, so
+  //    if it were hydrated it would be in here. This is the property that keeps
+  //    a bundle portable between people.
+  const download = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByTestId("export").click(),
+  ]).then(([d]) => d);
+  const stream = await download.createReadStream();
+  const bundle = await new Promise<string>((resolve, reject) => {
+    let out = "";
+    stream.on("data", (c) => (out += c));
+    stream.on("end", () => resolve(out));
+    stream.on("error", reject);
+  });
+  expect(bundle).not.toContain(".ilc-host");
+  expect(bundle).not.toContain("alice");
+  expect(Object.keys(JSON.parse(bundle).entries)).toEqual(["hostapp"]);
+});
+
 // Events, Phase 3 — the engine's `emit` reaches the main thread (§6.3).
 //
 // The whole path is under test here and nowhere else: the engine calls

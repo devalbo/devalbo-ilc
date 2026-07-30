@@ -249,6 +249,41 @@ native slot subscribes to nothing.
 **Generated apps are disposable for now** — re-scaffold rather than migrate, so template layout changes
 cost a re-bless (`make scaffold-golden`) and not a migration story.
 
+### App #4 — DoneBlock, a task DAG — [`DONEBLOCK-EXAMPLE-PLAN.md`](./DONEBLOCK-EXAMPLE-PLAN.md)
+
+A CLI version of doneblock.com: tasks are nodes, an edge means one task blocks another, and the question the
+tool answers is *what can I work on now*. Written as a spec **a coding agent can execute**, and built to
+produce framework feedback rather than to demonstrate a capability.
+
+Why this app, when notes and tictactoe exist: **its queries are traversals**, where every previous app has
+been a flat collection. That makes it the first honest consumer for the derived index (a reverse lookup —
+"what does this block"), the first genuinely tempting case for a host to compute something the engine should
+own (readiness, in a browser with a graph library), and the first app with two collections and referential
+integrity to maintain by hand.
+
+**Scope:** multiple projects at once (each with its own metadata and its own DAG), tasks with a status,
+edges that carry a **blocking reason** plus reason-specific arguments, and a `check` command that verifies
+twelve integrity invariants over the stored files — the app-level answer to "the files are the truth, so
+what happens when the files are wrong?"
+
+- [ ] Phases 0–7 live in the plan doc, with a full command reference (§4.2) an agent can build from. Phase 0 has been **dry-run**; see below
+- [ ] `example-apps/doneblock/FEEDBACK.md` — the friction log, written *while* building
+
+**Three framework bugs already found, before any app code existed** (plan §11) — all reproducible, none
+caught by any existing check:
+
+- [ ] **`dlc new --help` prints an invocation that fails.** Usage says `dlc new <name> --tiers <tiers>`, but
+      the parser stops at the first non-flag argument, so `dlc new myapp --module x` dies with
+      `unexpected argument "--module"`. Either accept flags after positionals or stop advertising that order
+- [ ] **A scaffolded project cannot run `make gen` in its own devbox environment.** The template's
+      `devbox.json` installs `protoc-gen-go-lite` but not `protoc-gen-es-lite`, which the generated
+      `buf.gen.yaml` needs the moment a `web` tier exists. The first command `dlc new` tells you to run is
+      the one that fails
+- [ ] **Nothing verifies a scaffold in its own declared environment — which is why the above survives.**
+      `verify-scaffold.sh` runs the scaffold's `make gen` inside the REPO's devbox shell, where the missing
+      plugin is already on PATH. Same class of blind spot as the two `verify-platform-gen.sh` exists for:
+      only broken from outside, therefore invisible from inside
+
 ### Second app — notes/list (App #2, the breadth pilot) — §13
 - [x] Scaffold notes/list — `example-apps/notes/`, built on the platform via `dlc.toml` `[platform] path`. **Not** scaffolded by `dlc new` in the end; it predates the template being complete, and Phase 1 above brings its layout back in line
 - [x] Handlers: `create` / `list` / `delete-record` over the filesystem, plus its own `notes.record-changed` event (the first app-defined topic)
@@ -538,6 +573,184 @@ inspecting the error is the trap this package already paid for once. Probing wit
 is the portable option. Being occasionally coarse beats being tier-dependent: a coarse message is a
 usability cost, a tier-dependent one is a parity failure.
 
+### Users are a HOST concern — identity, per-user resources, and host-owned storage (candidate platform work)
+
+**Raised 2026-07-29 while planning DoneBlock** ([`DONEBLOCK-EXAMPLE-PLAN.md`](./DONEBLOCK-EXAMPLE-PLAN.md)
+D11). It went through three shapes in one sitting — a manifest field, then WASI env vars, then injected
+resources — before landing on the one that needs the least: **the engine has no user concept at all.**
+
+> **The philosophy, in one line: users are infrastructure, coordinated by host and tier. An app should not
+> know what a user is.**
+
+That is a capability-model statement, not a feature. The engine gets a granted root and does its work; who
+that root belongs to, and what they prefer, is resolved before the engine is ever called.
+
+#### The app-facing concept is BINARY: `single` vs `multi`
+
+Declared in `dlc.toml` (`[project] users = "single" | "multi"`), with **no default** — the tiers precedent:
+worth asking rather than falling into.
+
+The three host arrangements collapse to two app-facing modes, and the collapse is the point:
+
+| Host arrangement | What the app sees | Why |
+| --- | --- | --- |
+| no user concept anywhere | **`single`** | there is one store and one writer |
+| **`partitioned`** — host grants a per-user root | **`single`** | each partition IS a single-user store; the app cannot tell, and should not |
+| **`shared`** — one store, several people | **`multi`** | "who" becomes part of the data model |
+
+Two arrangements presenting as one mode is what makes this a real abstraction rather than a relabelling: an
+app written for `single` runs unchanged on a partitioned multi-user host, because partitioning was never
+its business.
+
+**"Host-managed users" is not one of the modes** — it is true in *both*. Identity is always resolved by the
+host (the philosophy above). The mode says only whether the app's **data model has a "who" in it**.
+
+#### What `multi` actually obliges an app to do
+
+If it obliges nothing, it is a comment rather than a mode — Decision 33's test. Concretely, `multi` means:
+
+1. **Records may carry provenance** — `created_by`, an opaque host-supplied string, exactly as `created_at`
+   already works. In `single` there is no such field to populate and none should exist.
+2. **The app may not assume it is the only writer.** This is where the deferred lock file and §9's
+   accepted last-writer-wins loss stop being theoretical, because two people can now write one store.
+3. **Output that names an actor is meaningful**, so there is something for a host to render.
+
+`single` is the promise that none of that applies, which is why it is worth declaring rather than assuming.
+
+**Nothing needs `multi` yet, and that should be said out loud.** DoneBlock is `single`. Building `multi` now
+would be a mode nothing exercises — the same trap as a manifest field nobody sets. Design it, declare the
+field, and let the first app that genuinely shares a store drive the rest.
+
+#### What that means per layer
+
+| Concern | Owner | Notes |
+| --- | --- | --- |
+| who is invoking | **host** | OS user, browser profile, device — the host already knows, natively |
+| per-user preferences | **host** | e.g. "alice's default project", filled into the request (Decision 28) |
+| per-user data partitioning | **host** | binds a per-user directory as the granted root — the engine cannot tell |
+| host-owned storage | **infrastructure** | must live OUTSIDE the app's granted area — see below |
+| app data | **engine** | knows nothing about any of the above |
+
+**Why this is cheaper than every earlier proposal:** no manifest field, no env var read by the engine, no
+`user` field on request messages, no platform identity API. All three earlier designs put something in the
+engine's path; this one deletes the requirement instead.
+
+**The rule that keeps it checkable:** an app may **store** what the host tells it — `created_by`, the way
+`created_at` already works — but may never **resolve, enumerate, or reason about** users. Provenance is a
+string; a user model is not.
+
+#### Yes: the host resolves the user and grants that user's subdirectory as the app's root
+
+The mechanism, concretely — and **most of it already works**:
+
+```
+host resolves who            ->  "alice"
+host grants a narrower root  ->  platform.Boot({Root: ".doneblock/users/alice", ...})
+engine writes                ->  tasks/t1.json    (lands in alice's subtree; the engine cannot tell)
+```
+
+**Natively this needs nothing new.** `BootOptions.Root` is already an arbitrary host-chosen path and
+`AppRoot(name)` is only a convention helper (`"." + name`) — a host may pass
+`.doneblock/users/alice` today and the platform is satisfied. Containment then comes from the same
+preopen/`SafeJoin` machinery everything else uses: the app cannot reach a sibling's directory whether or
+not it tries.
+
+**On the web it is nearly free too, and the reason is a detail already in the code:**
+`loadTreeFromOPFS(root?)`, `flushTreeToOPFS(tree, root?)` and `clearOPFS(root?)` **all take an optional
+directory handle** and only default to the OPFS root. The worker currently calls them with no argument;
+passing a per-user subdirectory handle is a change to the *caller*, not to the bridge. (Note that a browser
+origin is already a partition, so per-user subdirectories are mostly a native and server concern.)
+
+**What falls out for free, and is worth stating because it is the payoff:**
+
+- `reset-fs` wipes **only that user's** data — it resolves under the granted root
+- `export-fs` produces a **per-user bundle**, which is also what makes bundles mergeable under §9's LWW sync
+- two users never write the same file, so partitioned data has **no concurrent-write loss by construction**
+
+**What was actually done (2026-07-29), and what was deliberately not:**
+
+- [x] **`AGENTS.md` §3·5 now says partitioning is exactly as trustworthy as the host** — a host granting the
+      wrong person's directory is undetectable from inside the engine, and no engine-side check is possible
+      even in principle. Consistent with the capability model, and worth stating rather than letting "the
+      filesystem enforces it" sound stronger than it is. The same section now also says a host may keep its
+      own state and must keep it outside the granted root.
+- [x] **Host-owned OPFS storage** — `dlc-platform/web/opfs.ts` reserves the top-level `.ilc-host` prefix and
+      skips it on hydrate **and** flush. The flush is the half that matters: `writeDir` mirrors, so a
+      directory the engine never hydrated would be deleted by the next command that writes anything.
+      Falsified both ways — removing the flush guard deletes the host's state, removing the read guard puts
+      it in an `export-fs` bundle. Test: `hosts/web/test/web.spec.ts`, "a host-reserved OPFS directory
+      survives the engine and stays out of bundles". **This also serves [`INDEX-PLAN.md`](./INDEX-PLAN.md)
+      D9**, which wanted the same mechanism for a different reason.
+- [x] **Isolation is reported in the manifest** — `Filesystem.isolation`
+      (`UNSPECIFIED | SHARED | PER_USER`) + `platform.Isolated()` + `BootOptions.Isolation`, in Go and in
+      the TS encoder, with a parity vector so the field crosses both tiers rather than existing only in Go.
+      Six tests; falsified by making silence read as isolated, which two tests caught.
+
+      **Reversal, recorded because the first answer was wrong.** This was declined hours earlier on D6
+      grounds — no consumer, and a "describe the root honestly" justification that was descriptive rather
+      than functional. The consumer is not any app in this repo: it is **an app holding private data that
+      needs to know whether privacy is its own problem** (a game host with per-player hidden state was the
+      example that made it concrete). D6 exists to stop speculative *convenience* fields; it should not be
+      read as forbidding a fact whose absence is discoverable only by leaking someone's data. **An unused
+      field costs one field; a missing one costs data.**
+
+      **Not a `FilesystemKind` value**, which is what was originally proposed: `kind` already conflates
+      WHERE the root is (`CWD`, `APP_DIR`) with WHAT backs it (`OPFS`), and isolation is orthogonal to both
+      — a per-user OPFS subtree is genuinely both. Three states rather than a bool, matching `Availability`:
+      "nobody said" is not a claim that the store is shared.
+
+      **Unset is SAFE, which is why no existing host had to change** — silence reads as not-isolated, so an
+      app requiring privacy refuses rather than assumes, and a forgetful host fails loudly instead of
+      leaking. That is the opposite of `FilesystemKind`, where `Boot` must refuse an unset value because
+      the wrong guess points `reset-fs` at a user's directory. `AGENTS.md` §3·5 carries both, plus the
+      caveat that this is the host's word and not a boundary.
+- [ ] ~~the web worker passing a subdirectory handle~~ — **deferred, same reason.** The bridge already
+      accepts one (`loadTreeFromOPFS(root?)`), so this is a caller change on the day a host wants
+      partitioning. Nothing wants it: a browser origin is already a partition, and DoneBlock is single-user.
+      Building it now would be a parameter nothing passes.
+
+#### The one thing that DOES need platform work: host storage outside the app area
+
+If the host owns user info, it needs somewhere to put it that the app cannot reach. Natively that is free
+(`~/.config/<app>/` — a host is an ordinary program). **The web tier is where infrastructure is needed:**
+the OPFS bridge hydrates everything under the root into the engine's FileData tree, so a host-owned subtree
+would end up visible to the engine and inside `export-fs` bundles.
+
+**That is the same mechanism [`INDEX-PLAN.md`](./INDEX-PLAN.md) D9 already wants**, for a different reason
+(a SQLite pool directory, if a host-provided store ever lands). Two features now want "a place in OPFS that
+is not part of the engine's tree", which is the point at which it is worth building once, properly, rather
+than twice as exclusions.
+
+- [ ] `dlc-platform/web/opfs.ts`: a reserved host-owned prefix, skipped by both hydrate and flush
+- [ ] Assert it: a browser test that an `export-fs` bundle contains nothing from the host's area
+
+#### Per-user resources: areas, if more than one is ever needed
+
+The richer version — the host injects a *bundle* of resources, chiefly storage areas — is recorded because
+it dissolves the mixed case (some data shared, some per-user) that a single root cannot express:
+
+- **WASI already supports it.** `preopens.get-directories()` returns a LIST; today the web host does
+  `_setPreopens({"/": tree})` and the platform exposes one `Root()`. The preopen path *is* the area name, so
+  enumeration needs no schema.
+- **The cost is concentrated in the inherited verbs**: `export-fs`/`import-fs`/`reset-fs` (100–102) resolve a
+  prefix under `Root()` and would need to name an area — a platform schema change, a re-blessed id lock, and
+  every host updated. `Root()`'s deliberate panic (`ENVIRONMENT-PLAN.md` D8) gets more complicated, and
+  parity compares one tree where it would then compare several.
+
+**Do not build areas until something binds two of them.** Nothing does. DoneBlock is single-area, and a
+second area nothing uses would be a branch nothing tests.
+
+#### Still true regardless
+
+- **A clock does not fit any of this** and needs its own answer; it changes continuously, where a granted
+  root and a remembered preference do not.
+- **Identity is not authentication.** The host asserts it and nothing verifies it. It selects data and keys
+  preferences. If it ever gates what a command may *do*, that is a security bug — and `AGENTS.md` should say
+  so the day any of this lands.
+- **No scaffolded app has ever had a host-side verb.** `dlc` has several; notes and tictactoe are pure engine
+  surfaces. DoneBlock's `use` will be the first, and whether the template and the generated runner
+  accommodate one is unproven.
+
 ### Capabilities
 - [ ] **Derived index** (§6.2) — **re-scoped away from SQLite 2026-07-29; see [`INDEX-PLAN.md`](./INDEX-PLAN.md) and the CURRENT section above. The phases live there, not here.** A projection index the engine owns, queried in Go, stored behind a `wasi:keyvalue`-shaped seam that is file-backed today. Present on every tier including embedded, so there is no `unavailable` branch in app code at all — the scan survives only inside `rebuild-index`. The old note here (native `modernc.org/sqlite`, web `@sqlite.org/sqlite-wasm`, a `platform.HasIndex()` fallback branch, and index verbs in the surface parity vectors) is superseded in every particular except one: adding a capability still means adding it to the surface vectors, because parity cannot see registration.
 - [ ] **Split-storage** write flow + `rebuild-index` (§7.1): lock-file discipline, atomic writes
@@ -550,18 +763,154 @@ usability cost, a tier-dependent one is a parity failure.
   - [ ] **follow-up: the OPFS probe has no end-to-end test.** The absent BRANCH is watched running in a browser (a capability drops, verbs unregister, the inspector re-marks, it comes back), but the probe that would detect a real denial is not: it runs in the WORKER, and a Playwright stub of `navigator.storage.getDirectory` cannot reach a worker's global scope. Options are moving the probe to the main thread (stubbable, but the probing thread is then not the one using the filesystem) or a worker-visible `?ilc-no-fs=1` switch (a production test seam, declined). Left open deliberately — the residual risk is one `try/catch` around one API call
   - [ ] **follow-up: `ilc.environment-stale` designed, not built.** The pull-shaped escape hatch (engine asks, host re-sends). Nothing needs it yet, and an event with no emitter is the "field nobody sets" trap; build it when something asks
   - [ ] **follow-up: nothing triggers a re-send automatically.** The browser has no event for a filesystem appearing or disappearing, so `window.host.setEnvironment` is the only trigger today. The path is kept exercised so it can be trusted when a real trigger exists
-- [ ] **Display** capability (§6.4) — **now OPTIONAL, and the app author's call** (Decision 34). Three paths, chosen per app or per event: draw-command list · retained widget tree · **semantic events the host renders**. The first two put presentation in the app and are what this capability builds; the third costs one small tier slot and no capability at all, so it goes first. Build draw-list/widget-tree when an app genuinely wants to write presentation **once** and have it work everywhere — not before
+- [ ] **Display** capability (§6.4) — **now OPTIONAL, and the app author's call** (Decision 34).
+
+  **The governing principle, stated 2026-07-29 and stronger than what §6.4 currently argues:**
+
+  > **Render decisions belong to the TIER, because it knows its timing and constraints better than the engine
+  > ever can** — refresh rate, whether partial updates are cheap, how much RAM a framebuffer may take, whether
+  > it is on battery, what is already on screen. An engine emitting draw commands knows none of it, and telling
+  > it would take a manifest field per constraint, a list with no end.
+
+  §6.4 argues for the semantic path from **dissimilarity of output** ("DOM, a TFT grid and terminal ASCII share
+  no structure"). This argument is better, and it survives a case the other one does not: two tiers on ONE
+  screen (`badge-native` / `badge-wamr`) look like the case where a shared draw list should win — until you
+  notice **one of them is running an interpreter and the other is not**, so their envelopes differ even though
+  their pixels are identical. **That retires the "the rule depends on which pair of tiers" finding** recorded
+  here earlier: it does not depend on the pair, it depends on who knows the cost.
+
+  **If a shared render is ever built, three parts — and they let a REQUIRED Display coexist with tier
+  authority:**
+
+  | What | Whose | Consequence |
+  | --- | --- | --- |
+  | **timing** — when to repaint | the tier | **pull, never push**: a command the host calls, not an import the engine drives |
+  | **whether to use a shared render at all** | the tier | a constrained tier may decline the draw list and render from semantic state |
+  | **content, when asked** | the engine | so two tiers that do use it cannot disagree about what is true |
+
+  So the shape is `render(state) -> draw-list` as the app's own **command** (`method_id`, app band): an export
+  the host pulls. No new WIT, no new import, no stub on a screenless tier, and the tier keeps timing for free.
+  **A required Display is then harmless** — nothing is obliged to call it — which is what makes the
+  optional-vs-required question the wrong one. It is push-vs-pull.
+
+  **The draw vocabulary stays the app author's to keep straight** between engine and slots. No framework
+  enforcement, and no cross-tier check that a rasterizer honours it: host parity compares renderings, not
+  intentions.
+
+  **Recorded as Decision 35** (2026-07-29) in [`DEVALBO-ILC-GO-PLAN.md`](./DEVALBO-ILC-GO-PLAN.md), with
+  pointers added to Decision 34 (its optional-vs-required axis is superseded) and to §6.4 (the first two paths
+  are sketched as an import and should be a pulled export; the reasoning is unchanged, the mechanism is not).
+
 - [ ] **Network** (deferred): `wasi:http` when needed
 
 ### Tiers / hosts
-- [ ] **Desktop** host — Wails v2 (webview + native Environment) — §5.4, §10
-- [ ] **ESP32-S3** — WAMR (official ESP-IDF component) + PlatformIO C host firmware; TFT Display; serial REPL — §4, §5.3
-- [ ] **RP2350** — WAMR-via-arduino-pico *or* native TinyGo fallback (§14 risk 2)
-- [ ] **RP2040** — native TinyGo build (no wasm) — §5.3
-- [ ] WAMR embedded spike (the deferred §11 spike 3)
+
+**Tiers are declared in `engine/tiers.go`** — constants plus a `TierLandscape` table, cross-checked against
+the template's `hosts/*` slots (see the landscape entry at the end of this section). `native` and `web` are
+built. Every other row in that table is a task below, named by its constant, so the roadmap and the code use
+one vocabulary.
+
+**A tier is a composition recipe** (Decision 27): engine × host binding × ABI mode × capability set. Not a
+board — **one board can be two tiers** (`badge-native` and `badge-wamr` are the same hardware) and two boards
+can share one tier. Adding a tier is a table row plus a `templates/component-model/hosts/<tier>/` skeleton.
+
+#### Shared prerequisites — nothing embedded starts before these
+
+- [ ] **`platform.Boot` cannot report an absent filesystem, and its error message says it can.** Boot refuses
+      an empty `Root` with *"grant one (see platform.AppRoot) or say so explicitly"* — and there is no way to
+      say so: it then sends `Filesystem{Availability: PRESENT}` unconditionally. **Why nobody noticed:** the
+      web host does not use `Boot`; `worker.ts` hand-builds the manifest and already handles the absent case,
+      which is why that branch is tested at all. So the absent-filesystem path **exists in TypeScript and is
+      unreachable from Go**, behind a correct-looking error. Needs an explicit "no filesystem" option that
+      sends `AVAILABILITY_ABSENT` and skips `SetRoot`, keeping the refusal for a host that says *nothing*.
+      **Blocks every embedded tier** — a board with no WASI has no filesystem to grant
+      ([`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1d).
+- [ ] **The caps seam has two of its three files, and the tags cannot express bare metal.** §5.3 and §5.6
+      both specify `caps_wasip2.go` / `caps_wasip1.go` / `caps_native.go`; the tree has `caps_native.go`
+      (`//go:build !tinygo`) and `caps_wasip2.go` (`//go:build tinygo`). Those tags conflate **"TinyGo →
+      wasm"** with **"TinyGo → microcontroller"**, so a natively-linked embedded build selects the WIT-import
+      file and fails on an import that is meaningless on the device. Needs a finer discriminator — TinyGo's
+      `baremetal` tag is the likely candidate, unverified — plus the third file. **Blocks the first native
+      embedded tier**, and found by reading the code rather than by building
+      ([`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1a).
+- [ ] **No wasip1 core-wasm build target exists.** `make build-wasm` emits the wasip2 component; WAMR needs
+      `engine.core.wasm` from `tinygo -target=wasip1`, and nothing produces one. Portable mode's other half
+      (Decision 25). **Blocks `badge-wamr` and `esp32-wamr`** but not the native embedded tiers, which use no
+      wasm at all.
+- [ ] **The deferred WAMR spike** — Phase-0 spike (3) of the main plan, the only one never run: *"WAMR running
+      a TinyGo core module on ESP32-S3 with one host import."* **WAMR tiers only** (`badge-wamr`,
+      `esp32-wamr`); the native embedded tiers do not need it. Worth noting what "one host import" now means
+      concretely: it is `emit`, whose lowering to `//go:wasmimport` `ilc.wit` still marks **UNVERIFIED**. So
+      the spike and the first real test of Decision 33's flat-scalars-and-bytes shape are the same piece of
+      work. Findings go in `spikes/<name>/README.md`, and a red result reshapes the plan (§11).
+- [ ] **A skeleton per embedded shape.** There are **three** shapes to template eventually — a Go host with a
+      screen, a Go host without one, and a C++ host embedding WAMR — and `templates/wamr/` is deliberately
+      unbuilt until a WAMR spike can `verify` (§16.6). Until a tier has a skeleton it stays `TierPlanned` and
+      `dlc new` refuses it by name. **The hand-written build/flash target for each tier is the best input that
+      template will ever get**; write each as though it were going to be scaffolded.
+
+#### One task per planned tier
+
+- [ ] **`desktop`** — Wails v2: webview over the **native** binding, so no new engine build and no new ABI
+      (§5.4, §10). The cheapest remaining tier, and the only planned one with no embedded prerequisites.
+- [ ] **`badge-native`** — RP2350B (Adafruit 6463, Badgeware Tufty): TinyGo compiled for the board and
+      **linked directly**, Go host, 320×240 TFT, five buttons. **Build this before `badge-wamr`**: it has one
+      unknown (does the pinned TinyGo target RP2350) where WAMR has several, so the badge *works* while WAMR
+      is still a question, and the port gets a running reference instead of a blank screen. Needs the caps
+      seam and the `Boot` fix above. Track N of
+      [`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md).
+- [ ] **`badge-wamr`** — the same board, engine as **wasip1 core wasm under WAMR**, C++ host with Pimoroni
+      display libraries, capabilities as WAMR native functions. §14 risk 2 calls RP2350-under-WAMR the
+      least-proven combination in the project, and treating it as a *second tier* rather than an either/or
+      spike **retires that framing as a gate** — a red result is a result, because Track N already shipped.
+      **The prize for building both:** one engine source, core wasm vs native, on the same hardware — the
+      first real check of the portable byte ABI, and the first verification that `emit` survives to core wasm
+      (`ilc.wit` marks it UNVERIFIED today). **The cost:** two hosts in two languages, so the presentation is
+      written twice. Track W of the same plan.
+- [ ] **`keeb-native`** — RP2040 (Adafruit 5302, KB2040): TinyGo linked directly, and **no display at all**.
+      264 KB SRAM makes native mandatory rather than chosen (Decision 18), so there is no WAMR variant of this
+      tier. Renders over USB serial into someone else's terminal; input is a typed line or a **3×3 key matrix**,
+      the purest input-map in the project (Decision 14). This is where "an app ships no presentation"
+      (Decision 34) stops being a claim, and where `HasFilesystem() == false` is a fact about the hardware
+      rather than a policy. Shares both prerequisites with `badge-native`. Track K of the same plan.
+- [ ] **`esp32-wamr`** — ESP32-S3 under the official Espressif WAMR ESP-IDF component, PlatformIO C host, TFT
+      display, serial REPL (§4, §5.3). The tier the WAMR toolchain is actually documented for, which makes it
+      the *lower-risk* WAMR target even though no demo board for it is on the list yet
+      (`demo-platforms.txt`) — worth considering before `badge-wamr` if the WAMR port fights back.
+
 - [ ] **WAMR skeleton** (`templates/wamr/`) — wasip1 + native-fn caps; only after the WAMR spike can `verify` (§16.6, Decision 25); in-tree first, submodule later
 - [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `dlc-platform` depends (§16.6 sequencing #1–#2)
 
+#### How the landscape came to be declared
+
+- [x] **The tier landscape is declared, and the template says which entries are buildable** (2026-07-29) — `supportedTiers` is **derived** from
+      `templates/component-model/hosts/*` instead of being a hard-coded `{native, web}`, and `dlc.toml`'s
+      `[tiers.*]` writer defaults to `root = "hosts/<tier>"` for anything that is not web. `tierOf` has
+      claimed since the host-layer work that "a new tier needs a directory here and nothing else"; that was
+      false — it also needed an edit to the list and a case in the switch, and a contributor would have found
+      the first by having their tier refused as "not supported yet". Two invariant tests (the offered set
+      equals the template's slots; an unslotted tier is refused by name), falsified by re-hardcoding the
+      list. Scaffold golden re-blessed: the native `[tiers.native]` comment is now the generic one.
+      **Then corrected the same day:** derivation alone left no place that NAMES a tier — a typo'd
+      `hosts/webb/` would silently become one, nothing tied the scaffolder's vocabulary to `dlc.toml`'s or the
+      docs', and there was no constant to reference. So `engine/tiers.go` now declares the whole landscape as
+      constants plus a `TierLandscape` table (`native`, `web` available; `desktop`, `badge-native`,
+      `badge-wamr`, `keeb-native`, `esp32-wamr` planned), and the table drives both the offered set and the
+      `[tiers.*]` sections. The two check **each other**: a slot with no row is a template that outgrew its
+      vocabulary, a row claiming availability with no slot is a lie. Same shape as `reserved_method_id` —
+      claim the name without pretending it works. A declared-but-unbuilt tier is refused **differently** from
+      a nonexistent one, because those are different mistakes.
+
+      **Falsification caught a tautology in my own test:** the first version asserted every *offered* tier had
+      a slot, but the offered set is already filtered by slots, so it could not fail — marking `desktop`
+      available left it green. Now it iterates the table's rows. Both directions watched failing.
+
+      **Expect a refactor:** a proto enum is the likelier long-term home (constants in Go *and* TypeScript, and
+      Decision 29 turns an enum into host-side menu choices), but that changes `NewRequest.tiers` from
+      `repeated string` and is a wire change to make deliberately.
+
+      **So adding an embedded tier to `dlc new` is now a row plus a skeleton** — and the skeleton still waits
+      on the WAMR-vs-native answer below, since the two shapes differ.
 ### Filesystem export/import (§7.3)
 - [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive) — declared in `BundleFormat` and **explicitly refused** today rather than silently returning BFT
 - [ ] BFT **deflate** variant (size)

@@ -130,6 +130,36 @@ private store takes the convention.
 On wasm `SetRoot` is a no-op: the grant already happened when the host installed the preopen, and the guest
 cannot rebind it. Both tiers call it anyway, so the startup sequence reads the same everywhere.
 
+**A narrower root is how per-user data partitioning works, and it is exactly as trustworthy as the host.**
+Nothing stops a host from granting `.myapp/users/alice` instead of `.myapp/` — the engine cannot tell, and
+that is the design: an app never learns what a user is, so it cannot leak across one. But the guarantee is
+the *host's*. A host that grants the wrong person's directory is undetectable from inside the engine, and no
+engine-side check is possible even in principle. That is consistent with the capability model — the host
+*is* the environment — and it is worth stating rather than leaving "the filesystem enforces it" to sound
+stronger than it is.
+
+**A host SAYS whether it isolated the store, and `platform.Isolated()` is how an app asks.** The manifest
+carries `Filesystem.isolation` (`UNSPECIFIED | SHARED | PER_USER`), and it exists for one kind of app: one
+that holds **private** data and needs to know whether privacy is its own problem. A per-user root means
+everything visible belongs to one person; a shared root means access control is the app's responsibility,
+and an app that assumed otherwise leaks quietly.
+
+**Unset means no claim, and reads as NOT isolated.** That is why the field cost no host a change: silence is
+never a promise of privacy, so an app that requires it refuses to run rather than assuming it, and a host
+that forgot to declare fails loudly instead of exposing data. Contrast `FilesystemKind`, which `Boot`
+*refuses* when unset — there the wrong guess points `reset-fs` at a user's directory, so there is no safe
+default to fall back on.
+
+**It is the host's word, not a boundary.** A host that grants a shared root and reports `PER_USER` is lying,
+and nothing engine-side can detect it. Use it to learn what an honest host is offering; never as the thing
+that enforces privacy.
+
+**A host may keep its own state, and it must keep it outside the granted root.** Who is driving, what they
+last selected, anything remembered between sessions: host-owned, app-invisible. Natively that is free
+(`~/.config/<app>/`). In a browser the host and engine share one OPFS, so `dlc-platform/web/opfs.ts`
+reserves the top-level `.ilc-host` prefix and skips it on **both** hydrate and flush — the flush being the
+half that matters, since it mirrors and would otherwise delete state the engine never hydrated.
+
 ## 3·6 The environment manifest is PUSHED, and the order is load-bearing
 
 **A host states what it can do before it does anything else** — `platform.Boot` natively, the worker's boot

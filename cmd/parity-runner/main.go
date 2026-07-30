@@ -86,6 +86,19 @@ var fixtures = []struct {
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT},
 		},
 	}},
+	// ISOLATION crosses the boundary as data like everything else (§3·5). Worth a
+	// vector because no host sets it yet: without this, the field would exist on
+	// the wire with nothing ever encoding or decoding it on the wasm side.
+	{name: "set-environment (per-user root)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
+		Environment: &ilcv1.Environment{
+			Revision: 5,
+			Filesystem: &ilcv1.Filesystem{
+				Availability: ilcv1.Availability_AVAILABILITY_PRESENT,
+				Kind:         ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
+				Isolation:    ilcv1.Isolation_ISOLATION_PER_USER,
+			},
+		},
+	}},
 	{name: "set-environment revision 0 (envelope error)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
 		Environment: &ilcv1.Environment{Revision: 0},
 	}},

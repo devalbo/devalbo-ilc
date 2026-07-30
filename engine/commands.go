@@ -10,11 +10,13 @@ package engine
 
 import (
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+	"github.com/devalbo/devalbo-ilc/templates"
 	"github.com/devalbo/dlc-platform"
 )
 
@@ -112,13 +114,24 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 	// quietly get the old default back.
 	if len(req.Tiers) == 0 {
 		return errors.New("new: no tiers requested — pass at least one of: " +
-			strings.Join(supportedTiers, ", "))
+			strings.Join(supportedTiers(), ", "))
 	}
 	for _, tier := range req.Tiers {
-		if !supportedTier(tier) {
-			return errors.New("new: tier " + strconv.Quote(tier) +
-				" is not supported yet (have: " + strings.Join(supportedTiers, ", ") + ")")
+		if supportedTier(tier) {
+			continue
 		}
+		// A DECLARED tier gets a different error from an unknown one, because the
+		// two are different mistakes. "badge-native has no skeleton yet" tells you
+		// the name was right and the work is pending; "hologram is not a tier"
+		// tells you to check your spelling. Collapsing them into one message
+		// makes the roadmap look like a typo.
+		if spec, declared := tierSpec(tier); declared {
+			return errors.New("new: tier " + strconv.Quote(tier) +
+				" is declared but has no template slot yet — " + spec.What +
+				"; buildable today: " + strings.Join(supportedTiers(), ", "))
+		}
+		return errors.New("new: tier " + strconv.Quote(tier) +
+			" is not a tier (buildable today: " + strings.Join(supportedTiers(), ", ") + ")")
 	}
 	for _, cap := range req.Caps {
 		if cap != "console" && cap != "filesystem" {
@@ -145,45 +158,53 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 // because the scaffold, the manifest defaults, and the npm re-base all have to
 // agree on the same path, and they are in three different files.
 const (
-	nativeSlot = "hosts/native"
-	webSlot    = "hosts/web"
+	webSlot = "hosts/web"
 )
 
-// tierSections renders the [tiers.*] blocks for dlc.toml.
+// supportedTiers are the tiers `dlc new` will actually emit: the DECLARED
+// landscape (tiers.go) intersected with what the template has a slot for.
 //
-// Built here rather than in the template because the set is dynamic: the
-// template renders one string, and this decides what that string contains.
-func tierSections(tiers []string) string {
-	var b strings.Builder
-	for _, t := range tiers {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("[tiers." + t + "]\n")
-		b.WriteString(`capabilities = ["console", "filesystem"]` + "\n")
-		switch t {
-		case "native":
-			b.WriteString("# This tier's HOST code — argv in, a proto request out.\n")
-			b.WriteString(`root      = "` + nativeSlot + `"` + "\n")
-		case "web":
-			b.WriteString("# This tier's HOST code, and where `dlc build web` writes into it.\n")
-			b.WriteString("# The assets MUST sit inside the slot: jco's loader fetches the core\n")
-			b.WriteString("# .wasm at run time, and a dev server will not serve a path outside\n")
-			b.WriteString("# its root.\n")
-			b.WriteString(`root      = "` + webSlot + `"` + "\n")
-			b.WriteString(`assets    = "` + webSlot + `/src/wasm"` + "\n")
-			b.WriteString(`component = "build/engine.component.wasm"` + "\n")
+// Both halves are load-bearing. The landscape names the tiers and claims their
+// names; the template decides which of them can be produced today. A row with no
+// slot directory stays unavailable no matter what it claims, and a slot directory
+// with no row is a template that has outgrown its vocabulary — the tests in
+// execute_test.go assert both directions.
+//
+// Canonical order comes from the landscape, not from the filesystem: the order
+// reaches users as help text and as the order of `[tiers.*]` sections.
+func supportedTiers() []string {
+	emittable := templateSlots()
+	out := make([]string, 0, len(TierLandscape))
+	for _, t := range TierLandscape {
+		if t.Status == TierAvailable && emittable[t.Name] {
+			out = append(out, t.Name)
 		}
 	}
-	return b.String()
+	return out
 }
 
-// supportedTiers are the tiers the template can actually emit. Requesting one
-// outside this list is refused by name rather than silently ignored.
-var supportedTiers = []string{"native", "web"}
+// SupportedTiers is the exported view, for tests that check the DERIVATION rather
+// than a hard-coded expectation.
+func SupportedTiers() []string { return supportedTiers() }
+
+// templateSlots is the set of tiers the embedded template can emit, which is
+// exactly its `hosts/*` directories (Decision 34, and tierOf says the same).
+func templateSlots() map[string]bool {
+	slots := map[string]bool{}
+	entries, err := fs.ReadDir(templates.FS, templates.Root+"/hosts")
+	if err != nil {
+		return slots
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			slots[e.Name()] = true
+		}
+	}
+	return slots
+}
 
 func supportedTier(name string) bool {
-	for _, t := range supportedTiers {
+	for _, t := range supportedTiers() {
 		if t == name {
 			return true
 		}
@@ -195,13 +216,13 @@ func supportedTier(name string) bool {
 // order rather than request order.
 //
 // NO DEFAULT. An empty list is an error, not "give them everything" — see
-// validateNew. A tier is a directory of host code plus a `dlc.toml` entry that
-// is checked to exist, so choosing one on a caller's behalf means scaffolding a
-// layout nobody asked for. Every front end asks the question its own way: the
-// CLI marks `--tiers` required, the browser has checkboxes.
+// validateNew. A tier is a directory of host code plus a `dlc.toml` entry that is
+// checked to exist, so choosing one on a caller's behalf means scaffolding a
+// layout nobody asked for. Every front end asks the question its own way: the CLI
+// marks `--tiers` required, the browser has checkboxes.
 func requestedTiers(req *dlcv1.NewRequest) []string {
 	out := make([]string, 0, len(req.Tiers))
-	for _, t := range supportedTiers { // canonical order, not request order
+	for _, t := range supportedTiers() { // canonical order, not request order
 		for _, r := range req.Tiers {
 			if r == t {
 				out = append(out, t)
@@ -210,6 +231,38 @@ func requestedTiers(req *dlcv1.NewRequest) []string {
 		}
 	}
 	return out
+}
+
+// tierSections renders the [tiers.*] blocks for dlc.toml, from the landscape.
+//
+// Built here rather than in the template because the set is dynamic: the template
+// renders one string, and this decides what that string contains. The per-tier
+// prose and the extra web keys live in tiers.go, so adding a tier is a row rather
+// than a case in a switch.
+func tierSections(tiers []string) string {
+	var b strings.Builder
+	for _, name := range tiers {
+		spec, ok := tierSpec(name)
+		if !ok {
+			continue // unreachable: validateNew refuses undeclared tiers first
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("[tiers." + spec.Name + "]\n")
+		b.WriteString(`capabilities = ["console", "filesystem"]` + "\n")
+		if spec.Comment != "" {
+			b.WriteString("# " + spec.Comment + "\n")
+		}
+		b.WriteString(`root      = "` + spec.slotRoot() + `"` + "\n")
+		if spec.Assets != "" {
+			b.WriteString(`assets    = "` + spec.Assets + `"` + "\n")
+		}
+		if spec.Component != "" {
+			b.WriteString(`component = "` + spec.Component + `"` + "\n")
+		}
+	}
+	return b.String()
 }
 
 // scaffoldVars maps the COMMAND to the template dictionary.

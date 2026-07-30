@@ -56,6 +56,21 @@ type BootOptions struct {
 	// still write; it should not promise the user durability.
 	Ephemeral bool
 
+	// Isolation says whether this root belongs to ONE person (§3·5).
+	//
+	// The ENUM rather than a bool, deliberately, so all three states survive to
+	// the wire: a host that has not thought about it (UNSPECIFIED) is genuinely
+	// different from one that checked and found the store shared (SHARED). A
+	// bool would have to collapse them, and it would collapse them into a claim
+	// nobody made.
+	//
+	// NOT required, unlike FilesystemKind, because the zero value is SAFE here:
+	// unset reads as "not isolated", so an app needing privacy refuses rather
+	// than assumes. FilesystemKind has no safe default — guessing there points
+	// reset-fs at the wrong directory — which is why that one is refused and
+	// this one is not.
+	Isolation ilcv1.Isolation
+
 	// Sink receives emitted events, or nil on a tier where nothing listens —
 	// which an app must not be able to detect (Decision 33).
 	Sink EventSink
@@ -96,6 +111,7 @@ func Boot(opts BootOptions) error {
 				Availability: ilcv1.Availability_AVAILABILITY_PRESENT,
 				Kind:         opts.FilesystemKind,
 				Ephemeral:    opts.Ephemeral,
+				Isolation:    opts.Isolation,
 			},
 		},
 	}).MarshalVT()

@@ -90,6 +90,48 @@ export const FilesystemKind_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v
 ]);
 
 /**
+ * Whether this root belongs to ONE person, or is shared with others.
+ *
+ * Separate from FilesystemKind rather than a fourth value of it, because it is
+ * an orthogonal dimension: `kind` already mixes WHERE the root is (cwd, app dir)
+ * with WHAT backs it (OPFS), and a per-user OPFS subtree is genuinely both OPFS
+ * and per-user. An enum can only say one thing.
+ *
+ * Three states for the same reason Availability has three: "nobody said" is not
+ * "somebody said it is shared", and only the second is a claim.
+ *
+ * @generated from enum devalbo.ilc.v1.Isolation
+ */
+export enum Isolation {
+  /**
+   * nobody said; treated as SHARED
+   *
+   * @generated from enum value: ISOLATION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * other people may see this store
+   *
+   * @generated from enum value: ISOLATION_SHARED = 1;
+   */
+  SHARED = 1,
+
+  /**
+   * this root was granted for one person
+   *
+   * @generated from enum value: ISOLATION_PER_USER = 2;
+   */
+  PER_USER = 2,
+}
+
+export const Isolation_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Isolation", [
+  [0, "ISOLATION_UNSPECIFIED"],
+  [1, "ISOLATION_SHARED"],
+  [2, "ISOLATION_PER_USER"],
+]);
+
+/**
  * Filesystem export/import — the first-class platform primitive (§7.3). An
  * app's whole state is a filesystem tree, so one bundle moves it between the
  * terminal, the browser, and an embedded device.
@@ -212,6 +254,33 @@ export interface Filesystem {
    * @generated from field: bool ephemeral = 3;
    */
   ephemeral?: boolean;
+  /**
+   * Whether the host isolated this store per user (§3·5).
+   *
+   * WHO READS THIS, since no app in this repo does yet: an app that holds
+   * PRIVATE data and needs to know whether privacy is its problem. If the host
+   * granted a per-user root, everything the app can see belongs to one person
+   * and it may be naive. If it did not, the app is responsible for access
+   * control, and an app that assumed otherwise leaks — silently, and only
+   * discoverably by leaking.
+   *
+   * That asymmetry is why this field exists ahead of its first consumer, where
+   * ENVIRONMENT-PLAN.md D6 would normally say to wait: an unused field costs one
+   * field, and a missing one costs someone else's data.
+   *
+   * UNSPECIFIED IS SAFE, which is what makes it addable without touching a
+   * single existing host: no claim reads as "not isolated", so an app that
+   * requires privacy refuses to run rather than assuming it has it. A host that
+   * forgets to declare isolation therefore fails LOUDLY instead of leaking.
+   *
+   * NOT A SECURITY BOUNDARY. This is the host's word. A host that grants a
+   * shared root and reports PER_USER is lying, and nothing engine-side can
+   * detect it — see AGENTS.md §3·5. It lets an honest host tell an app what it
+   * is getting; it does not enforce anything.
+   *
+   * @generated from field: devalbo.ilc.v1.Isolation isolation = 4;
+   */
+  isolation?: Isolation;
 
 };
 
@@ -221,6 +290,7 @@ export const Filesystem: MessageType<Filesystem> = /* @__PURE__ */ createMessage
         { no: 1, name: "availability", kind: "enum", T: Availability_Enum },
         { no: 2, name: "kind", kind: "enum", T: FilesystemKind_Enum },
         { no: 3, name: "ephemeral", kind: "scalar", T: ScalarType.BOOL },
+        { no: 4, name: "isolation", kind: "enum", T: Isolation_Enum },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

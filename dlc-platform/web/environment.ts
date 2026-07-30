@@ -21,6 +21,10 @@ export const AVAILABILITY_PRESENT = 2;
 /** devalbo.ilc.v1.FilesystemKind */
 export const FILESYSTEM_KIND_OPFS = 3;
 
+/** devalbo.ilc.v1.Isolation */
+export const ISOLATION_SHARED = 1;
+export const ISOLATION_PER_USER = 2;
+
 /** `SetEnvironment` — the core-lifecycle block, id 2. */
 export const METHOD_SET_ENVIRONMENT = 2;
 
@@ -30,7 +34,17 @@ const WIRE_BYTES = 2;
 export interface Manifest {
   /** Monotonic and NON-ZERO. Zero is rejected by the engine. */
   revision: number;
-  filesystem: { available: boolean; kind?: number; ephemeral?: boolean };
+  filesystem: {
+    available: boolean;
+    kind?: number;
+    ephemeral?: boolean;
+    /**
+     * Whether this root belongs to one person (§3·5). Omitted means no claim,
+     * which reads as "not isolated" — the safe direction, so a host with nothing
+     * to say stays silent rather than promising privacy it cannot provide.
+     */
+    isolation?: number;
+  };
 }
 
 /**
@@ -59,6 +73,10 @@ export function encodeSetEnvironment(m: Manifest): Uint8Array {
   if (m.filesystem.ephemeral) {
     appendTag(fs, 3, WIRE_VARINT); // Filesystem.ephemeral
     appendVarint(fs, 1n);
+  }
+  if (m.filesystem.isolation !== undefined) {
+    appendTag(fs, 4, WIRE_VARINT); // Filesystem.isolation
+    appendVarint(fs, BigInt(m.filesystem.isolation));
   }
 
   const env: number[] = [];

@@ -99,6 +99,51 @@ func (x FilesystemKind) String() string {
 	return strconv.Itoa(int(x))
 }
 
+// Whether this root belongs to ONE person, or is shared with others.
+//
+// Separate from FilesystemKind rather than a fourth value of it, because it is
+// an orthogonal dimension: `kind` already mixes WHERE the root is (cwd, app dir)
+// with WHAT backs it (OPFS), and a per-user OPFS subtree is genuinely both OPFS
+// and per-user. An enum can only say one thing.
+//
+// Three states for the same reason Availability has three: "nobody said" is not
+// "somebody said it is shared", and only the second is a claim.
+type Isolation int32
+
+const (
+	Isolation_ISOLATION_UNSPECIFIED Isolation = 0 // nobody said; treated as SHARED
+	Isolation_ISOLATION_SHARED      Isolation = 1 // other people may see this store
+	Isolation_ISOLATION_PER_USER    Isolation = 2 // this root was granted for one person
+)
+
+// Enum value maps for Isolation.
+var (
+	Isolation_name = map[int32]string{
+		0: "ISOLATION_UNSPECIFIED",
+		1: "ISOLATION_SHARED",
+		2: "ISOLATION_PER_USER",
+	}
+	Isolation_value = map[string]int32{
+		"ISOLATION_UNSPECIFIED": 0,
+		"ISOLATION_SHARED":      1,
+		"ISOLATION_PER_USER":    2,
+	}
+)
+
+func (x Isolation) Enum() *Isolation {
+	p := new(Isolation)
+	*p = x
+	return p
+}
+
+func (x Isolation) String() string {
+	name, valid := Isolation_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 // Filesystem export/import — the first-class platform primitive (§7.3). An
 // app's whole state is a filesystem tree, so one bundle moves it between the
 // terminal, the browser, and an embedded device.
@@ -215,6 +260,29 @@ type Filesystem struct {
 	// Ephemeral means the store does not survive the process/tab. An app may
 	// still write; it should not promise the user durability.
 	Ephemeral bool `protobuf:"varint,3,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// Whether the host isolated this store per user (§3·5).
+	//
+	// WHO READS THIS, since no app in this repo does yet: an app that holds
+	// PRIVATE data and needs to know whether privacy is its problem. If the host
+	// granted a per-user root, everything the app can see belongs to one person
+	// and it may be naive. If it did not, the app is responsible for access
+	// control, and an app that assumed otherwise leaks — silently, and only
+	// discoverably by leaking.
+	//
+	// That asymmetry is why this field exists ahead of its first consumer, where
+	// ENVIRONMENT-PLAN.md D6 would normally say to wait: an unused field costs one
+	// field, and a missing one costs someone else's data.
+	//
+	// UNSPECIFIED IS SAFE, which is what makes it addable without touching a
+	// single existing host: no claim reads as "not isolated", so an app that
+	// requires privacy refuses to run rather than assuming it has it. A host that
+	// forgets to declare isolation therefore fails LOUDLY instead of leaking.
+	//
+	// NOT A SECURITY BOUNDARY. This is the host's word. A host that grants a
+	// shared root and reports PER_USER is lying, and nothing engine-side can
+	// detect it — see AGENTS.md §3·5. It lets an honest host tell an app what it
+	// is getting; it does not enforce anything.
+	Isolation Isolation `protobuf:"varint,4,opt,name=isolation,proto3" json:"isolation,omitempty"`
 }
 
 func (x *Filesystem) Reset() {
@@ -242,6 +310,13 @@ func (x *Filesystem) GetEphemeral() bool {
 		return x.Ephemeral
 	}
 	return false
+}
+
+func (x *Filesystem) GetIsolation() Isolation {
+	if x != nil {
+		return x.Isolation
+	}
+	return Isolation_ISOLATION_UNSPECIFIED
 }
 
 // Environment is what the host can do, as of `revision`.
@@ -601,6 +676,7 @@ func (m *Filesystem) CloneVT() *Filesystem {
 	r.Availability = m.Availability
 	r.Kind = m.Kind
 	r.Ephemeral = m.Ephemeral
+	r.Isolation = m.Isolation
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -871,6 +947,9 @@ func (this *Filesystem) EqualVT(that *Filesystem) bool {
 		return false
 	}
 	if this.Ephemeral != that.Ephemeral {
+		return false
+	}
+	if this.Isolation != that.Isolation {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1223,6 +1302,46 @@ func (x *FilesystemKind) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the Isolation to JSON.
+func (x Isolation) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Isolation_name)
+}
+
+// MarshalText marshals the Isolation to text.
+func (x Isolation) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Isolation_name)), nil
+}
+
+// MarshalJSON marshals the Isolation to JSON.
+func (x Isolation) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Isolation from JSON.
+func (x *Isolation) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Isolation_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Isolation enum: %v", err)
+		return
+	}
+	*x = Isolation(v)
+}
+
+// UnmarshalText unmarshals the Isolation from text.
+func (x *Isolation) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Isolation_value)
+	if err != nil {
+		return err
+	}
+	*x = Isolation(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Isolation from JSON.
+func (x *Isolation) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the BundleFormat to JSON.
 func (x BundleFormat) MarshalProtoJSON(s *json.MarshalState) {
 	s.WriteEnum(int32(x), BundleFormat_name)
@@ -1398,6 +1517,11 @@ func (x *Filesystem) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("ephemeral")
 		s.WriteBool(x.Ephemeral)
 	}
+	if x.Isolation != 0 || s.HasField("isolation") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("isolation")
+		x.Isolation.MarshalProtoJSON(s)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -1424,6 +1548,9 @@ func (x *Filesystem) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "ephemeral":
 			s.AddField("ephemeral")
 			x.Ephemeral = s.ReadBool()
+		case "isolation":
+			s.AddField("isolation")
+			x.Isolation.UnmarshalProtoJSON(s)
 		}
 	})
 }
@@ -2125,6 +2252,11 @@ func (m *Filesystem) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Isolation != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Isolation))
+		i--
+		dAtA[i] = 0x20
+	}
 	if m.Ephemeral {
 		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Ephemeral)
 		i--
@@ -2756,6 +2888,11 @@ func (m *Filesystem) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Isolation != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Isolation))
+		i--
+		dAtA[i] = 0x20
+	}
 	if m.Ephemeral {
 		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Ephemeral)
 		i--
@@ -3319,6 +3456,7 @@ func (m *Filesystem) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Availability)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Kind)
 	n += protobuf_go_lite.SizeBoolNonZero(1, m.Ephemeral)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Isolation)
 	n += len(m.unknownFields)
 	return n
 }
@@ -3482,6 +3620,9 @@ func (x Availability) MarshalProtoText() string {
 func (x FilesystemKind) MarshalProtoText() string {
 	return x.String()
 }
+func (x Isolation) MarshalProtoText() string {
+	return x.String()
+}
 func (x BundleFormat) MarshalProtoText() string {
 	return x.String()
 }
@@ -3524,6 +3665,10 @@ func (x *Filesystem) MarshalProtoText() string {
 	if x.Ephemeral != false {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "ephemeral")
 		protobuf_go_lite.TextWriteBool(&sb, x.Ephemeral)
+	}
+	if x.Isolation != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "isolation")
+		protobuf_go_lite.TextWriteStringer(&sb, Isolation(x.Isolation))
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -3874,6 +4019,17 @@ func (m *Filesystem) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Ephemeral = bool(v)
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Isolation", wireType)
+			}
+			m.Isolation = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Isolation = Isolation(_v)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -4783,6 +4939,17 @@ func (m *Filesystem) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Ephemeral = bool(v)
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Isolation", wireType)
+			}
+			m.Isolation = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Isolation = Isolation(_v)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
