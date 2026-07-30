@@ -51,37 +51,37 @@
   },
   {
     "name": "echo hello world",
-    "method": 10001,
+    "method": 9001,
     "request": "0a0568656c6c6f0a05776f726c64"
   },
   {
     "name": "echo empty",
-    "method": 10001,
+    "method": 9001,
     "request": ""
   },
   {
     "name": "new (defaults)",
-    "method": 10000,
+    "method": 9000,
     "request": "0a0b6170702d64656661756c7422066e61746976652203776562"
   },
   {
     "name": "new with module",
-    "method": 10000,
+    "method": 9000,
     "request": "0a0a6170702d6d6f64756c65121a6769746875622e636f6d2f61636d652f6170702d6d6f64756c6522066e61746976652203776562"
   },
   {
     "name": "new with enums",
-    "method": 10000,
+    "method": 9000,
     "request": "0a096170702d656e756d731a07636f6e736f6c651a0a66696c6573797374656d22066e6174697665220377656228013001"
   },
   {
     "name": "new missing name (envelope error)",
-    "method": 10000,
+    "method": 9000,
     "request": "22066e6174697665"
   },
   {
     "name": "new missing tiers (envelope error)",
-    "method": 10000,
+    "method": 9000,
     "request": "0a0b6170702d6e6f7469657273"
   },
   {
@@ -146,7 +146,7 @@
   },
   {
     "name": "malformed request bytes",
-    "method": 10000,
+    "method": 9000,
     "request": "ff"
   }
 ]

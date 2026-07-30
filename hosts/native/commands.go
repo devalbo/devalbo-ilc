@@ -38,7 +38,16 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 		// dlc's own commands PLUS the platform verbs it inherits — the same two
 		// lines a scaffolded app writes. dlc claims no privileged block: its
 		// ids start at 10000 like any app's.
-		Commands: append(append([]clispec.Command{}, dlcv1.DlcServiceCLI...), ilcv1.PlatformServiceCLI...),
+		// Three sources, one surface: dlc's engine verbs, the platform's
+		// inherited ones, and dlc's HOST-LOCAL toolchain verbs (Decision 30).
+		// The last group used to bypass this entirely and was therefore missing
+		// from `--help`.
+		Commands: append(append(append([]clispec.Command{},
+			dlcv1.DlcServiceCLI...), ilcv1.PlatformServiceCLI...), dlcv1.ToolchainServiceCLI...),
+
+		// Behaviour for the host-local verbs. The runner refuses to build the
+		// surface if a declared local command has no entry here.
+		Local: toolchainVerbs,
 
 		Port:   port,
 		Stdout: stdout,

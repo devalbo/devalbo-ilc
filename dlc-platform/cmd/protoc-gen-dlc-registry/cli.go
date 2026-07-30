@@ -32,6 +32,7 @@ const (
 	shortExt     protoreflect.FullName = "devalbo.options.v1.short"
 	cliNameExt   protoreflect.FullName = "devalbo.options.v1.cli_name"       // MethodOptions
 	cliHiddenExt protoreflect.FullName = "devalbo.options.v1.cli_hidden"     // MethodOptions
+	hostLocalExt protoreflect.FullName = "devalbo.options.v1.host_local"     // MethodOptions
 	cliFlagExt   protoreflect.FullName = "devalbo.options.v1.cli_flag"       // FieldOptions
 	cliSourceExt protoreflect.FullName = "devalbo.options.v1.cli_source"     // FieldOptions
 	cliPosExt    protoreflect.FullName = "devalbo.options.v1.cli_positional" // FieldOptions
@@ -452,6 +453,11 @@ func renderCLI(file *descriptorpb.FileDescriptorProto, services []service, cmds 
 			fmt.Fprintf(&b, "\t\tName:    %q,\n", cmd.name)
 			fmt.Fprintf(&b, "\t\tMethod:  Method%s,\n", m.name)
 			fmt.Fprintf(&b, "\t\tRequest: %q,\n", cmd.request)
+			if m.hostLocal {
+				// Decision 30: the host serves this, so the runner must find a
+				// local handler for it rather than sending it to the engine.
+				fmt.Fprintf(&b, "\t\tLocal:   true,\n")
+			}
 			if cmd.summary != "" {
 				fmt.Fprintf(&b, "\t\tSummary: %q,\n", cmd.summary)
 			}
@@ -532,6 +538,14 @@ func renderCLITS(file *descriptorpb.FileDescriptorProto, services []service, cmd
 		for _, m := range svc.methods {
 			cmd, ok := findCmd(cmds, m.id)
 			if !ok {
+				continue
+			}
+			// HOST-LOCAL VERBS ARE OMITTED FROM THE WEB SURFACE ENTIRELY, not
+			// marked. A browser cannot spawn a toolchain, so `gen` and `build`
+			// could never work there — and a command that is listed and cannot
+			// run is worse than one that is absent. Omitting rather than flagging
+			// also means no runtime check to forget: there is nothing to skip.
+			if m.hostLocal {
 				continue
 			}
 			fmt.Fprintf(&b, "  {\n")

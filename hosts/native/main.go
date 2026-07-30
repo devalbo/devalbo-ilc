@@ -22,15 +22,30 @@ import (
 	"github.com/devalbo/dlc-platform"
 	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 
+	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+
 	// Importing the engine is what REGISTERS dlc's commands; nothing else here
 	// touches it. The blank-ish import is load-bearing.
 	_ "github.com/devalbo/devalbo-ilc/engine"
 )
 
-// toolchainVerbs never cross into the engine (Decision 30).
-var toolchainVerbs = map[string]func([]string) error{
-	"build": runBuild,
-	"gen":   runGen,
+// toolchainVerbs never cross into the engine (Decision 30) — they spawn the dev
+// toolchain, which cannot happen inside wasm.
+//
+// Keyed by the method id DECLARED in proto/devalbo/dlc/v1/toolchain.proto, not by
+// name. Before that file this map was keyed by string and consulted BEFORE the
+// CLI ran, which meant `gen` and `build` never appeared in `dlc --help`: the two
+// commands every tutorial tells you to run were missing from the tool's own
+// command list.
+//
+// Now the name, summary, flags and defaults all come from the schema like every
+// other command's, and this map supplies only the behaviour — which is why each
+// handler takes an ENCODED REQUEST rather than argv. There is no hand-rolled flag
+// loop left in any of them.
+var toolchainVerbs = map[uint32]func(request []byte) error{
+	dlcv1.MethodBuild: runBuild,
+	dlcv1.MethodGen:   runGen,
+	dlcv1.MethodRun:   runRun,
 }
 
 func main() {
@@ -55,19 +70,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	args := os.Args[1:]
-
-	if len(args) > 0 {
-		if handler, ok := toolchainVerbs[args[0]]; ok {
-			if err := handler(args[1:]); err != nil {
-				os.Stderr.WriteString("dlc: " + err.Error() + "\n")
-				os.Exit(1)
-			}
-			return
-		}
-	}
-
-	// In-engine verbs go through the GENERATED command surface (Decision 29):
-	// no switch, no usage string, just the renderers in commands.go.
-	os.Exit(runCommand(args))
+	// EVERY verb goes through the generated command surface (Decision 29), engine
+	// and host-local alike. The runner routes on `Local` — declared in the
+	// .proto — so there is no pre-CLI interception and nothing is invisible to
+	// `--help`.
+	os.Exit(runCommand(os.Args[1:]))
 }

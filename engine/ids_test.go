@@ -69,23 +69,42 @@ func TestMethodIDsMatchProto(t *testing.T) {
 	}
 }
 
-// The ranges are the platform/app contract; a stray id on the wrong side of the
-// line is exactly what the reserved range exists to prevent.
+// The ranges are the platform/app/dlc contract; a stray id on the wrong side of a
+// line is exactly what the bands exist to prevent.
+//
+// Every boundary is QUOTED from a constant, never retyped — the message this test
+// replaced said "1–9999" while comparing against a constant that read 1000, which
+// is the failure mode a range test is least entitled to have.
 func TestMethodIDsRespectRanges(t *testing.T) {
+	// The platform's inherited verbs sit below dlc's block, which sits below the
+	// app band.
 	for name, id := range protoIDs(t, "../dlc-platform/proto/devalbo/ilc/v1/platform.proto") {
-		if id == 0 || id >= platform.AppMethodBase {
-			t.Errorf("platform %s = %d, must be in 1–%d (ILC's band)",
-				name, id, platform.AppMethodBase-1)
+		if id == 0 || id >= engine.DlcMethodBase {
+			t.Errorf("platform %s = %d, must be in 1–%d (ILC's inherited verbs)",
+				name, id, engine.DlcMethodBase-1)
 		}
 	}
+	// dlc's ENGINE-SERVED verbs: 9000–9099.
 	for name, id := range protoIDs(t, "../proto/devalbo/dlc/v1/commands.proto") {
+		if id < engine.DlcMethodBase || id >= engine.DlcHostLocalBase {
+			t.Errorf("dlc %s = %d, must be in %d–%d (dlc's engine-served block)",
+				name, id, engine.DlcMethodBase, engine.DlcHostLocalBase-1)
+		}
+	}
+	// dlc's HOST-LOCAL verbs: 9100 up to, but not into, the app band.
+	for name, id := range protoIDs(t, "../proto/devalbo/dlc/v1/toolchain.proto") {
+		if id < engine.DlcHostLocalBase || id >= platform.AppMethodBase {
+			t.Errorf("dlc toolchain %s = %d, must be in %d–%d (dlc's host-local block)",
+				name, id, engine.DlcHostLocalBase, platform.AppMethodBase-1)
+		}
+	}
+	// And the app band belongs to apps. notes is the stand-in: if a framework id
+	// ever leaks into an example app, that is the same mistake from the other
+	// side.
+	for name, id := range protoIDs(t, "../example-apps/notes/proto/notes/v1/commands.proto") {
 		if id < platform.AppMethodBase {
-			// The band edge is quoted from the constant, never retyped. This
-			// message used to say "1–9999" while comparing against a constant
-			// that read 1000 — the two copies of the boundary disagreeing inside
-			// a single line, in the test whose job is to police that boundary.
-			t.Errorf("app %s = %d, must be >= %d (1–%d is reserved for ILC)",
-				name, id, platform.AppMethodBase, platform.AppMethodBase-1)
+			t.Errorf("app %s = %d, must be >= %d (below that is the framework's)",
+				name, id, platform.AppMethodBase)
 		}
 	}
 }

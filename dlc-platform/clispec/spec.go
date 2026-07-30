@@ -95,6 +95,12 @@ type Command struct {
 	// the command is defined rather than in a third place that goes stale.
 	Summary string
 	Flags   []Flag
+	// Local marks a verb the HOST handles rather than the engine (Decision 30,
+	// `host_local` in the .proto). The runner refuses to build a surface with a
+	// local command and no local handler, the same way it refuses a missing
+	// renderer — a declared command that silently does nothing is worse than a
+	// build error.
+	Local bool
 	// Unsupported names request fields the CLI cannot express yet (nested
 	// messages, maps, repeated non-scalars). Listed rather than dropped: a
 	// command that silently ignores a field is worse than one that says it

@@ -9,7 +9,7 @@
 export const DlcServiceCLI = [
   {
     name: "new",
-    method: 10000,
+    method: 9000,
     request: "NewRequest",
     summary: "Scaffold a new ILC project",
     flags: [
@@ -24,7 +24,7 @@ export const DlcServiceCLI = [
   },
   {
     name: "echo",
-    method: 10001,
+    method: 9001,
     request: "EchoRequest",
     summary: "Echo the words back, through the engine",
     flags: [

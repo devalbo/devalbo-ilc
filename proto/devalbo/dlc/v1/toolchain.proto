@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package devalbo.dlc.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1;dlcv1";
+
+import "devalbo/options/v1/options.proto";
+
+// `dlc`'s TOOLCHAIN verbs — the half of its command surface the HOST serves.
+//
+// Decision 30 splits `dlc`'s commands two ways. A verb that only touches the
+// filesystem or app data is an in-engine handler and runs in a terminal *and* a
+// browser (`new`, `export-fs`, …, in commands.proto). A verb that must spawn the
+// dev toolchain or inspect the machine cannot run inside wasm at all, so the
+// native host serves it directly and the engine never sees it. Those live here.
+//
+// WHY THEY ARE DECLARED AT ALL, given the engine will never dispatch them:
+// because a command's NAME, SUMMARY and HELP are surface, not behaviour, and this
+// project generates its surface from schema (AGENTS.md §3b). Before this file the
+// toolchain verbs were a hand-written Go map in `hosts/native/main.go`, which
+// meant they were absent from `dlc --help` — the two commands every tutorial
+// tells you to run did not appear in the tool's own command list, and a reader
+// would fairly conclude they did not exist.
+//
+// What `host_local` buys, precisely:
+//
+//   - the name and summary come from here, like every other command
+//   - `dlc --help` lists them
+//   - `protoc-gen-dlc-registry` emits NO dispatch map for this service, so an
+//     engine cannot accidentally serve one
+//   - the runner refuses to build a surface where a declared local verb has no
+//     handler, the same way it refuses a missing renderer
+//
+// METHOD IDS HERE ARE NOT WIRE IDS. Nothing sends them anywhere: they key the
+// command surface inside one process and stop there. So an implemented
+// host-local id is deliberately **excluded from `method-ids.lock`** — changing one
+// breaks no peer, and locking it would make that file's "permanent wire id"
+// header a lie.
+//
+// RESERVATIONS BELOW ARE STILL LOCKED, and the asymmetry is deliberate rather
+// than an oversight: the lock is also the only place that records "this number is
+// claimed", and a reservation quietly disappearing should show up in review like
+// any other id change. So the lock answers two questions — what the wire promises,
+// and what names are taken — and only the first applies to this service's
+// implemented verbs.
+//
+// They must still be unique within a surface, because `dlc`'s CLI concatenates
+// this service with `DlcService` (10000+) and the platform's inherited verbs
+// (1–9999). Hence the band:
+//
+//	   9100 +   `dlc`'s host-local toolchain verbs
+//
+// far above the app-band verbs in commands.proto and with room to grow.
+service ToolchainService {
+  // Regenerate this project's bindings from its schema and dlc.toml.
+  //
+  // Only the FIRST line becomes the command summary, so it has to stand alone —
+  // a wrapped sentence gets cut mid-clause in `--help`, which is how this comment
+  // was originally written.
+  rpc Gen(GenRequest) returns (GenResponse) {
+    option (devalbo.options.v1.method_id) = 9100;
+    option (devalbo.options.v1.host_local) = true;
+  }
+  // Build a tier: `dlc build web` transpiles the wasm component.
+  rpc Build(BuildRequest) returns (BuildResponse) {
+    option (devalbo.options.v1.method_id) = 9101;
+    option (devalbo.options.v1.host_local) = true;
+  }
+
+  // Launch a tier: run the CLI, or serve the web tier and open a browser.
+  rpc Run(RunRequest) returns (RunResponse) {
+    option (devalbo.options.v1.method_id) = 9102;
+    option (devalbo.options.v1.host_local) = true;
+  }
+
+  // Held for the rest of Decision 30's host-side surface, declared rather than
+  // commented so the names and numbers cannot be claimed twice in the meantime.
+  // Each is host-local for the same reason: it spawns a toolchain or inspects the
+  // machine.
+  //   9103 = Verify    `dlc verify [<tier>] [--parity]` — the §11 matrix
+  //   9104 = Doctor    the command form of scripts/preflight.sh (§16.7)
+  //   9105 = HostAdd   `dlc host add <tier>` — scaffold a tier slot
+  //   9106 = Proto     proto-only codegen, without the rest of `gen`
+  option (devalbo.options.v1.reserved_method_id) = 9103;
+  option (devalbo.options.v1.reserved_method_id) = 9104;
+  option (devalbo.options.v1.reserved_method_id) = 9105;
+  option (devalbo.options.v1.reserved_method_id) = 9106;
+}
+
+// The flags are declared HERE, so the runner parses them exactly as it parses an
+// engine command's: one grammar, one help text, one place defaults live. A local
+// handler receives the encoded request, not argv.
+//
+// Responses stay empty: these verbs print their own progress as they drive the
+// toolchain, and there is nothing to format afterwards. A host-local verb owes no
+// renderer for the same reason.
+
+// `dlc gen` takes no arguments — the project's `dlc.toml` and `.proto` files say
+// everything. Empty because there is nothing to declare, not because it is
+// unfinished.
+message GenRequest {}
+message GenResponse {}
+
+// `dlc build <tier> [--out …] [--web-out …] [--entry …]`
+message BuildRequest {
+  string tier = 1 [
+    (devalbo.options.v1.help) = "tier to build",
+    (devalbo.options.v1.default) = "web",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+  // NO DEFAULTS on out/web_out, deliberately. Precedence is built-in default,
+  // then `dlc.toml`'s [tiers.<tier>], then the flag — so the host has to be able
+  // to tell "not given" from "given", and a declared default here would make
+  // every invocation look explicit and silently clobber the manifest.
+  //
+  // proto3's empty string is exactly that distinction, which is why these are
+  // plain strings with no default rather than a wrapper type.
+  string out = 2 [
+    (devalbo.options.v1.help) = "component output path (default: dlc.toml, else build/engine.component.wasm)"
+  ];
+  string web_out = 3 [
+    (devalbo.options.v1.help) = "transpiled web assets dir (default: dlc.toml, else <slot>/src/wasm)"
+  ];
+  // A constant default, not a manifest-derived one, so declaring it here is safe.
+  string entry = 4 [
+    (devalbo.options.v1.help) = "component entry package",
+    (devalbo.options.v1.default) = "./cmd/engine-component"
+  ];
+}
+message BuildResponse {}
+
+// `dlc run <tier> [args…]` — the two-phase launch (§5.5) for whichever tier can
+// be launched from a developer machine.
+//
+// NOT EVERY TIER CAN RUN, and the default answer is "not supported". A tier is a
+// host binding, and only some bindings are things `dlc` can start: it can exec a
+// native binary and it can serve a web tier, but it cannot flash a board or push
+// a firmware image, and pretending otherwise would be worse than refusing. A
+// declared-but-unlaunchable tier gets a message naming itself.
+message RunRequest {
+  string tier = 1 [
+    (devalbo.options.v1.help) = "tier to launch",
+    (devalbo.options.v1.default) = "native",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+  // Everything after the tier goes to the launched program, which is why this is
+  // a REPEATED positional and therefore last: `dlc run native state 3` runs the
+  // CLI with `state 3`.
+  //
+  // The web tier has nothing to forward these to, and says so rather than
+  // ignoring them — a silently dropped argument is the kind of thing you only
+  // notice when the output is wrong.
+  repeated string args = 2 [
+    (devalbo.options.v1.help) = "arguments for the launched program (native only)",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
+  // Serve only; do not open a browser. The default is to open one, because
+  // `dlc run web` with nothing appearing looks broken.
+  bool no_open = 3 [
+    (devalbo.options.v1.help) = "web: serve without opening a browser"
+  ];
+}
+message RunResponse {}

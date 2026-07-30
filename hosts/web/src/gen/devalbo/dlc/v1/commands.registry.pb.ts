@@ -5,11 +5,11 @@
 // lock in proto/method-ids.lock.
 
 /** Method ids for DlcService. */
-export const MethodNew = 10000;
-export const MethodEcho = 10001;
+export const MethodNew = 9000;
+export const MethodEcho = 9001;
 
 /** Every DlcService id, for hosts that enumerate. */
 export const DlcServiceMethods = {
-  New: 10000,
-  Echo: 10001,
+  New: 9000,
+  Echo: 9001,
 } as const;

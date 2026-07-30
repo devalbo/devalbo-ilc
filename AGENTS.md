@@ -29,8 +29,22 @@ Hand-mirroring is how an id ends up living in two places that silently disagree.
 
 | Range | Owner |
 | --- | --- |
-| 1 – 9999 | ILC, subdivided by capability (600–9999 held for capabilities not yet shipped) |
-| 10000 + | the app — including `dlc`, which claims no privileged block |
+| 1 – 599 | ILC's inherited verbs, in per-capability blocks (core 1–99, filesystem 100–199, …) |
+| 600 – 8999 | held for future capability verbs — **over-provisioned, see below** |
+| 9000 – 9099 | **`dlc`'s own engine-served verbs** (`new`, `echo`) |
+| 9100 – 9999 | **`dlc`'s own host-local verbs** (`gen`, `build`, `run`) |
+| 10000 + | **the app, and only the app** |
+
+**`dlc` moved out of the app band on 2026-07-29**, reversing Decision 29's "claims no privileged block". The
+old argument still holds as far as it went — `dlc` and a scaffolded app never share a registry, so collision
+was impossible either way — but `10000` meant "some app's first command, *or* dlc's `New`", and neither a lock
+file nor a wire trace told you which. The gain is legibility, not safety.
+
+**Why the block was affordable:** 600–9999 was reserved for capability verbs, and capabilities turned out not
+to be command-shaped. Events is an import (Decision 33), a shared render is a pulled *app* command
+(Decision 35), network is `wasi:http` — none consume method ids. **Seven framework ids exist in total.** The
+realistic future claimants are more *inherited* verbs (§7.3's open file verbs at 103+), and those have a home
+already.
 
 **Changing an id is a breaking change.** `buf breaking` cannot see it (it validates message wire compat,
 not an option's *value*), so the lock is the only guard. Re-bless deliberately:

@@ -30,6 +30,24 @@ package engine
 // but that changes `NewRequest.tiers` from `repeated string` and is a wire change
 // worth making deliberately rather than in passing.
 
+// `dlc`'s OWN method-id block, carved out of the framework range (AGENTS.md §1).
+//
+// Declared here because it is dlc's band, not the platform's — `dlc-platform`
+// has no business knowing this tool exists. The upper bound is
+// `platform.AppMethodBase` and is never retyped: the boundary lives in one place,
+// which is the lesson ids_test.go already records about a message that disagreed
+// with the constant beside it.
+//
+// Moved out of the app band on 2026-07-29 (see commands.proto for why). 10000+ is
+// the app's alone now.
+const (
+	// DlcMethodBase is the first id `dlc`'s engine-served verbs may claim.
+	DlcMethodBase uint32 = 9000
+	// DlcHostLocalBase is the first id `dlc`'s host-local verbs may claim
+	// (Decision 30) — the ones the engine never dispatches.
+	DlcHostLocalBase uint32 = 9100
+)
+
 // Tier names. Referenced rather than spelled, so a rename is one edit and a typo
 // is a compile error.
 const (

@@ -10,6 +10,8 @@ package main
 // disagree with the manifest.
 
 import (
+	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,9 +20,15 @@ import (
 	"strings"
 )
 
-func runGen(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("gen: unexpected argument %q", args[0])
+func runGen(request []byte) error {
+	// The generated surface already refused any argument — `GenRequest` has no
+	// fields, so a stray flag fails at parse time with the schema's own message.
+	// Decoding is still done rather than skipped: it is the same contract an
+	// engine handler honours, and a silently-ignored request is how a field added
+	// later would go unnoticed.
+	var req dlcv1.GenRequest
+	if err := req.UnmarshalVT(request); err != nil {
+		return fmt.Errorf("gen: %w", err)
 	}
 	m, err := loadManifest()
 	if err != nil {

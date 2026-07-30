@@ -38,6 +38,25 @@ extend google.protobuf.MethodOptions {
   // still perfectly dispatchable by a host that knows the id. This hides it
   // from the SURFACE, it does not remove the verb.
   bool cli_hidden = 50011;
+
+  // This verb is handled by the HOST, not the engine (Decision 30).
+  //
+  // Some `dlc` commands must spawn the dev toolchain or inspect the machine —
+  // `gen`, `build` — which cannot happen inside wasm, so they never reach
+  // `execute`. Before this option they were a hand-written Go map in
+  // hosts/native, which meant they were invisible to `--help`: the two commands
+  // every tutorial tells you to run did not appear in the tool's own command
+  // list, and someone reading it would conclude they did not exist.
+  //
+  // Declaring them here gets the name, the summary and the help text from the
+  // same place as every other command. What it does NOT do is give them a
+  // handler: the generator emits a CLI entry and deliberately no registration,
+  // so an engine can never accidentally serve one.
+  //
+  // The id is still required (it keys the command surface) but is NOT a wire
+  // id — nothing sends it anywhere. See the band note in
+  // proto/devalbo/dlc/v1/toolchain.proto.
+  bool host_local = 50012;
 }
 
 extend google.protobuf.ServiceOptions {

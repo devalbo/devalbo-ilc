@@ -156,6 +156,14 @@ func run() error {
 		if !isSpikePackage(file.GetPackage()) {
 			for _, svc := range services {
 				for _, m := range svc.methods {
+					// A HOST-LOCAL verb's id is not a wire id — nothing sends it
+					// anywhere, so changing it breaks no peer and locking it would
+					// make this file's header ("permanent wire id") a lie. The id
+					// still has to be unique within a command surface, which the
+					// band convention handles (see toolchain.proto).
+					if m.hostLocal {
+						continue
+					}
 					locked[file.GetPackage()+"."+svc.name+"."+m.name] = m.id
 				}
 				// Reservations are locked as well: an id held for an unbuilt
@@ -250,12 +258,25 @@ type method struct {
 	fieldParam string // lowerCamel param name
 	cliName    string // (cli_name) override; empty means kebab(name)
 	cliHidden  bool   // (cli_hidden): a host lifecycle verb, not a subcommand
+	hostLocal  bool   // (host_local): the HOST handles it; no engine registration
 }
 
 type service struct {
 	name     string
 	methods  []method
 	reserved []uint32
+}
+
+// hasDispatchable reports whether any rpc in this service is served by the
+// ENGINE. A service of purely host-local verbs (Decision 30) gets a CLI surface
+// and no dispatch map, so nothing can register a handler for one by accident.
+func (s service) hasDispatchable() bool {
+	for _, m := range s.methods {
+		if !m.hostLocal {
+			return true
+		}
+	}
+	return false
 }
 
 // extensionResolver registers every extension declared anywhere in the request,
@@ -311,6 +332,14 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 				return nil, fmt.Errorf("%s.%s: cli_name: %w", svc.GetName(), m.GetName(), err)
 			}
 			cliHidden, _ := extBool(opts, cliHiddenExt)
+			hostLocal, _ := extBool(opts, hostLocalExt)
+			if cliHidden && hostLocal {
+				// Hidden means "dispatchable but not typeable"; host-local means
+				// "typeable but never dispatched". Together they describe a verb
+				// nothing can reach, which is a mistake worth naming.
+				return nil, fmt.Errorf("%s.%s: cli_hidden and host_local are contradictory — a host-local verb exists to be typed",
+					svc.GetName(), m.GetName())
+			}
 			s.methods = append(s.methods, method{
 				name:       m.GetName(),
 				id:         id,
@@ -319,6 +348,7 @@ func servicesOf(file *descriptorpb.FileDescriptorProto, resolver *protoregistry.
 				fieldParam: lowerFirst(m.GetName()) + "Fn",
 				cliName:    cliName,
 				cliHidden:  cliHidden,
+				hostLocal:  hostLocal,
 			})
 		}
 		if len(s.methods) > 0 {
@@ -456,6 +486,12 @@ func render(file *descriptorpb.FileDescriptorProto, services []service) (string,
 	}
 
 	for _, svc := range services {
+		// A service of only host-local verbs has no dispatch map at all: the
+		// engine must never be able to serve one, so the generator does not offer
+		// the option (Decision 30).
+		if !svc.hasDispatchable() {
+			continue
+		}
 		fmt.Fprintf(&b, "// %sHandlers builds the dispatch map for %s from typed handlers.\n", svc.name, svc.name)
 		fmt.Fprintf(&b, "// The returned map goes to platform.RegisterRaw; the closures below own the\n")
 		fmt.Fprintf(&b, "// decode/encode, so an app never touches request bytes or an id.\n")

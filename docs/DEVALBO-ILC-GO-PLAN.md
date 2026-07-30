@@ -749,10 +749,29 @@ Every tier feeds the same `execute` entry, so **there is one dispatch path** —
 
 | Band | Owner |
 | --- | --- |
-| **1 – 9999** | **ILC itself**, subdivided by capability: 1–99 core lifecycle · 100–199 filesystem · 200–299 index · 300–399 events · 400–499 display · 500–599 network · **600–9999 reserved for capabilities not yet shipped** |
-| **10000 +** | **the app** |
+| **1 – 599** | **ILC's inherited verbs**, per capability: 1–99 core lifecycle · 100–199 filesystem · 200–299 index · 300–399 events · 400–499 display · 500–599 network |
+| **600 – 8999** | reserved for future capability verbs — **and over-provisioned**: see the note below |
+| **9000 – 9999** | **`dlc`'s own verbs** — 9000–9099 engine-served, 9100–9999 host-local (Decision 30) |
+| **10000 +** | **the app, and only the app** |
 
 Each band is deliberately far larger than it needs to be: ids are `u32`, so over-reserving costs nothing, while *widening* a band once apps exist breaks every id above it. `protoc-gen-dlc-registry` writes a committed `proto/method-ids.lock` and fails the build on any change, because `buf breaking` validates message wire compatibility and cannot see an option's *value*.
+
+**⚠ `dlc` NOW HAS A BLOCK (9000–9999), reversing what this paragraph used to say** — changed 2026-07-29, kept
+here with its original reasoning because the reasoning was sound and only half of it stopped applying.
+
+*What was true and still is:* `dlc` and a scaffolded app never share a registry (an app imports
+`dlc-platform`, never `dlc`'s `engine`), so collision was impossible either way and a block buys no safety.
+
+*What changed:* legibility. `10000` meant "some app's first command, **or** dlc's `New`", and neither
+`method-ids.lock` nor a wire trace distinguished them. 10000+ is now unambiguously the app in front of you.
+
+*What made it affordable:* 600–9999 was held for capability verbs, and **capabilities turned out not to be
+command-shaped** — events is an import (Decision 33), a shared render is a pulled *app* command (Decision 35),
+network is `wasi:http`. Blocks 200–599 are empty and seven framework ids exist in total, so 9,400 reserved ids
+were over-provisioned by three orders of magnitude. The realistic future claimants are more *inherited* verbs
+(§7.3's file verbs at 103+), which already have a home.
+
+*The original text follows.*
 
 **`dlc` claims no reserved block — it is an app like any other** (`New` = 10000). It needs none: `dlc` and a scaffolded app never share a registry (an app imports `engine/platform`, never `dlc`'s `engine`), so collision is impossible by construction and a block would be signalling rather than protection. Keeping `dlc` in the app band is also the dogfooding — any friction it feels there is friction every scaffolded app feels, which is the point of App #1. If `dlc`'s scaffolder is ever shared *as a capability* (an app embedding `new`), it takes an **ILC** block out of the reserved 600–9999, not a `dlc` one. Cross-app command routing (§9, Phase 5) needs **app identity in the envelope** regardless — a global id carve-out would give false comfort about a problem that lives elsewhere.
 

@@ -38,6 +38,26 @@ type App struct {
 	// the whole command line against a fake (Decision 34).
 	Port platform.EnginePort
 
+	// Local supplies handlers for commands the HOST serves rather than the engine
+	// (Decision 30, `host_local` in the .proto): `dlc gen`, `dlc build`.
+	//
+	// WHY THEY GO THROUGH THE SAME SURFACE. They used to be a hand-written map in
+	// the host's main(), checked before the CLI ran — which meant they never
+	// appeared in `--help`. The two commands every tutorial tells you to run were
+	// invisible in the tool's own command list. Declaring them in the .proto puts
+	// their name and summary in the one place every other command's comes from;
+	// this map is where their behaviour attaches.
+	//
+	// The handler receives the SAME encoded request an engine handler would —
+	// flags, positionals, defaults and required-ness all parsed from the schema.
+	// The only difference is that nothing crosses a boundary: the bytes are
+	// handed straight over instead of going through `Port.Execute`.
+	//
+	// Bytes rather than a typed message because this package cannot know an app's
+	// types; the handler decodes with the generated `UnmarshalVT`, exactly as the
+	// engine side does.
+	Local map[uint32]func(request []byte) error
+
 	// Render maps a method id to its printer. A command with no entry is an
 	// ERROR at run time, not a silent no-op: forgetting to print a response is
 	// a bug, and it should not look like a command that succeeded quietly.
@@ -86,7 +106,11 @@ func (a App) build() (*ffcli.Command, error) {
 		if err != nil {
 			return nil, err
 		}
-		if live != nil && !live[cmd.Method] {
+		// A HOST-LOCAL verb is never in the engine's registry, so the live surface
+		// has nothing to say about it — asking would mark `gen` and `build`
+		// permanently unavailable, which is exactly what happened the first time
+		// this ran.
+		if live != nil && !cmd.Local && !live[cmd.Method] {
 			sub = unavailable(cmd, sub)
 		}
 		subs = append(subs, sub)
@@ -176,9 +200,28 @@ func unavailable(cmd clispec.Command, sub *ffcli.Command) *ffcli.Command {
 }
 
 func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
-	renderer, ok := a.Render[cmd.Method]
-	if !ok {
-		return nil, fmt.Errorf("command %q (method %d) has no renderer registered", cmd.Name, cmd.Method)
+	// A host-local verb never reaches the engine, so it owes no renderer and
+	// takes no request — but it does owe a handler, and a declared command that
+	// silently does nothing is worse than a build error (the same stance the
+	// missing-renderer check takes).
+	var local func([]byte) error
+	if cmd.Local {
+		var ok bool
+		local, ok = a.Local[cmd.Method]
+		if !ok {
+			return nil, fmt.Errorf("command %q (method %d) is host-local but no handler is registered", cmd.Name, cmd.Method)
+		}
+	}
+
+	// A host-local verb owes no renderer: it prints its own progress as it drives
+	// the toolchain, and there is no response message to format.
+	var renderer Renderer
+	if !cmd.Local {
+		var ok bool
+		renderer, ok = a.Render[cmd.Method]
+		if !ok {
+			return nil, fmt.Errorf("command %q (method %d) has no renderer registered", cmd.Name, cmd.Method)
+		}
 	}
 
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
@@ -195,13 +238,21 @@ func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
 			values[f.Name] = append(values[f.Name], s)
 			return nil
 		}
-		fs.Func(f.Name, usageFor(f), collect)
+		// A BOOLEAN IS A SWITCH, not a field you have to answer. `--no-open`
+		// means true; requiring `--no-open true` is the kind of ceremony nobody
+		// should have to type, and it is what this did before. `--no-open=false`
+		// still works, because BoolFunc keeps the explicit form.
+		register := fs.Func
+		if f.Kind == clispec.KindBool {
+			register = fs.BoolFunc
+		}
+		register(f.Name, usageFor(f), collect)
 		if f.Short != "" {
 			// Registered as a second name on the same target. stdlib flag has no
 			// separate short/long concept — which is the point: it accepts
 			// `-title` as well as `--title`, where pflag would read that as a
 			// cluster of shorthands (Spike 4, case 3).
-			fs.Func(f.Short, usageFor(f)+" (short for --"+f.Name+")", collect)
+			register(f.Short, usageFor(f)+" (short for --"+f.Name+")", collect)
 		}
 	}
 
@@ -214,12 +265,12 @@ func (a App) subcommand(cmd clispec.Command) (*ffcli.Command, error) {
 			if err := assignPositionals(cmd, rest, values); err != nil {
 				return err
 			}
-			return a.exec(cmd, values, renderer)
+			return a.exec(cmd, values, renderer, local)
 		},
 	}, nil
 }
 
-func (a App) exec(cmd clispec.Command, values map[string][]string, render Renderer) error {
+func (a App) exec(cmd clispec.Command, values map[string][]string, render Renderer, local func([]byte) error) error {
 	// Defaults first, so Fill and the user both override them.
 	for _, f := range cmd.Flags {
 		if f.Default != "" && len(values[f.Name]) == 0 {
@@ -251,6 +302,13 @@ func (a App) exec(cmd clispec.Command, values map[string][]string, render Render
 	request, err := encodeRequest(cmd, values, a.Stdin)
 	if err != nil {
 		return err
+	}
+
+	// A HOST-LOCAL verb stops here: same parsing, same encoding, no boundary
+	// (Decision 30). Everything above this line is shared with engine commands,
+	// which is the point — one grammar, one help text, one place defaults live.
+	if local != nil {
+		return local(request)
 	}
 
 	result := a.Port.Execute(cmd.Method, request)
@@ -404,12 +462,23 @@ func (a App) permute(args []string) []string {
 	if cmd == nil {
 		return args // unknown command: let the root Exec say so
 	}
+	// HOST-LOCAL VERBS ARE NOT EXEMPT. They were, briefly, on the grounds that
+	// they parsed their own argv — which stopped being true when their flags moved
+	// into the .proto. `dlc build web --entry x` failed with "unexpected argument"
+	// until this exemption came out: the reason for it had gone, but the code had
+	// not.
 
+	// Known flags, and which of them take a value. A BOOLEAN TAKES NONE, so
+	// permuting must not drag the following token along with it — `--no-open web`
+	// would otherwise move the tier into the flag list and leave no positional.
 	known := map[string]bool{}
+	takesValue := map[string]bool{}
 	for _, f := range cmd.Flags {
 		known[f.Name] = true
+		takesValue[f.Name] = f.Kind != clispec.KindBool
 		if f.Short != "" {
 			known[f.Short] = true
+			takesValue[f.Short] = f.Kind != clispec.KindBool
 		}
 	}
 
@@ -435,7 +504,7 @@ func (a App) permute(args []string) []string {
 				flags = append(flags, t)
 				continue
 			}
-			if known[bare] && i+1 < len(tail) {
+			if known[bare] && takesValue[bare] && i+1 < len(tail) {
 				flags = append(flags, t, tail[i+1])
 				i++
 				continue

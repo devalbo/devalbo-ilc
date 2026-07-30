@@ -9,15 +9,15 @@ can second-guess them.
 
 | Part | Front end | State today |
 | --- | --- | --- |
-| 1–6 | **terminal** | ✅ works, start to finish |
-| 7 | **browser** | ✅ works, start to finish |
-| 8 | front ends agree | ✅ works |
-| 9 | **badge** (RP2350 / RP2040) | ⚠️ **blocked** — three framework gaps, listed in the order they must be fixed |
+| 1–5 | **terminal** | ✅ works, start to finish |
+| 6 | **browser** | ✅ works, start to finish |
+| 7 | front ends agree | ✅ works |
+| 8 | **badge** (RP2350 / RP2040) | ⚠️ **blocked** — three framework gaps, listed in the order they must be fixed |
 
-Part 9 is honest rather than aspirational. If you want a badge running tic-tac-toe today you cannot have one;
+Part 8 is honest rather than aspirational. If you want a badge running tic-tac-toe today you cannot have one;
 what you can have is a precise account of what stands in the way.
 
-> **A reference implementation already exists** at `example-apps/tictactoe/`. This tutorial builds the same
+> **A reference implementation already exists** at `$ILC/example-apps/tictactoe/`. This tutorial builds the same
 > app under a different name so nothing is overwritten, and you can diff against it when stuck. If you would
 > rather read than type, read that instead.
 
@@ -25,64 +25,48 @@ what you can have is a precise account of what stands in the way.
 
 ## 0. Before you start
 
-You need the repository and [`devbox`](https://www.jetify.com/devbox). Everything else is pinned.
+**You need `dlc` installed** — [do that first](./INSTALL-DLC-STEPS.md), it takes about ten minutes and you
+never repeat it. From here on this tutorial assumes:
+
+- `dlc --help` works from any directory
+- you know the path to your `devalbo-ilc` checkout (call it `$ILC` below), because unpublished packages mean a
+  new project points at it
 
 ```bash
-cd /path/to/devalbo-ilc
-devbox shell          # first run downloads a toolchain; be patient
+export ILC=/path/to/devalbo-ilc
 ```
 
-That shell gives you Go, TinyGo, buf, Node, wasmtime and the codegen plugins. **Every command below assumes
-you are in it.** If you would rather not keep a shell open, prefix each with `devbox run --`.
+Everything else you need arrives with the project: `dlc new` writes a `devbox.json`, so each app provisions
+its own pinned toolchain.
 
-Two rules that will save you time:
-
-- **`dlc` embeds its templates.** After changing anything under `templates/`, rebuild `dlc` — otherwise you
-  scaffold from the old copy. This caught me while writing this tutorial.
-- **Never `go build ./cmd/x` without `-o`.** Go drops the binary in the current directory, named after the
-  package folder. Use `-o "$(mktemp -d)/x"`.
+**One habit worth adopting now:** work inside the project's `devbox shell`. Codegen needs plugins that live
+there, and the commands below assume it.
 
 ---
 
-## 1. Build the `dlc` tool
+## 1. Scaffold the project
 
-`dlc` is the framework's CLI — and an ILC app itself, which is why it is built exactly like the one you are
-about to write.
-
-```bash
-BIN="$(mktemp -d)"
-go build -buildvcs=false -o "$BIN/dlc" ./hosts/native
-export PATH="$BIN:$PATH"
-dlc --help
-```
-
-You should see `echo`, `export-fs`, `import-fs`, `new`, `reset-fs`, `version`.
-
----
-
-## 2. Scaffold the project
+Anywhere you keep projects — this does not have to live inside the framework checkout:
 
 ```bash
-cd example-apps
+cd ~/projects
 dlc new ttt --tiers native --tiers web \
-  --module github.com/devalbo/devalbo-ilc/example-apps/ttt \
-  --platform-path ../..
+  --module github.com/you/ttt \
+  --platform-path "$ILC"
 ```
 
-Three things about that command, each of which cost a failed attempt while writing this:
+Two things about that command, each of which cost a failed attempt while writing this:
 
 - **`--tiers` is repeatable, not comma-separated.** `--tiers native,web` fails with
   `tier "native,web" is not supported yet`.
-- **Flags may go before or after the name.** Both orders work. (They did not always — the parser used to stop
-  at the first non-flag argument, so the order the help text advertised was the one that failed.)
-- **`--platform-path` is relative to the NEW PROJECT**, because it is written into its `dlc.toml` verbatim.
-  From `example-apps/`, `../..` is right: the project lands two levels below the repo root. An absolute path
-  works from anywhere.
+- **`--platform-path` is written into the project verbatim**, so an absolute path (`$ILC`) is the safe form.
+  A relative one has to be relative to the *new project*, not to your shell.
 
 Now generate and check:
 
 ```bash
 cd ttt
+devbox shell                        # the project ships its own
 make gen && go mod tidy && make verify
 ```
 
@@ -117,7 +101,7 @@ tier with no directory fails the build.
 
 ---
 
-## 3. Declare the game in proto
+## 2. Declare the game in proto
 
 The command surface **is** the schema: flags, help text, positionals and enum menus are all generated from
 `.proto`. Designing the game means writing this file.
@@ -219,7 +203,7 @@ find a winner itself". Keep it.
 
 ---
 
-## 4. Write the rules
+## 3. Write the rules
 
 This is the whole app. Replace the scaffolded `greet` handler in `engine/commands.go` with:
 
@@ -231,8 +215,8 @@ import (
 
 	"github.com/devalbo/dlc-platform"
 
-	"github.com/devalbo/devalbo-ilc/example-apps/ttt/gen/go/dlcconfig"
-	tttv1 "github.com/devalbo/devalbo-ilc/example-apps/ttt/gen/go/ttt/v1"
+	"github.com/you/ttt/gen/go/dlcconfig"
+	tttv1 "github.com/you/ttt/gen/go/ttt/v1"
 )
 
 const gameFile = "game.json"
@@ -381,72 +365,154 @@ invariant the whole architecture exists to protect.
 
 ---
 
-## 5. Play it in the terminal
+## 4. Play it in the terminal
 
 The generated surface already knows your three commands. What it needs is a **renderer** — the one
-hand-written part of a command, because how a board should *look* is a presentation decision and belongs to
+hand-written part of a command, because how a board should *look* is presentation, and presentation belongs to
 the front end.
 
-Put the projection in its own file so a test can call it without a terminal:
+### 4a. The projection
+
+New file, `hosts/native/projection.go`:
 
 ```go
-// hosts/native/projection.go
 package main
 
 import (
+	"fmt"
 	"strings"
 
-	tttv1 "github.com/devalbo/devalbo-ilc/example-apps/ttt/gen/go/ttt/v1"
+	tttv1 "github.com/you/ttt/gen/go/ttt/v1"
 )
 
-// Projection renders a board as text. A FRONT END RENDERS: it reads `outcome`,
-// `turn` and `winning_line`, and never works any of them out.
+// Projection is what this front end is showing, as text.
+//
+// EXPORTED because it is the front end's contract, not a detail: §7 feeds the
+// same state to this and to the browser and compares the two. A test that
+// scraped stdout instead would be asserting about padding.
+//
+// THIS FILE DECIDES NOTHING. It prints the outcome because the engine computed
+// it, and highlights the winning line because the engine named it.
 func Projection(s *tttv1.GameState) string {
-	glyph := func(m tttv1.Mark) string {
-		switch m {
-		case tttv1.Mark_MARK_X:
-			return "X"
-		case tttv1.Mark_MARK_O:
-			return "O"
-		}
-		return " "
+	if s == nil {
+		return "(no game)\n"
 	}
+	won := map[uint32]bool{}
+	for _, i := range s.GetWinningLine() {
+		won[i] = true
+	}
+
 	var b strings.Builder
 	for row := 0; row < 3; row++ {
+		cells := make([]string, 3)
 		for col := 0; col < 3; col++ {
-			if col > 0 {
-				b.WriteString("|")
-			}
-			b.WriteString(" " + glyph(s.Board[row*3+col]) + " ")
+			i := uint32(row*3 + col)
+			cells[col] = cell(s, i, won[i])
 		}
-		b.WriteString("\n")
+		// Each cell is padded to three characters, so a row is exactly as wide
+		// as the separator below it. Get this wrong and §7 will tell you.
+		b.WriteString(strings.Join(cells, "|") + "\n")
 		if row < 2 {
 			b.WriteString("---+---+---\n")
 		}
 	}
-	switch s.Outcome {
-	case tttv1.Outcome_OUTCOME_WINNER_X:
-		b.WriteString("winner: X\n")
-	case tttv1.Outcome_OUTCOME_WINNER_O:
-		b.WriteString("winner: O\n")
-	case tttv1.Outcome_OUTCOME_DRAW:
-		b.WriteString("a draw\n")
-	default:
-		b.WriteString("turn: " + glyph(s.Turn) + "\n")
-	}
+	b.WriteString(status(s))
 	return b.String()
+}
+
+// cell draws one square. An empty square shows its NUMBER, because a player
+// typing `play 5` needs to know which 5 that is — pure presentation, and exactly
+// the sort of thing a front end is for.
+func cell(s *tttv1.GameState, i uint32, winning bool) string {
+	sym := symbol(s.GetBoard()[i])
+	if sym == "" {
+		return fmt.Sprintf(" %d ", i+1)
+	}
+	if winning {
+		return "[" + sym + "]" // the line the ENGINE named
+	}
+	return " " + sym + " "
+}
+
+// status is a SWITCH OVER ONE ENGINE-COMPUTED VALUE, not an interpretation of
+// several. This is what `Outcome` being a single enum buys: no "winner set? else
+// draw? else in progress" for each front end to get subtly different.
+func status(s *tttv1.GameState) string {
+	switch s.GetOutcome() {
+	case tttv1.Outcome_OUTCOME_WINNER_X:
+		return "X wins\n"
+	case tttv1.Outcome_OUTCOME_WINNER_O:
+		return "O wins\n"
+	case tttv1.Outcome_OUTCOME_DRAW:
+		return "a draw\n"
+	default:
+		return symbol(s.GetTurn()) + " to play\n"
+	}
+}
+
+func symbol(m tttv1.Mark) string {
+	switch m {
+	case tttv1.Mark_MARK_X:
+		return "X"
+	case tttv1.Mark_MARK_O:
+		return "O"
+	}
+	return ""
 }
 ```
 
-Then in `hosts/native/main.go`, follow the shape of the scaffolded `greet` entry: the `Render` map goes from a
-generated method id to a function that decodes that response and writes to the output. Add three entries —
-`MethodGetState`, `MethodPlay`, `MethodNewGame` — each decoding its response and printing
-`Projection(r.GetState())`.
+### 4b. Wire it into the command line
 
-**If you forget one**, you will get `command "play" (method 10001) has no renderer registered` — deliberately
-an error rather than silence, because a command that prints nothing looks like one that succeeded quietly.
+`hosts/native/main.go` came scaffolded and **will not compile right now** — it references `MethodGreet` and
+`AppServiceCLI`, and you deleted both in §2. Two edits fix it.
 
-Now play:
+**First**, in the `Commands:` line, point at your service:
+
+```go
+Commands: append(append([]clispec.Command{}, tttv1.GameServiceCLI...), ilcv1.PlatformServiceCLI...),
+```
+
+**Second**, in the `Render:` map, replace the single `MethodGreet` entry with three — one per command, all
+printing the same projection:
+
+```go
+		Render: map[uint32]cli.Renderer{
+			tttv1.MethodGetState: render(func(out io.Writer, r *tttv1.GetStateResponse) error {
+				_, err := io.WriteString(out, Projection(r.GetState()))
+				return err
+			}),
+			tttv1.MethodPlay: render(func(out io.Writer, r *tttv1.PlayResponse) error {
+				_, err := io.WriteString(out, Projection(r.GetState()))
+				return err
+			}),
+			tttv1.MethodNewGame: render(func(out io.Writer, r *tttv1.NewGameResponse) error {
+				_, err := io.WriteString(out, Projection(r.GetState()))
+				return err
+			}),
+
+			// LEAVE THE FOUR BELOW ALONE. version / export-fs / import-fs /
+			// reset-fs are inherited verbs you did not write and did not ask
+			// for — every ILC app has them, so every ILC app renders them.
+			ilcv1.MethodVersion: /* … as scaffolded … */
+```
+
+**Leave the rest of the file exactly as it is.** In particular:
+
+- **`platform.Boot(...)`** at the top grants the filesystem root before anything can touch it — the native
+  equivalent of the WASI preopen a browser installs before instantiating. It is why your game lands in
+  `./.ttt/` and why the inherited `reset-fs` can only ever clear that subtree.
+- **the `render[T, PT]` generic helper** at the bottom adapts a typed printer to the byte-level `Renderer`, so
+  each printer says what it prints and nothing about decoding. Generics, not reflection — the same reason the
+  engine's typed handlers work under TinyGo.
+- **the four platform renderers.** Delete one and you get
+  `command "version" (method 1) has no renderer registered` — deliberately an error rather than silence,
+  because a command that prints nothing looks like one that succeeded quietly.
+
+Notice what is *not* in that file: no `switch args[0]`, no usage string, no flag declarations. Which
+subcommands exist, what flags they take, which are required, what the help says — all generated from
+`commands.proto`.
+
+### 4c. Play
 
 ```bash
 make build
@@ -454,6 +520,15 @@ make build
 ./ttt play 5
 ./ttt play 1
 ./ttt state
+```
+
+```
+ 1 | 2 | 3
+---+---+---
+ 4 | X | 6
+---+---+---
+ 7 | 8 | 9
+O to play
 ```
 
 Then try the refusals. They come from the engine, not the front end:
@@ -469,13 +544,12 @@ And read what it wrote — the file is meant to be legible:
 cat .ttt/game.json
 ```
 
-**Where did `.ttt/` come from?** The host *grants* the engine a filesystem root, and the convention is
-`./.<app>/`. The engine never chooses; it writes `game.json` and lands wherever the host said. That is also
-why the inherited `reset-fs` can only ever clear this app's own subtree.
+**Where did `.ttt/` come from?** The host *granted* it. The engine never chooses a location; it writes
+`game.json` and lands wherever the host said.
 
 ---
 
-## 6. Test the rules, then break the test
+## 5. Test the rules, then break the test
 
 The rules are the risky part, and they need no front end at all:
 
@@ -488,8 +562,8 @@ import (
 
 	"github.com/devalbo/dlc-platform"
 
-	_ "github.com/devalbo/devalbo-ilc/example-apps/ttt/engine" // registers the commands
-	tttv1 "github.com/devalbo/devalbo-ilc/example-apps/ttt/gen/go/ttt/v1"
+	_ "github.com/you/ttt/engine" // registers the commands
+	tttv1 "github.com/you/ttt/gen/go/ttt/v1"
 )
 
 // Commands are tested THROUGH the registry — the same path every front end uses —
@@ -538,28 +612,249 @@ That habit is the house style: **a check nobody has watched fail is indistinguis
 
 ---
 
-## 7. Play it in the browser
+## 6. Play it in the browser
 
 The same engine, compiled to WebAssembly, running in a worker with its filesystem bound to the browser's
-origin-private filesystem.
+origin-private filesystem. **Nothing in `engine/` changes.**
+
+### 6a. The markup
+
+In `hosts/web/index.html`, replace the scaffolded `<input>`, `<button>` and `<pre>` with a board, a status line
+and a new-game button:
+
+```html
+      <div id="game"></div>
+      <p id="status" data-testid="status"></p>
+      <button id="new-game" data-testid="new-game">new game</button>
+```
+
+### 6b. The view
+
+Replace `hosts/web/src/view.ts` entirely:
+
+```ts
+// ttt — web tier slot.
+//
+// A DOM grid of nine buttons. The terminal draws ASCII from the SAME state and
+// shares no markup, no layout and no code with this — only the schema.
+//
+// THIS FILE DECIDES NOTHING. It disables a square because the engine filled it,
+// highlights a line because the engine named it, and says who won because
+// `outcome` says so. Break the engine's win detection and BOTH front ends go
+// wrong identically — which is the proof that presentation carries no logic.
+import type { EnginePort } from "@devalbo/dlc-web/port";
+
+import { StateChangedEventTopic } from "@gen/ttt/v1/commands.events.pb";
+import {
+  GetStateRequest,
+  GetStateResponse,
+  Mark,
+  Outcome,
+  NewGameRequest,
+  PlayRequest,
+  StateChangedEvent,
+  type GameState,
+} from "@gen/ttt/v1/commands.pb";
+import {
+  MethodGetState,
+  MethodNewGame,
+  MethodPlay,
+} from "@gen/ttt/v1/commands.registry.pb";
+
+export type GameView = {
+  play(square: number): Promise<void>;
+  newGame(): Promise<void>;
+  /** Re-read from the engine. Cold start calls this; events do the rest. */
+  refresh(): Promise<void>;
+  /** What this front end is showing, as text — compared against the terminal in §7. */
+  projection(): string;
+  unmount(): Promise<void>;
+};
+
+export function mountGame(
+  port: EnginePort,
+  root: HTMLElement = document.getElementById("game")!,
+  statusEl: HTMLElement = document.getElementById("status")!,
+): GameView {
+  let state: GameState | null = null;
+
+  const cells: HTMLButtonElement[] = [];
+  const grid = document.createElement("div");
+  grid.className = "ttt-grid";
+  grid.dataset.testid = "board";
+  for (let i = 0; i < 9; i++) {
+    const b = document.createElement("button");
+    b.dataset.testid = `square-${i + 1}`;
+    b.className = "ttt-cell";
+    b.addEventListener("click", () => void play(i + 1));
+    cells.push(b);
+    grid.append(b);
+  }
+  root.append(grid);
+
+  function draw() {
+    if (!state) return;
+    const board = state.board ?? [];
+    const won = new Set(state.winningLine ?? []);
+    board.forEach((m, i) => {
+      const b = cells[i];
+      b.textContent = symbol(m) ?? String(i + 1);
+      // Disabled because the engine FILLED it or ENDED the game — not because
+      // this file worked out that the move would be illegal.
+      b.disabled = m !== Mark.UNSPECIFIED || isOver(state!);
+      b.classList.toggle("won", won.has(i));
+    });
+    statusEl.textContent = status(state);
+  }
+
+  async function refresh(): Promise<void> {
+    // COLD START: events are ephemeral, so a front end that rendered only from
+    // the stream shows an empty board on reload. Prime with a query.
+    const r = await port.execute(MethodGetState, GetStateRequest.toBinary({}));
+    if (!r.success) return;
+    state = GetStateResponse.fromBinary(r.output).state ?? null;
+    draw();
+  }
+
+  async function play(square: number): Promise<void> {
+    const r = await port.execute(MethodPlay, PlayRequest.toBinary({ square }));
+    if (!r.success) {
+      // The engine's refusal, shown verbatim. This file has no idea why the move
+      // was illegal and does not need one.
+      statusEl.textContent = r.error ?? "(refused)";
+      return;
+    }
+    // NO redraw here. The engine emits `game.state-changed` and the subscription
+    // below renders it — so if events stop working the board visibly freezes
+    // rather than the capability rotting unnoticed.
+  }
+
+  async function newGame(): Promise<void> {
+    await port.execute(MethodNewGame, NewGameRequest.toBinary({}));
+  }
+
+  const unsubscribing = port.subscribe((topic, payload) => {
+    if (topic !== StateChangedEventTopic) return;
+    // The whole state arrives in the payload. Rendered, never written back from:
+    // a stale render is fixed by the next event, a write-back would make the
+    // event a second source of truth.
+    state = StateChangedEvent.fromBinary(payload).state ?? null;
+    draw();
+  });
+
+  return {
+    play,
+    newGame,
+    refresh,
+    projection: () => projectionOf(state),
+    async unmount() {
+      (await unsubscribing)();
+    },
+  };
+}
+
+/**
+ * The text projection — written to match the terminal's output EXACTLY, because
+ * §7 compares them. What must agree is the semantics, not the pixels.
+ */
+export function projectionOf(s: GameState | null): string {
+  if (!s) return "(no game)\n";
+  const board = s.board ?? [];
+  const won = new Set(s.winningLine ?? []);
+  const lines: string[] = [];
+  for (let row = 0; row < 3; row++) {
+    const cells: string[] = [];
+    for (let col = 0; col < 3; col++) {
+      const i = row * 3 + col;
+      const sym = symbol(board[i]);
+      if (!sym) cells.push(` ${i + 1} `);
+      else if (won.has(i)) cells.push(`[${sym}]`);
+      else cells.push(` ${sym} `);
+    }
+    lines.push(cells.join("|"));
+    if (row < 2) lines.push("---+---+---");
+  }
+  return lines.join("\n") + "\n" + status(s);
+}
+
+function symbol(m: Mark | undefined): string | null {
+  if (m === Mark.X) return "X";
+  if (m === Mark.O) return "O";
+  return null;
+}
+
+function isOver(s: GameState): boolean {
+  // One value, one comparison — what a single `Outcome` enum buys.
+  return (s.outcome ?? Outcome.UNSPECIFIED) !== Outcome.IN_PROGRESS;
+}
+
+function status(s: GameState): string {
+  switch (s.outcome) {
+    case Outcome.WINNER_X:
+      return "X wins\n";
+    case Outcome.WINNER_O:
+      return "O wins\n";
+    case Outcome.DRAW:
+      return "a draw\n";
+    default:
+      return `${symbol(s.turn) ?? "nobody"} to play\n`;
+  }
+}
+
+/** Styling, shipped with the front end. */
+export function gameStyles(): string {
+  return `
+.ttt-grid { display: grid; grid-template-columns: repeat(3, 3rem); gap: 2px; }
+.ttt-cell { height: 3rem; font: 700 1.25rem ui-monospace, Menlo, monospace; cursor: pointer; }
+.ttt-cell:disabled { cursor: default; }
+.ttt-cell.won { outline: 2px solid currentColor; }
+`.trim();
+}
+```
+
+### 6c. The entry point
+
+Replace `hosts/web/src/main.ts`:
+
+```ts
+import { enginePort } from "@devalbo/dlc-web/port";
+
+import { gameStyles, mountGame } from "./view";
+import type { GameView } from "./view";
+
+document.head.appendChild(document.createElement("style")).textContent = gameStyles();
+
+const game = mountGame(enginePort);
+
+document.getElementById("new-game")!.addEventListener("click", () => {
+  void game.newGame();
+});
+
+// COLD START — prime with a query; events do the rest. Delete this line and the
+// board is blank until you click, which is the most common way a new front end
+// is subtly wrong.
+void game.refresh();
+
+declare global {
+  interface Window {
+    game: GameView;
+  }
+}
+window.game = game;
+```
+
+**`window.game` is not a debug back door** — it is the same functions the buttons call. A console API that
+took a different path would be a second front end able to disagree with the first.
+
+### 6d. Run it
 
 ```bash
 make build-web        # TinyGo -> wasip2 component -> jco transpile
-make dev-web          # serves the page
+make dev-web          # serves the page; open the URL it prints
 ```
 
-The scaffolded page drives `greet`. To drive the game, edit `hosts/web/src/view.ts`. It takes an `EnginePort`
-and exports a `projection()` — which is what lets it be tested with no engine at all. Three jobs:
-
-1. **Prime with `state` on load.** Events are ephemeral, so a page that renders only from the stream is blank
-   after a refresh. This is the single most common way a new front end is subtly wrong.
-2. **Send `play` on a click**, encoding a `PlayRequest` with the generated `toBinary`.
-3. **Repaint on `game.state-changed`**, decoding the event's `GameState`.
-
-Messages come from `@gen/ttt/v1/commands.pb` and the method ids from `@gen/ttt/v1/commands.registry.pb`.
-Neither is hand-written — if you find yourself typing `10001`, stop.
-
-Then run the browser tests:
+Click squares. Then **refresh the page** — the game is still there, because `game.json` is in OPFS. Then run
+the browser tests the scaffold shipped:
 
 ```bash
 cd hosts/web && npx playwright test
@@ -568,20 +863,20 @@ cd hosts/web && npx playwright test
 ### What just happened
 
 The browser ran **the same engine source** as your terminal. Not a port, not a reimplementation: the Go in
-`engine/` compiled to a wasm component, with `game.json` in OPFS. Refresh the page and the game is still
-there.
+`engine/` compiled to a wasm component, with its filesystem bound to OPFS.
 
-The two front ends share **no** presentation code. One prints ASCII, one builds DOM. Both read `outcome`,
-`turn` and `winning_line`; neither computes them.
+The two front ends share **no** presentation code — one prints ASCII, one builds DOM. Both read `outcome`,
+`turn` and `winningLine`; neither computes them. And notice the one thing `play` does *not* do in either: it
+never redraws. Both wait for `game.state-changed`, so a broken event path is visible rather than silent.
 
 ---
 
-## 8. Prove the front ends agree
+## 7. Prove the front ends agree
 
 Two independent renderers will eventually disagree, and the disagreement will show up on one tier only, with
 every other check green. So compare them directly: feed both the *same* synthetic states and check their
 normalized output matches. The reference implementation does this in
-`example-apps/tictactoe/hosts/native/projection_test.go` and `hosts/web/test/parity.spec.ts`.
+`$ILC/example-apps/tictactoe/hosts/native/projection_test.go` and its `hosts/web/test/parity.spec.ts`.
 
 **Then write the probe that gives this app its point.** Hand both front ends a state whose `board` has three
 in a row while `outcome` is `IN_PROGRESS` — something the engine would never send. **Neither may announce a
@@ -593,7 +888,7 @@ mis-indented rows relative to their separators, and disagreed about it.
 
 ---
 
-## 9. The badge — what stands in the way
+## 8. The badge — what stands in the way
 
 **You cannot follow this part yet**, and not because the design is unsettled. Three specific pieces of
 framework are missing. Here they are in the order they must be fixed, so you can judge the distance.
@@ -638,14 +933,14 @@ The full design — which tier to build first and why, and the falsification for
 | Symptom | Cause |
 | --- | --- |
 | `tier "native,web" is not supported yet` | `--tiers` is repeatable, not comma-separated |
-| `unexpected argument "--module"` | old `dlc` binary; rebuild it (§1) |
-| `protoc-gen-es-lite: executable file not found` | you are outside `devbox shell`, or in a scaffold made by an old `dlc` |
+| `unexpected argument "--module"` | an old `dlc`; rebuild it per the [install tutorial](./INSTALL-DLC-STEPS.md) §6 |
+| `protoc-gen-es-lite: executable file not found` | you are outside the project's `devbox shell` |
 | `[tiers.x] root "hosts/x" does not exist` | a declared tier needs its slot directory. Create it or remove the entry |
 | `unknown method_id 1` at run time | the engine package was never imported, so its `init` never ran — the host needs the blank import |
 | `command "…" has no renderer registered` | you added an rpc but no `Render` entry. A new rpc *is* a new subcommand |
 | the id lock fails the build | you changed a `method_id`. If deliberate: `DLC_ID_LOCK_UPDATE=1 make gen`, then review the diff |
-| blank board after a browser refresh | the page renders only from events. Prime with `state` on load (§7) |
-| template edits have no effect | `dlc` embeds templates — rebuild it |
+| blank board after a browser refresh | the page renders only from events. Prime with `state` on load (§6) |
+| template edits have no effect | `dlc` embeds its templates — rebuild it ([install](./INSTALL-DLC-STEPS.md) §6) |
 
 ---
 
@@ -655,5 +950,5 @@ The full design — which tier to build first and why, and the falsification for
   §5 verification.
 - [`DEVALBO-ILC-GO-PLAN.md`](../DEVALBO-ILC-GO-PLAN.md) §6.4 and Decisions 34–35 — the three ways an app can
   put something on a screen, and why this one used the cheapest.
-- [`example-apps/notes/`](../../example-apps/notes/) — the same framework with a *collection* of records
+- [`$ILC/example-apps/notes/`](../../example-apps/notes/) — the same framework with a *collection* of records
   instead of one document.

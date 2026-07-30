@@ -998,6 +998,78 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
 
   **Mostly a review, partly automatable** — and worth being honest about which: "does `dlc` use capability X" is a judgement call, but a few pieces are greppable invariants (a `dlc.toml` exists; no `switch args[0]` under `hosts/`; every tier directory matches a declared slot). Add those as checks so the manual pass shrinks over time rather than growing.
 
+- [x] **`dlc` moved out of the app band into 9000–9999** (2026-07-29) — reversing Decision 29's "claims no
+      privileged block", with the original reasoning kept and marked rather than edited away.
+
+      **The safety argument was always sound and still is:** `dlc` and a scaffolded app never share a registry,
+      so collision was impossible either way. **What moved is legibility** — `10000` meant "some app's first
+      command, *or* dlc's `New`", and neither `method-ids.lock` nor a wire trace distinguished them. 10000+ is
+      now the app's alone.
+
+      **What made the block affordable, and it is the more interesting finding:** 600–9999 was reserved for
+      capability verbs, and **capabilities turned out not to be command-shaped.** Events is an import
+      (Decision 33), a shared render is a pulled *app* command (Decision 35), network is `wasi:http` — none
+      consume method ids. Blocks 200–599 are empty and **seven framework ids exist in total**, so 9,400
+      reserved ids were over-provisioned by three orders of magnitude. The band structure was designed when
+      capabilities were expected to arrive as commands; three later decisions moved them off the command
+      surface entirely. The realistic future claimants are more *inherited* verbs (§7.3's file verbs at 103+),
+      which already have a home.
+
+      New layout: **1–599** inherited verbs · **600–8999** future capability verbs · **9000–9099** dlc
+      engine-served · **9100–9999** dlc host-local · **10000+** the app. This also retires the ad-hoc `10100+`
+      band invented a day earlier purely to avoid colliding with dlc's own 10000/10001 inside one surface.
+
+      **`TestMethodIDsRespectRanges` rewritten** to police four bands instead of two, with every boundary
+      quoted from `engine.DlcMethodBase` / `engine.DlcHostLocalBase` / `platform.AppMethodBase` and never
+      retyped — the failure mode that test's own comment records. Falsified both new edges. Updated:
+      `AGENTS.md` §1, the plan's §8 table and Decision 29's paragraph, `DLC-COMMANDS.md`, and the id lock and
+      parity vectors were regenerated (8 vectors pinned the old ids).
+- [x] **`dlc run <tier>`, and the toolchain verbs' flags moved into the schema** (2026-07-29) — `run` claims
+      10102 (the id lock refused the dropped reservation until re-blessed, which is the guard working).
+      `native` builds then execs, forwarding args (`dlc run native list`); `web` resolves the same defaults
+      `build web` does, npm-installs, opens a browser, serves. **Every other tier refuses by name** — `dlc`
+      can exec a binary and serve a directory, not flash a board — and `run web` refuses stray program args
+      rather than dropping them.
+
+      **`BuildRequest`/`RunRequest` declare their flags**, so parsing, help, defaults and required-ness are
+      generated; the hand-rolled flag loops are gone. `out`/`web_out` deliberately carry **no** schema default,
+      because precedence is built-in → `dlc.toml` → flag and the host must distinguish "not given" from
+      "given" — a declared default would make every invocation look explicit and silently clobber the manifest.
+
+      **DX fix in the same pass: a boolean is a switch.** `--no-open`, not `--no-open true`. Bools now register
+      via `flag.BoolFunc`, and the argv permutation stopped assuming every known flag consumes the next token
+      (`--no-open web` would have eaten the tier). One existing test asserted the old ceremony and was updated
+      rather than preserved.
+
+      **The web surface omits host-local verbs entirely** rather than marking them: a browser cannot spawn a
+      toolchain, and a listed command that cannot run is worse than an absent one.
+
+      **Falsification caught a weak test, again.** The first two bool tests stayed green with the permute guard
+      removed — a swallowed token still ended up trailing where the positional parser found it. Only
+      `--force myapp --title x` (a flag *after* the positional) exposes it. Same lesson as the tier-landscape
+      tautology earlier: the assertion has to be able to fail.
+
+      **Left alone:** ffcli renders the switch as `-no-open=...` in help. Cosmetic, comes from ffcli's usage
+      formatter rather than the schema, and worth a separate look.
+- [x] **The toolchain verbs are declared in proto, and `dlc --help` finally lists them** (2026-07-29) —
+      `proto/devalbo/dlc/v1/toolchain.proto` + a new `host_local` method option (50012). **The bug:** `gen` and
+      `build` were a hand-written `map[string]func` consulted *before* the CLI ran, so they never appeared in
+      `dlc --help` — the two commands every tutorial tells you to run were missing from the tool's own command
+      list, and a reader would fairly conclude they did not exist. There was no single place listing the
+      surface at all; it was split across `--help`, two id locks, a Go map, and Decision 30.
+      **Now:** name/summary/help come from the schema like everything else, the generator emits **no dispatch
+      map** for a service with no engine-served rpc (so an engine cannot serve one by accident), and the runner
+      refuses a declared local verb with no handler — the same stance as a missing renderer.
+      **Ids here are not wire ids** and are excluded from `method-ids.lock`; reservations still lock, because
+      the lock is also the record of "this number is claimed". Band: **10100+**.
+      **Two bugs found by running it**, both fixed: host-local verbs were marked `(unavailable on this host)`
+      because the live-surface check asked the engine about commands it will never register; and the generated
+      summary was cut mid-clause because only an rpc comment's first line becomes the summary.
+      Falsified three ways — no handler → build error naming the command; drop the live-surface guard → both
+      verbs go unavailable; and `ToolchainServiceHandlers` exists nowhere in the generated output.
+      Documented in [`DLC-COMMANDS.md`](./DLC-COMMANDS.md). Follow-up: move these verbs' flags into the
+      `.proto` so their parsing is generated too — today they still parse their own argv, which is why the
+      `Local` handler takes `[]string`.
 - [ ] `dlc` command surface: **tier-scoped** `dlc build <tier>` / `dlc run <tier>` / `dlc verify [<tier>] [--parity]` (Decision 27 — tiers are composition recipes, not forks), plus `dlc proto`, `dlc host add <tier>` (§16.7). Supersedes the bootstrap `make build-host` / `build-engine` / `verify-parity` for scaffolded apps
 - [ ] **Project manifest** `dlc.toml` (§16.8) — capabilities/tiers/storage/ui/launch/platform pin; drives build/verify/host-add/launch
 - [ ] Regenerate / upgrade (re-apply templates against a newer `platform` pin)

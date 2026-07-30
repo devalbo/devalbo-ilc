@@ -12,6 +12,8 @@ package main
 // stranded on a stale world.
 
 import (
+	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
+
 	"fmt"
 	"io/fs"
 	"os"
@@ -28,31 +30,21 @@ import (
 // Precedence: built-in defaults, then dlc.toml's [tiers.<tier>], then flags.
 // The manifest is what the project DECLARES; flags are one-off overrides. Either
 // alone should work, and neither should require editing the other.
-func runBuild(args []string) error {
-	tier := "web"
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		tier, args = args[0], args[1:]
+func runBuild(request []byte) error {
+	// Parsed by the generated surface from toolchain.proto — no hand-rolled flag
+	// loop, no usage string, and `--help` comes from the field comments. The
+	// positional default ("web") and `--entry`'s default are declared there too.
+	var req dlcv1.BuildRequest
+	if err := req.UnmarshalVT(request); err != nil {
+		return fmt.Errorf("build: %w", err)
 	}
+	tier := req.GetTier()
 
-	// Flags first into their own vars, so the manifest cannot clobber an
-	// explicit override.
-	var outFlag, webOutFlag string
-	entry := "./cmd/engine-component"
-	for i := 0; i < len(args); i++ {
-		if i+1 >= len(args) {
-			return fmt.Errorf("build: %s needs a value", args[i])
-		}
-		switch args[i] {
-		case "--out":
-			outFlag, i = args[i+1], i+1
-		case "--web-out":
-			webOutFlag, i = args[i+1], i+1
-		case "--entry":
-			entry, i = args[i+1], i+1
-		default:
-			return fmt.Errorf("build: unknown flag %q", args[i])
-		}
-	}
+	// STILL SEPARATE VARIABLES, because the precedence below depends on knowing
+	// whether the user said anything: out/web_out carry no schema default, so an
+	// empty string means "not given" and the manifest gets its turn.
+	outFlag, webOutFlag := req.GetOut(), req.GetWebOut()
+	entry := req.GetEntry()
 
 	// The manifest decides which tiers exist. Building one the project does not
 	// declare is worth naming — otherwise `dlc build web` in a CLI-only project

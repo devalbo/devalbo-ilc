@@ -103,7 +103,10 @@ func TestEncodesByFieldNumber(t *testing.T) {
 	port := &fakePort{}
 	app, _, errOut := testApp(t, cmd, port, "")
 
-	if code := app.Run([]string{"go", "-title", "hello", "-count", "42", "-on", "true"}); code != 0 {
+	// `-on` is a SWITCH: no value. This test used to pass `-on true`, which was the
+	// ceremony the bool handling removed — the assertion below is unchanged, so it
+	// is the interface that improved rather than the expectation that moved.
+	if code := app.Run([]string{"go", "-title", "hello", "-count", "42", "-on"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	if port.method != methodTest {
@@ -707,5 +710,99 @@ func TestUnknownFlagStillFails(t *testing.T) {
 
 	if code := app.Run([]string{"go", "myapp", "--nope", "x"}); code == 0 {
 		t.Fatalf("unknown flag accepted; stderr: %s", errOut.String())
+	}
+}
+
+// --- booleans are switches, not questions ----------------------------------
+
+func switchCmd() clispec.Command {
+	return clispec.Command{
+		Name: "go", Method: methodTest,
+		Flags: []clispec.Flag{
+			{Name: "name", Field: 1, Kind: clispec.KindString, Positional: 1},
+			{Name: "force", Field: 2, Kind: clispec.KindBool},
+			// A third flag AFTER the positional is what makes the permutation
+			// observable — see TestSwitchBeforePositionalWithTrailingFlag.
+			{Name: "title", Field: 3, Kind: clispec.KindString},
+		},
+	}
+}
+
+// `--force` means true. Requiring `--force true` was ceremony nobody should have
+// to type, and it is what this did before.
+func TestBoolFlagNeedsNoValue(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, switchCmd(), port, "")
+
+	if code := app.Run([]string{"go", "myapp", "--force"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q, want myapp", s)
+	}
+	if _, n, ok := field(t, port.request, 2); !ok || n != 1 {
+		t.Errorf("bool field: %d (present=%v), want 1", n, ok)
+	}
+}
+
+// A SWITCH BEFORE A POSITIONAL must not eat it. The permutation moves known flags
+// ahead of positionals and used to assume every flag consumes the next token —
+// which would have moved `myapp` into the flag list and left nothing behind.
+func TestBoolFlagDoesNotSwallowThePositional(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, switchCmd(), port, "")
+
+	if code := app.Run([]string{"go", "--force", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q, want myapp", s)
+	}
+	if _, n, ok := field(t, port.request, 2); !ok || n != 1 {
+		t.Errorf("bool field: %d, want 1", n)
+	}
+}
+
+// The explicit form survives, because `--force=false` is how you override a
+// default that is true.
+func TestBoolFlagAcceptsExplicitValue(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, switchCmd(), port, "")
+
+	if code := app.Run([]string{"go", "--force=false", "myapp"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	// Explicitly false is still ABSENT on the wire: proto3 cannot tell a false
+	// from an unset field, and sending zeros for every unset flag is what makes a
+	// partial update blank things it never mentioned.
+	if _, n, ok := field(t, port.request, 2); ok && n != 0 {
+		t.Errorf("bool field: %d, want absent or 0", n)
+	}
+}
+
+// THE CASE THAT ACTUALLY EXERCISES THE PERMUTATION, and the one the first two
+// tests missed.
+//
+// `go --force myapp --title x`: if permuting treats `--force` as taking a value it
+// drags `myapp` into the flag section, and stdlib flag then stops at that
+// non-flag token — leaving `myapp --title x` as three positionals for a command
+// that declares one. The earlier tests stayed green with the guard removed,
+// because a swallowed token still ended up trailing where the positional parser
+// could find it. This one does not.
+func TestSwitchBeforePositionalWithTrailingFlag(t *testing.T) {
+	port := &fakePort{}
+	app, _, errOut := testApp(t, switchCmd(), port, "")
+
+	if code := app.Run([]string{"go", "--force", "myapp", "--title", "x"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if s, _, ok := field(t, port.request, 1); !ok || s != "myapp" {
+		t.Errorf("positional: %q, want myapp", s)
+	}
+	if _, n, ok := field(t, port.request, 2); !ok || n != 1 {
+		t.Errorf("switch: %d, want 1", n)
+	}
+	if s, _, ok := field(t, port.request, 3); !ok || s != "x" {
+		t.Errorf("trailing flag: %q, want x", s)
 	}
 }
