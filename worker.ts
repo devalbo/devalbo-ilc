@@ -19,6 +19,7 @@ import * as Comlink from "comlink";
 // the engine calls into — ES modules are singletons per graph — so installing a
 // forwarder here is what makes the engine's events reachable.
 import { setForwarder } from "./events";
+import { publishStoreChanged, receiveStoreChanged } from "./crosstab";
 import {
   _getFileDataTree,
   _setFileData,
@@ -34,6 +35,7 @@ import {
   flushTreeToOPFS,
   listOPFS,
   loadTreeFromOPFS,
+  treeFingerprint,
   type FileDataEntry,
 } from "./opfs";
 
@@ -76,6 +78,39 @@ let listener: Listener | null = null;
  * command that writes without emitting would slip past it.
  */
 let flushListener: (() => void) | null = null;
+
+/**
+ * The main thread's EXTERNAL-CHANGE listener, installed by `onExternalChange`.
+ *
+ * Separate from `subscribe` on purpose, and it is not a naming preference. An
+ * app that re-reads on an engine event is reading ITS OWN tree, which is correct
+ * for its own writes and wrong for another tab's: this engine's snapshot does
+ * not contain them and cannot be made to. Folding foreign events into
+ * `subscribe` would turn every existing "re-list on change" handler into a
+ * confident render of stale data.
+ */
+let externalListener: (() => void) | null = null;
+
+/**
+ * Set once another tab writes, and never cleared.
+ *
+ * This engine is now behind a store it shares, and it cannot catch up: the
+ * component captured its preopen at instantiation (see `clearStorage`). Staying
+ * usable would mean mirroring a stale whole-tree snapshot back over OPFS on the
+ * next command, and that mirror PRUNES — the other tab's work would be deleted
+ * by a tab that merely listed something. So the engine stops here and the page
+ * reloads to get a fresh one.
+ */
+let stale = false;
+
+// Another tab wrote. Refusing further commands is the entire safety mechanism —
+// see `stale` above.
+receiveStoreChanged(() => {
+  stale = true;
+  if (externalListener) {
+    void Promise.resolve(externalListener()).catch(() => {});
+  }
+});
 
 // Non-null only while a command is on the engine's stack — see `execute`.
 let duringCommand: Array<[string, Uint8Array]> | null = null;
@@ -139,14 +174,37 @@ async function boot(): Promise<EngineModule> {
     throw new Error(`engine rejected the environment manifest: ${res.error ?? "unknown"}`);
   }
 
+  // Seed the digest from what was hydrated, so the first command only counts as
+  // a write if it actually changed something.
+  flushed = treeFingerprint(_getFileDataTree() as FileDataEntry);
+
   engine = mod;
   return engine;
 }
 
-/** Persist whatever the engine wrote back into OPFS. */
-async function flush(): Promise<void> {
+/**
+ * The digest of the tree as last persisted. Set at boot from what was hydrated,
+ * so a command that changes nothing matches immediately.
+ */
+let flushed: string | null = null;
+
+/**
+ * Persist whatever the engine wrote back into OPFS. Reports whether it wrote.
+ *
+ * A command that changed nothing does not flush, and this is not merely an
+ * optimisation. Every flush rewrites the whole tree and — since tabs can hear
+ * each other — tells every other tab their store moved. Without this, opening a
+ * second tab invalidated the first one by listing, because `refresh()` on load
+ * is an `execute` like any other. A read must not invalidate anybody.
+ */
+async function flush(): Promise<boolean> {
   // Live tree, not JSON.stringify — see _getFileDataTree in the vendored shim.
-  await flushTreeToOPFS(_getFileDataTree() as FileDataEntry);
+  const tree = _getFileDataTree() as FileDataEntry;
+  const digest = treeFingerprint(tree);
+  if (digest === flushed) return false;
+  await flushTreeToOPFS(tree);
+  flushed = digest;
+  return true;
 }
 
 const api = {
@@ -161,6 +219,18 @@ const api = {
    * can report a write.
    */
   async execute(method: number, request: Uint8Array): Promise<CommandResult> {
+    // REFUSED, not "best effort". A read would answer from a snapshot that is
+    // missing another tab's writes, and any command at all would flush that
+    // snapshot back and prune them off the disk. An error the caller can show is
+    // strictly better than either.
+    if (stale) {
+      return {
+        success: false,
+        output: new Uint8Array(),
+        error:
+          "this tab is out of date — another tab changed the store; reload to continue",
+      };
+    }
     const mod = await boot();
     // Collect this command's events instead of forwarding them as they fire.
     // The engine emits mid-command, BEFORE the flush below has persisted
@@ -182,12 +252,17 @@ const api = {
     }
     const events = duringCommand;
     duringCommand = null;
-    await flush();
+    const wrote = await flush();
     // Flush signal first: a watcher told "the filesystem moved" must find it
     // moved, and the same ordering argument applies here as to events below.
-    if (flushListener) {
+    if (wrote && flushListener) {
       void Promise.resolve(flushListener()).catch(() => {});
     }
+    // Other tabs, on the WRITE rather than on an event — the store moved, and
+    // whether a handler chose to announce it is beside the point. Broadcast
+    // after it is durable, so a tab that reloads on hearing this finds what it
+    // was told about.
+    if (wrote) publishStoreChanged();
     for (const [topic, payload] of events) deliver(topic, payload);
     return {
       success: r.success === true,
@@ -285,6 +360,18 @@ const api = {
    */
   async subscribe(fn: Listener): Promise<void> {
     listener = fn;
+  },
+
+  /**
+   * Hear that ANOTHER TAB changed the store. One listener, like `subscribe`.
+   *
+   * By the time this fires the engine here has already stopped accepting
+   * commands, so a page has one useful response: reload. That is not a
+   * limitation of the notification — it is what "the engine cannot be rebound to
+   * a new filesystem root" means from the outside.
+   */
+  async onExternalChange(fn: () => void): Promise<void> {
+    externalListener = fn;
   },
 };
 
