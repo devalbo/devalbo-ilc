@@ -8,7 +8,7 @@ import (
 	fmt "fmt"
 	protobuf_go_lite "github.com/aperturerobotics/protobuf-go-lite"
 	json "github.com/aperturerobotics/protobuf-go-lite/json"
-	_ "github.com/devalbo/dlc-platform/gen/go/devalbo/options/v1"
+	_ "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/options/v1"
 	io "io"
 	slices "slices"
 	strconv "strconv"

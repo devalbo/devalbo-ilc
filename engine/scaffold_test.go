@@ -123,6 +123,31 @@ func TestWebDependencyPrefersTheGitRef(t *testing.T) {
 	}
 }
 
+// Both halves of the platform dependency pin a RELEASE when no checkout was
+// named, and both fall back to the local tree when one was. They are separate
+// mechanisms — a git ref for npm, a module version for Go — and the only thing
+// keeping them in step is that they are set together.
+func TestGoDependencyPrefersTheReleasedVersion(t *testing.T) {
+	noPath := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Tiers: []string{"native", "web"}})
+	if got := noPath["PlatformGoVersion"]; got != PlatformGoVersion {
+		t.Errorf("with no --platform-path: got %q, want the released %q", got, PlatformGoVersion)
+	}
+	// And NO replace directive: one would override the pinned version with a
+	// path that does not exist on the user's machine, which is how a scaffold
+	// ends up requiring a version it never fetches.
+	if got := noPath["PlatformReplace"]; got != "" {
+		t.Errorf("with no --platform-path a replace was emitted anyway:\n%s", got)
+	}
+
+	local := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", PlatformPath: "/opt/ilc", Tiers: []string{"native", "web"}})
+	if got := local["PlatformGoVersion"]; got != "v0.0.0" {
+		t.Errorf("with --platform-path: got %q, want v0.0.0 (the replace resolves it)", got)
+	}
+	if got := local["PlatformReplace"]; !strings.Contains(got, "replace github.com/devalbo/devalbo-ilc/dlc-platform => /opt/ilc/dlc-platform") {
+		t.Errorf("with --platform-path, no usable replace:\n%s", got)
+	}
+}
+
 // The dictionary is the contract between the COMMAND and templates/: every token
 // a template may use comes from a NewRequest field or a derivation of one. Pin
 // the set, so adding a request field without wiring it (or vice versa) is loud.
@@ -131,7 +156,7 @@ func TestScaffoldVarsDictionary(t *testing.T) {
 	want := []string{
 		"ProjectName", "ProjectVersion", "Module", "PkgName",
 		"PlatformPath", "PlatformPathFrontend", "PlatformReplace",
-		"PlatformWebDep", "TierSections",
+		"PlatformWebDep", "PlatformGoVersion", "TierSections",
 	}
 	if len(vars) != len(want) {
 		t.Errorf("dictionary has %d keys, want %d: %v", len(vars), len(want), vars)

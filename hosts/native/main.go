@@ -19,8 +19,8 @@ package main
 import (
 	"os"
 
-	"github.com/devalbo/dlc-platform"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 

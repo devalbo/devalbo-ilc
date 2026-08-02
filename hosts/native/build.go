@@ -22,7 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/devalbo/dlc-platform/wit"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/wit"
 )
 
 // runBuild implements `dlc build <tier> [--out dir] [--web-out dir] [--entry pkg]`.

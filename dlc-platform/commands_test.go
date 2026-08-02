@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 func inTempRoot(t *testing.T) string {

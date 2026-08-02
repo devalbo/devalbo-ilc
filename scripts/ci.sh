@@ -124,6 +124,11 @@ if [ "$TIER" = "all" ]; then
 	# `run` gives it OUR toolchain to build dlc with; the scrub-and-re-enter for
 	# the SCAFFOLD's devbox.json happens inside the script, after that.
 	step "scaffold's own environment" run ./scripts/verify-scaffold-env.sh
+	# Also network-bound, and for a related reason: every other check passes
+	# --platform-path, which resolves the platform from this tree and never asks
+	# a remote anything. This is the only check that consults the pinned ref, so
+	# it is the only one that notices a bumped constant with no pushed tag.
+	step "the pinned platform ref resolves" run ./scripts/verify-platform-ref.sh
 fi
 
 echo

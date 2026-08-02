@@ -7,7 +7,7 @@
 package terminalstdout
 
 import (
-	terminaloutput "github.com/devalbo/dlc-platform/gen/go/wasi/cli/terminal-output"
+	terminaloutput "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/cli/terminal-output"
 	"go.bytecodealliance.org/cm"
 )
 

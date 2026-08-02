@@ -4,8 +4,8 @@
 package streams
 
 import (
-	ioerror "github.com/devalbo/dlc-platform/gen/go/wasi/io/error"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/poll"
+	ioerror "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/error"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/poll"
 	"go.bytecodealliance.org/cm"
 )
 

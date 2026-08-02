@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	platform "github.com/devalbo/dlc-platform"
+	platform "github.com/devalbo/devalbo-ilc/dlc-platform"
 )
 
 // inTempRoot grants a filesystem root the way a host does, in a throwaway

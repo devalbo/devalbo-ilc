@@ -23,7 +23,7 @@ package platform
 import (
 	"errors"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // env is the manifest in force, or nil when no host has sent one.

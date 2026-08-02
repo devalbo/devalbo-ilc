@@ -61,10 +61,23 @@ cd frontend && npm test                    # ✅ its own shipped browser test
 make dev-web                               # ✅ dlc in the browser (React UI, OPFS)
 ```
 
-> **`--platform-path` is temporary.** A scaffolded app depends on the ILC platform as a Go module (and an
-> npm package), but neither is published yet — so `dlc new` writes a `replace` directive and a `file:`
-> dependency pointing at your local checkout. Both are clearly marked in the generated project and go away
-> when the packages are released.
+> **`--platform-path` is half-retired.** A scaffolded app depends on the ILC platform twice — as a Go
+> module and as an npm package — and the two halves are now distributed differently:
+>
+> | | How a scaffold resolves it | Needs `--platform-path`? |
+> | --- | --- | --- |
+> | **`@devalbo/dlc-web`** (npm) | ✅ a **git ref** — `github:devalbo/devalbo-ilc#dlc-web-v0.1.0` | **no.** The flag still overrides it with a `file:` dependency, which is what this repo's own checks use |
+> | **`dlc-platform`** (Go) | a `replace` directive pointing at your checkout | **yes**, still |
+>
+> **Neither package goes to a registry.** npm cannot install from a subdirectory of a git repo — the
+> `#fragment` is a committish, not a path — so `dlc-platform/web` is released as a branch whose *root* is the
+> package, via the `git subtree split` in [`scripts/release-dlc-web.sh`](scripts/release-dlc-web.sh). That
+> the pinned ref resolves **and is complete** is checked nightly by `make verify-platform-ref`: every other
+> check passes `--platform-path`, so none of them would notice a bumped constant with no pushed tag.
+>
+> **The Go half is now fetchable too** — its module path was renamed to match the directory it lives in
+> (`github.com/devalbo/devalbo-ilc/dlc-platform`), which is what Go requires of a module inside a repo. What
+> is left is a tag and a pinned version in the template; until then the scaffold still writes a `replace`.
 
 > **Scaffolding is offline; building the result is not.** `dlc new` needs no network — the templates are
 > compiled into the binary, and nothing is ever cloned at runtime (§16.6). But the *generated project* is a
@@ -188,14 +201,14 @@ identical tree through the CLI.
 
 The honest gaps, in the order they matter:
 
-1. 🚧 **The Go module still needs `--platform-path`; the npm package no longer does.**
-   `@devalbo/dlc-web` is consumable as a git ref (see the quick start). `dlc-platform` is not, and the
-   blocker is structural rather than missing work: its module path is `github.com/devalbo/dlc-platform`,
-   but it lives in a subdirectory of `github.com/devalbo/devalbo-ilc`, and Go resolves a module path to its
-   own repo. Two ways out, both real decisions — **move it to that repo** (import paths never change, which
-   is what its go.mod already promises) or **rename the path** to `…/devalbo-ilc/dlc-platform` and tag
-   `dlc-platform/vX.Y.Z` (one repo, but every app's module graph then contains the tool's repo, which
-   `verify-scaffold.sh` currently asserts against).
+1. 🚧 **The Go module still needs `--platform-path`, but only until it is tagged.** The structural blocker
+   is gone. It used to declare `module github.com/devalbo/dlc-platform` — a repo that does not exist — and
+   Go resolves a module path to its own repo, so it could never be fetched at all. It is now
+   `github.com/devalbo/devalbo-ilc/dlc-platform`, matching the directory it lives in, which Go fetches from
+   a `dlc-platform/vX.Y.Z` tag. Remaining: cut that tag, then pin the version in the template the way
+   `PlatformWebRef` pins the npm side. **Splitting the platform into its own repo is no longer a
+   prerequisite for anyone outside using it** — it stays available as an independence decision, worth taking
+   when the platform has a consumer that is not `dlc`.
 2. 📋 **Desktop, embedded, and the remaining capabilities** (sync) are designed and
    unbuilt — see the tasks doc. **The index landed** (`docs/INDEX-PLAN.md`) after being re-scoped away from
    SQLite: `ORDER BY` was the only argument for SQL, and moving the sort into Go makes the index a

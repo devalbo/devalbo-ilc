@@ -13,7 +13,7 @@
 // string substitution rather than text/template (reflection-heavy under TinyGo).
 package engine
 
-import "github.com/devalbo/dlc-platform"
+import "github.com/devalbo/devalbo-ilc/dlc-platform"
 
 // Result is the dispatch envelope. Aliased from the platform so hosts keep
 // importing one package (this one) while the type is owned where the registry

@@ -4,8 +4,8 @@
 package udpcreatesocket
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/wasi/sockets/network"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/sockets/udp"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/sockets/network"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/sockets/udp"
 	"go.bytecodealliance.org/cm"
 )
 

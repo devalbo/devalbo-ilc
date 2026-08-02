@@ -21,11 +21,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/cli"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
-	"github.com/devalbo/dlc-platform"
-	"github.com/devalbo/dlc-platform/cli"
-	"github.com/devalbo/dlc-platform/clispec"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // app builds dlc's command line. Every dependency is an argument so the whole

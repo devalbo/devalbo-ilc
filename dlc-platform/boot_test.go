@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // bootIn runs Boot against a fresh temp directory with a clean registry.

@@ -18,7 +18,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 
 	"github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/dlcconfig"
 	tictactoev1 "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/tictactoe/v1"

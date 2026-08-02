@@ -75,16 +75,28 @@ step "go mod tidy"
 # above runs `dlc gen`, and `dlc build web` supplies the WIT world). What it must
 # not need is the dlc MODULE. Those are different claims and only the second is
 # being made here.
-step "the module graph contains dlc-platform and not devalbo-ilc"
+#
+# THE MATCH IS EXACT, and that stopped being a detail when the platform moved to
+# `github.com/devalbo/devalbo-ilc/dlc-platform` (2026-08-02). A substring test
+# for "devalbo-ilc" now matches the platform itself, so the sloppy version of
+# this check fails on a perfectly good scaffold — and the lazy fix, dropping the
+# check, would retire the only thing enforcing the extraction. `go list -m all`
+# prints "<path> <version>" per line, so the module path is the first field and
+# comparing it is exact by construction.
+step "the module graph contains dlc-platform and not the dlc module"
 graph="$( cd "$PROJ" && go list -m all 2>/dev/null )" || fail "go list -m all"
-case "$graph" in
-	*github.com/devalbo/dlc-platform*) ;;
-	*) fail "the scaffold does not depend on dlc-platform at all" ;;
-esac
-case "$graph" in
-	*github.com/devalbo/devalbo-ilc*)
-		fail "the scaffold still depends on the dlc module: $(printf '%s' "$graph" | grep devalbo-ilc | tr '\n' ' ')" ;;
-esac
+
+# Written to a file rather than piped: `grep -q` exits at the first match and
+# SIGPIPEs the writer, which under `pipefail` reports a SUCCESSFUL match as a
+# failed pipeline. lint-scripts.sh knows about this one because it already
+# reached CI once.
+printf '%s\n' "$graph" | awk '{print $1}' > "$WORK/module-paths"
+if ! grep -qx 'github.com/devalbo/devalbo-ilc/dlc-platform' "$WORK/module-paths"; then
+	fail "the scaffold does not depend on dlc-platform at all"
+fi
+if grep -qx 'github.com/devalbo/devalbo-ilc' "$WORK/module-paths"; then
+	fail "the scaffold depends on the dlc MODULE, not just the platform that lives in its repo"
+fi
 
 # And it must BUILD with no network: a dependency that is only satisfiable by
 # fetching is one the module graph did not really contain.

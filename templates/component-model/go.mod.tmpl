@@ -6,7 +6,7 @@ go 1.23.0
 // containment, BFT bundles, and the inherited verbs (version, export-fs,
 // import-fs, reset-fs). Depend on it — never copy it in — so a fix upstream
 // reaches this app on a version bump.
-require github.com/devalbo/dlc-platform v0.0.0
+require github.com/devalbo/devalbo-ilc/dlc-platform {{.PlatformGoVersion}}
 
 require github.com/aperturerobotics/protobuf-go-lite v0.9.1
 

@@ -213,7 +213,7 @@ package engine
 import (
 	"errors"
 
-	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 
 	"github.com/you/ttt/gen/go/dlcconfig"
 	tttv1 "github.com/you/ttt/gen/go/ttt/v1"
@@ -560,7 +560,7 @@ package engine_test
 import (
 	"testing"
 
-	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 
 	_ "github.com/you/ttt/engine" // registers the commands
 	tttv1 "github.com/you/ttt/gen/go/ttt/v1"

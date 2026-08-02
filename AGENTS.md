@@ -70,8 +70,10 @@ containment is inherited rather than re-implemented per command.
 ## 3. The platform boundary
 
 `dlc-platform/` is what every app **inherits**; `engine/` is `dlc`'s own app code. It **is** a separate Go
-module — `github.com/devalbo/dlc-platform`, named for where it is going and resolved by `replace` until it
-gets there (§16.4). So:
+module — `github.com/devalbo/devalbo-ilc/dlc-platform`, whose path matches the directory it lives in, which
+is what makes it fetchable: Go resolves a module path to its own repo, so the earlier name
+(`github.com/devalbo/dlc-platform`, chosen for a repo it might one day move to) could never be `go get`-ed
+by anyone. Fetching uses Go's subdirectory rule — the tag is `dlc-platform/vX.Y.Z` (§16.4). So:
 
 **Templates depend on the platform; they never inline it.** Code copied into a scaffold is frozen there
 forever — a path-containment fix inlined into a template could never reach an already-generated app. The

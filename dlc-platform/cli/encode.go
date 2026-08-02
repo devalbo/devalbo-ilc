@@ -28,7 +28,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/devalbo/dlc-platform/clispec"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
 )
 
 // encodeRequest builds request bytes from parsed flag values.

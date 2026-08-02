@@ -4,7 +4,7 @@
 package monotonicclock
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/poll"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/poll"
 	"go.bytecodealliance.org/cm"
 )
 

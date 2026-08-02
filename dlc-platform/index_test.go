@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // --- registration (D3/D8: an APP fact, not a HOST fact) ---------------------

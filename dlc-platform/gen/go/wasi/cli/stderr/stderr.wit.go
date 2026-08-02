@@ -4,7 +4,7 @@
 package stderr
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/streams"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/streams"
 	"go.bytecodealliance.org/cm"
 )
 

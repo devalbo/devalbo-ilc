@@ -14,7 +14,7 @@ plugins:
   # go-lite ignores (it emits messages only). Also enforces the id lock — see
   # cmd/protoc-gen-dlc-registry. `go run` keeps it buildable from a fresh clone
   # with no install step; cwd here is proto/.
-  - local: ["go", "run", "github.com/devalbo/dlc-platform/cmd/protoc-gen-dlc-registry"]
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
     out: gen/go
     # strategy: all — buf's DEFAULT is `directory`, which invokes a plugin once
     # per directory. The id lock needs every service in ONE invocation, or each
@@ -27,7 +27,7 @@ plugins:
   # The same ids for the web tier. buf runs a plugin once per output directory,
   # so this is a second invocation with lang=ts rather than one emitting both.
   # No lock here — one writer is enough, and two would race on the same file.
-  - local: ["go", "run", "github.com/devalbo/dlc-platform/cmd/protoc-gen-dlc-registry"]
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
     out: gen/ts
     strategy: all
     opt:

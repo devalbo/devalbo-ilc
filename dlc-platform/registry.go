@@ -17,7 +17,7 @@ package platform
 import (
 	"strconv"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // Result is the host-neutral outcome of a command. The wasip2 entrypoint maps it

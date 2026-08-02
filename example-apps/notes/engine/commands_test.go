@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devalbo/dlc-platform"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/notes/engine" // registers commands
 	notesv1 "github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/notes/v1"

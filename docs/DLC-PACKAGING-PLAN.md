@@ -95,7 +95,7 @@ as the go-lite banner lesson: unpinned generators make T-B2.4 / T-B2.6 lie.
 The flake can ship `dlc` while apps still use `replace` + `file:` — that is an intermediate state
 (Phase 2). The install tutorial’s “do not delete the repository” warning only ends when:
 
-- `github.com/devalbo/dlc-platform` is a tagged, proxy-fetchable module (committed `gen/` travels with it);
+- `github.com/devalbo/devalbo-ilc/dlc-platform` is a tagged, proxy-fetchable module (committed `gen/` travels with it);
 - `@devalbo/dlc-web` is on npm (or an equivalent registry);
 - the template stops writing `PlatformPath` / `replace` / `file:` (tasks already sketch vendoring
   `options.proto` vs BSR — prefer vendoring; offline codegen stays).
@@ -134,7 +134,7 @@ the **same tag story**, even if `dlc-platform` lives in a nested path or a moved
 | --- | --- |
 | `make build-host` → `./dlc` from `./hosts/native` | Flake build target is known |
 | Templates `go:embed`’d into the engine / binary | Flake `src` must be the full repo (or a release tarball that includes `templates/`) |
-| `dlc-platform` path is already `github.com/devalbo/dlc-platform` but unpublished | `replace` / `--platform-path` remain until Phase 3 |
+| `dlc-platform` path is already `github.com/devalbo/devalbo-ilc/dlc-platform` but unpublished | `replace` / `--platform-path` remain until Phase 3 |
 | Scaffold `devbox.json` has no `dlc` | Phase 2 edits the template |
 | Install tutorial teaches global `~/.local/bin/dlc` | Remains valid as a fallback; becomes optional after Phase 2 |
 | Nixhub = Nixpkgs index | Phase 5 only |

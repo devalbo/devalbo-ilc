@@ -7,7 +7,7 @@
 package terminalstdin
 
 import (
-	terminalinput "github.com/devalbo/dlc-platform/gen/go/wasi/cli/terminal-input"
+	terminalinput "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/cli/terminal-input"
 	"go.bytecodealliance.org/cm"
 )
 

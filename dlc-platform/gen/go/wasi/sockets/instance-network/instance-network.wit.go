@@ -4,7 +4,7 @@
 package instancenetwork
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/wasi/sockets/network"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/sockets/network"
 	"go.bytecodealliance.org/cm"
 )
 

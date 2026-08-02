@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // version is app-supplied: the platform owns the *command*, the app owns the

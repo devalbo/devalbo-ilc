@@ -94,7 +94,7 @@ EOF
 // third dimension is load-bearing rather than decorative.
 package engine
 
-import "github.com/devalbo/dlc-platform"
+import "github.com/devalbo/devalbo-ilc/dlc-platform"
 
 func init() { platform.Emit("probe.tinygo-only", []byte("drift")) }
 EOF

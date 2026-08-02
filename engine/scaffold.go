@@ -16,8 +16,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 	"github.com/devalbo/devalbo-ilc/templates"
-	"github.com/devalbo/dlc-platform"
 )
 
 // Template file suffixes. Every file under templates/ carries exactly one, and

@@ -14,7 +14,7 @@ package platform
 import (
 	"go.bytecodealliance.org/cm"
 
-	"github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/events"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/events"
 )
 
 // emit calls the host's import.

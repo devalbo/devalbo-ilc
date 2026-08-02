@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 	notesv1 "github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/notes/v1"
-	"github.com/devalbo/dlc-platform"
 )
 
 // recordingPort captures the request without running anything.

@@ -27,10 +27,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 	"github.com/devalbo/devalbo-ilc/engine"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
-	"github.com/devalbo/dlc-platform"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // vector is one golden call across the boundary. Request is hex-encoded proto

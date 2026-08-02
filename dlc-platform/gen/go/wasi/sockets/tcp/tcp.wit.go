@@ -4,10 +4,10 @@
 package tcp
 
 import (
-	monotonicclock "github.com/devalbo/dlc-platform/gen/go/wasi/clocks/monotonic-clock"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/poll"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/streams"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/sockets/network"
+	monotonicclock "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/clocks/monotonic-clock"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/poll"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/streams"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/sockets/network"
 	"go.bytecodealliance.org/cm"
 )
 

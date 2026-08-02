@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devalbo/dlc-platform"
-	"github.com/devalbo/dlc-platform/index"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/index"
 
 	"github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/dlcconfig"
 

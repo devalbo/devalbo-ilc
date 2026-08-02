@@ -3,7 +3,7 @@
 package types
 
 import (
-	wallclock "github.com/devalbo/dlc-platform/gen/go/wasi/clocks/wall-clock"
+	wallclock "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/clocks/wall-clock"
 	"go.bytecodealliance.org/cm"
 	"unsafe"
 )

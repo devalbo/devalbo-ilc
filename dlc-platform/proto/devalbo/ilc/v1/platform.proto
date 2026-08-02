@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package devalbo.ilc.v1;
 
-option go_package = "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
 
 import "devalbo/options/v1/options.proto";
 

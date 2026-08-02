@@ -16,8 +16,8 @@
 package main
 
 import (
-	_ "github.com/devalbo/devalbo-ilc/engine" // registers dlc's commands
-	_ "github.com/devalbo/dlc-platform/wasm"  // wires the WIT exports
+	_ "github.com/devalbo/devalbo-ilc/dlc-platform/wasm" // wires the WIT exports
+	_ "github.com/devalbo/devalbo-ilc/engine"            // registers dlc's commands
 )
 
 func main() {}

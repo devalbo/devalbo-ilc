@@ -16,6 +16,6 @@ require (
 
 // The platform is a separate module (§16.4) that has not been published: it is
 // named for where it is going, and resolved from the tree until it gets there.
-require github.com/devalbo/dlc-platform v0.0.0
+require github.com/devalbo/devalbo-ilc/dlc-platform v0.0.0
 
-replace github.com/devalbo/dlc-platform => ./dlc-platform
+replace github.com/devalbo/devalbo-ilc/dlc-platform => ./dlc-platform

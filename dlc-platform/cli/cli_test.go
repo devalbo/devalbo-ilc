@@ -16,9 +16,9 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/devalbo/dlc-platform"
-	"github.com/devalbo/dlc-platform/clispec"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // fakePort records the request it was given and answers with canned bytes.

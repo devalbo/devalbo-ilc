@@ -10,7 +10,7 @@
 
 package ilcv1
 
-import "github.com/devalbo/dlc-platform/clispec"
+import "github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
 
 // PlatformServiceCLI is PlatformService as a command-line surface.
 var PlatformServiceCLI = []clispec.Command{

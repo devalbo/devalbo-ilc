@@ -72,6 +72,10 @@ verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, buil
 verify-npm-package: ## @devalbo/dlc-web ships what its `exports` advertise
 	@./scripts/verify-npm-package.sh
 
+.PHONY: verify-platform-ref
+verify-platform-ref: build-host ## the ref `dlc new` pins actually resolves (nightly; needs network)
+	@./scripts/verify-platform-ref.sh
+
 .PHONY: verify-scaffold-env
 verify-scaffold-env: build-host ## the scaffold generates in ITS OWN devbox, not ours (slow; needs network)
 	@./scripts/verify-scaffold-env.sh

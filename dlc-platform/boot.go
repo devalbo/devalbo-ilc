@@ -26,7 +26,7 @@ package platform
 import (
 	"errors"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // BootOptions is what a host knows and the engine does not.

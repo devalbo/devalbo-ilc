@@ -4,7 +4,7 @@
 package engine
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/types"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/types"
 )
 
 // CommandResult represents the type alias "devalbo:ilc/engine#command-result".

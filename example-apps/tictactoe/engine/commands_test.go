@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/engine"
 	tictactoev1 "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/tictactoe/v1"

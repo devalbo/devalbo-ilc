@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 	"github.com/devalbo/devalbo-ilc/engine"
-	"github.com/devalbo/dlc-platform"
 )
 
 // rpc Foo(FooRequest) returns (FooResponse) { option (…method_id) = N; }

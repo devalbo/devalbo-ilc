@@ -17,11 +17,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/cli"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 	"github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/dlcconfig"
-	"github.com/devalbo/dlc-platform"
-	"github.com/devalbo/dlc-platform/cli"
-	"github.com/devalbo/dlc-platform/clispec"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/engine" // registers the commands
 	tictactoev1 "github.com/devalbo/devalbo-ilc/example-apps/tictactoe/gen/go/tictactoe/v1"

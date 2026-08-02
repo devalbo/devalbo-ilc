@@ -11,9 +11,9 @@ import (
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 
-	"github.com/devalbo/dlc-platform"
-	"github.com/devalbo/dlc-platform/clispec"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // Renderer prints one response. Nil means the command prints nothing.

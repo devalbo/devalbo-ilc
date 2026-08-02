@@ -16,7 +16,7 @@
 //
 //	import (
 //		_ "myapp/engine"                                        // registers commands
-//		_ "github.com/devalbo/dlc-platform/wasm" // wires the exports
+//		_ "github.com/devalbo/devalbo-ilc/dlc-platform/wasm" // wires the exports
 //	)
 //
 //	func main() {}
@@ -26,9 +26,9 @@
 package wasm
 
 import (
-	"github.com/devalbo/dlc-platform"
-	wit "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/engine"
-	"github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/types"
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	wit "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/engine"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/types"
 	"go.bytecodealliance.org/cm"
 )
 

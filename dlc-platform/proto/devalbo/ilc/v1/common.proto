@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package devalbo.ilc.v1;
 
-option go_package = "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
 
 // Standardized error taxonomy (the wire mirror of the WIT capability-error).
 // See docs/DEVALBO-ILC-GO-PLAN.md "Error taxonomy" + §7.2.

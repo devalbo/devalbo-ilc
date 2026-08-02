@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	platform "github.com/devalbo/dlc-platform"
+	platform "github.com/devalbo/devalbo-ilc/dlc-platform"
 )
 
 // Pair is one stored projection: an app-defined key and opaque bytes.

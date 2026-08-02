@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 	"github.com/devalbo/devalbo-ilc/engine"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 	"github.com/devalbo/devalbo-ilc/templates"
-	"github.com/devalbo/dlc-platform"
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // call marshals a request, dispatches on method_id, and fails on an error result.

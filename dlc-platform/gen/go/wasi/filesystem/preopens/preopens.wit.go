@@ -4,7 +4,7 @@
 package preopens
 
 import (
-	"github.com/devalbo/dlc-platform/gen/go/wasi/filesystem/types"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/filesystem/types"
 	"go.bytecodealliance.org/cm"
 )
 

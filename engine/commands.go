@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
 	dlcv1 "github.com/devalbo/devalbo-ilc/gen/go/devalbo/dlc/v1"
 	"github.com/devalbo/devalbo-ilc/templates"
-	"github.com/devalbo/dlc-platform"
 )
 
 // dlc's version, HARDCODED — and the one dogfood gap that is a real constraint
@@ -301,8 +301,12 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 		// What the web tier's package.json actually depends on. A LOCAL CHECKOUT
 		// when one was named, a GIT REF otherwise — npm reads both, and the second
 		// is what lets a scaffolded app build with no copy of this repo on disk.
-		"PlatformWebDep":  platformWebDep(webSlot, req.PlatformPath),
-		"PlatformReplace": platformReplace(req.PlatformPath),
+		"PlatformWebDep": platformWebDep(webSlot, req.PlatformPath),
+		// The version in the require line. A local checkout pins v0.0.0 and lets
+		// the `replace` decide what that means; without one, the app requires a
+		// real released version and fetches it.
+		"PlatformGoVersion": platformGoVersion(req.PlatformPath),
+		"PlatformReplace":   platformReplace(req.PlatformPath),
 		// The manifest must describe what was actually emitted — a [tiers.web]
 		// section in a project with no frontend/ would be a lie the build would
 		// later trip over.
@@ -325,6 +329,19 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 // loud but names the wrong problem.
 const PlatformWebRef = "github:devalbo/devalbo-ilc#dlc-web-v0.1.0"
 
+// PlatformGoVersion is the platform module version a scaffolded app requires
+// when no local checkout was named — the Go counterpart of PlatformWebRef.
+//
+// Fetched by Go's SUBDIRECTORY RULE: the module lives at `dlc-platform/` inside
+// this repo, so its tag carries that prefix (`dlc-platform/v0.1.0`) while the
+// version an app records is plain `v0.1.0`. That rule is why the module could be
+// renamed into the repo rather than needing one of its own.
+//
+// Bump it in the same commit as the tag. A version with no tag behind it fails
+// at `go mod download` for someone who has never seen this repo, and passes
+// every check inside it — verify-platform-ref.sh exists for exactly that gap.
+const PlatformGoVersion = "v0.1.0"
+
 // platformWebDep chooses between a local checkout and the published ref.
 //
 // The local path wins when given, because that is what development against an
@@ -335,6 +352,18 @@ func platformWebDep(subdir, path string) string {
 		return PlatformWebRef
 	}
 	return "file:" + platformPathFrom(subdir, path) + "/dlc-platform/web"
+}
+
+// platformGoVersion picks the version the scaffold's go.mod requires.
+//
+// v0.0.0 with a local checkout, because the `replace` is what resolves it and a
+// real version there would be a number nothing reads — the classic way a go.mod
+// ends up claiming a dependency it does not have.
+func platformGoVersion(path string) string {
+	if path == "" {
+		return PlatformGoVersion
+	}
+	return "v0.0.0"
 }
 
 // platformPathFrom re-bases a project-root-relative platform path for a file in
@@ -391,17 +420,21 @@ func identifier(app string) string {
 // it the day the module is tagged. Without a path we emit the instructions
 // rather than a broken build with no explanation.
 func platformReplace(path string) string {
-	const why = "// BOOTSTRAP: dlc-platform is not published yet. This `replace` points at the\n" +
-		"// platform inside a local devalbo-ilc checkout; delete it once the module is\n" +
-		"// tagged and `go get github.com/devalbo/dlc-platform` resolves on its own.\n"
+	// NO REPLACE when no local checkout was named: the module is fetched from its
+	// tag like any other dependency, which is the whole point of the rename. A
+	// `replace` here would override the pinned version with a path that does not
+	// exist on the user's machine.
 	if path == "" {
-		return why + "// replace github.com/devalbo/dlc-platform => /path/to/devalbo-ilc/dlc-platform\n" +
-			"//\n// ^ uncomment and set the path, or re-run `dlc new` with --platform-path."
+		return ""
 	}
+	const why = "// DEVELOPMENT: this `replace` points at the platform inside a local\n" +
+		"// devalbo-ilc checkout, because --platform-path was given. Delete it to use\n" +
+		"// the released version instead — `go get github.com/devalbo/devalbo-ilc/dlc-platform`\n" +
+		"// resolves on its own.\n"
 	// PlatformPath names the devalbo-ilc checkout; the module is the platform
 	// directory inside it (§16.4). A scaffolded app depends on the PLATFORM and
 	// not on dlc — dlc is the tool that generated it, not something it links.
-	return why + "replace github.com/devalbo/dlc-platform => " + path + "/dlc-platform"
+	return why + "replace github.com/devalbo/devalbo-ilc/dlc-platform => " + path + "/dlc-platform"
 }
 
 // scaffold renders the template tree and writes it. One implementation, reached

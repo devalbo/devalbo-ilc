@@ -10,9 +10,9 @@ package main
 import (
 	"strconv"
 
-	asyncengine "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/async-engine"
-	hostdelay "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/host-delay"
-	"github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/types"
+	asyncengine "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/async-engine"
+	hostdelay "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/host-delay"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/types"
 	"go.bytecodealliance.org/cm"
 )
 

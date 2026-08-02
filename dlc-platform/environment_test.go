@@ -5,7 +5,7 @@ package platform
 import (
 	"testing"
 
-	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
 // cleanEnv isolates a test from the package-level manifest and registry. Both

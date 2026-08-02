@@ -104,12 +104,25 @@ test("scaffolds into OPFS and survives a reload", async ({ page }) => {
     return file.text();
   });
   expect(goMod).toContain("module github.com/you/myapp");
-  // No --platform-path in the browser, so the replace directive comes through
-  // commented, with instructions rather than a broken build.
-  // A scaffolded app depends on the PLATFORM, never on dlc (§16.4) — dlc is the
-  // tool that generated it, not something it links.
-  expect(goMod).toContain("// replace github.com/devalbo/dlc-platform =>");
-  expect(goMod).not.toContain("require github.com/devalbo/devalbo-ilc");
+  // There is no --platform-path in a browser, and there no longer needs to be:
+  // the scaffold requires a RELEASED platform version and fetches it. This used
+  // to assert a commented-out `replace` with instructions, which was the best
+  // available answer while the module path named a repo that did not exist.
+  expect(goMod).toMatch(
+    /^require\s+github\.com\/devalbo\/devalbo-ilc\/dlc-platform\s+v\d+\.\d+\.\d+/m,
+  );
+  // …and no replace at all: one would override the pinned version with a path
+  // that does not exist on the machine running the app.
+  expect(goMod).not.toMatch(/^replace\s+github\.com\/devalbo\/devalbo-ilc\/dlc-platform/m);
+  // A scaffolded app depends on the PLATFORM, never on the dlc MODULE (§16.4) —
+  // dlc is the tool that generated it, not something it links.
+  //
+  // Matched on a whole LINE, because the platform now lives inside dlc's repo
+  // and its path contains dlc's. A `not.toContain("require …/devalbo-ilc")`
+  // would fail on the platform's own require line, and "fix" it by deleting the
+  // only assertion that keeps the two apart.
+  const requiresDlcModule = /^require\s+github\.com\/devalbo\/devalbo-ilc(\s|$)/m.test(goMod);
+  expect(requiresDlcModule, `go.mod requires the dlc module itself:\n${goMod}`).toBe(false);
 });
 
 test("honors --module, like the CLI does", async ({ page }) => {

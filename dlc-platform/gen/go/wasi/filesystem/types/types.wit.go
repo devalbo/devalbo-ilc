@@ -4,8 +4,8 @@
 package types
 
 import (
-	wallclock "github.com/devalbo/dlc-platform/gen/go/wasi/clocks/wall-clock"
-	"github.com/devalbo/dlc-platform/gen/go/wasi/io/streams"
+	wallclock "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/clocks/wall-clock"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/wasi/io/streams"
 	"go.bytecodealliance.org/cm"
 )
 

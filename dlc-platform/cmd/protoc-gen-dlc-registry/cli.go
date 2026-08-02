@@ -439,7 +439,7 @@ func renderCLI(file *descriptorpb.FileDescriptorProto, services []service, cmds 
 	fmt.Fprintf(&b, "//\n// How a response is PRINTED is not here: that is presentation, and it belongs\n")
 	fmt.Fprintf(&b, "// to the tier slot (Decision 34).\n\n")
 	fmt.Fprintf(&b, "package %s\n\n", pkg)
-	fmt.Fprintf(&b, "import \"github.com/devalbo/dlc-platform/clispec\"\n\n")
+	fmt.Fprintf(&b, "import \"github.com/devalbo/devalbo-ilc/dlc-platform/clispec\"\n\n")
 
 	for _, svc := range services {
 		fmt.Fprintf(&b, "// %sCLI is %s as a command-line surface.\n", svc.name, svc.name)
