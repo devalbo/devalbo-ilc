@@ -228,6 +228,80 @@ export const OpenRecordResponse: MessageType<OpenRecordResponse> = /* @__PURE__ 
 });
 
 /**
+ * Update is the first command that can leave the index STALE rather than merely
+ * absent: a create adds a projection, a delete removes one, and only this can
+ * make an existing one disagree with the record it projects. That is the case
+ * D6's "the index is a cache" was written for, and the case D4's rebuild
+ * invariant is checked against after every mutation.
+ *
+ * @generated from message notes.v1.UpdateRecordRequest
+ */
+export interface UpdateRecordRequest {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id?: string;
+  /**
+   * Both optional, and ABSENT MEANS UNCHANGED — which proto3 cannot express with
+   * a bare string, since "" and unset are the same bytes on the wire. So each
+   * field is paired with an explicit clear flag rather than being made
+   * `optional`: a caller that wants to empty a body says so, and one that only
+   * wants to fix a typo in the title cannot accidentally erase it.
+   *
+   * @generated from field: string title = 2;
+   */
+  title?: string;
+  /**
+   * @generated from field: string body = 3;
+   */
+  body?: string;
+  /**
+   * @generated from field: bool clear_body = 4;
+   */
+  clearBody?: boolean;
+
+};
+
+export const UpdateRecordRequest: MessageType<UpdateRecordRequest> = /* @__PURE__ */ createMessageType({
+    typeName: "notes.v1.UpdateRecordRequest",
+    fields: [
+        { no: 1, name: "id", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "title", kind: "scalar", T: ScalarType.STRING },
+        { no: 3, name: "body", kind: "scalar", T: ScalarType.STRING },
+        { no: 4, name: "clear_body", kind: "scalar", T: ScalarType.BOOL },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * @generated from message notes.v1.UpdateRecordResponse
+ */
+export interface UpdateRecordResponse {
+  /**
+   * @generated from field: notes.v1.Record record = 1;
+   */
+  record?: Record;
+  /**
+   * What actually changed, so a caller can tell a real edit from a no-op. An
+   * update that changes nothing is not an error, but it is worth being able to
+   * see — it is also the case that must NOT emit an event.
+   *
+   * @generated from field: bool changed = 2;
+   */
+  changed?: boolean;
+
+};
+
+export const UpdateRecordResponse: MessageType<UpdateRecordResponse> = /* @__PURE__ */ createMessageType({
+    typeName: "notes.v1.UpdateRecordResponse",
+    fields: [
+        { no: 1, name: "record", kind: "message", T: () => Record },
+        { no: 2, name: "changed", kind: "scalar", T: ScalarType.BOOL },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * @generated from message notes.v1.DeleteRecordRequest
  */
 export interface DeleteRecordRequest {

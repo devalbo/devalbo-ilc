@@ -9,6 +9,7 @@ export const MethodCreateRecord = 10000;
 export const MethodListRecords = 10001;
 export const MethodOpenRecord = 10002;
 export const MethodDeleteRecord = 10003;
+export const MethodUpdateRecord = 10004;
 
 /** Every NotesService id, for hosts that enumerate. */
 export const NotesServiceMethods = {
@@ -16,4 +17,5 @@ export const NotesServiceMethods = {
   ListRecords: 10001,
   OpenRecord: 10002,
   DeleteRecord: 10003,
+  UpdateRecord: 10004,
 } as const;

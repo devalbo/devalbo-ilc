@@ -115,6 +115,17 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				_, err := fmt.Fprintf(out, "# %s\n\n%s\n", r.Record.GetTitle(), r.Record.GetBody())
 				return err
 			}),
+			notesv1.MethodUpdateRecord: render(func(out io.Writer, r *notesv1.UpdateRecordResponse) error {
+				// "no change" is a real outcome, not a failure — the engine said so
+				// in the response, and printing "updated" would be a small lie a
+				// script could act on.
+				if !r.GetChanged() {
+					_, err := fmt.Fprintln(out, "no change")
+					return err
+				}
+				_, err := fmt.Fprintf(out, "updated %s\n", r.Record.GetId())
+				return err
+			}),
 			notesv1.MethodDeleteRecord: render(func(out io.Writer, r *notesv1.DeleteRecordResponse) error {
 				if !r.GetDeleted() {
 					// Not an error: deleting nothing is a legitimate outcome, and

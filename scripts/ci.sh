@@ -93,6 +93,14 @@ step "unit tests"               run go test ./engine/... ./hosts/...
 # while adding the index: six existing test files, none of them executed here.
 # `go test -C` is what crosses a module boundary without a subshell cd.
 step "platform unit tests"      run go test -C dlc-platform ./...
+# WINDOWS, checked from here rather than assumed. A cross-build catches the whole
+# class this project is exposed to — a unix-only import, a build tag that has no
+# Windows counterpart — for the price of a compile, on every push, with no
+# Windows runner involved. It does NOT check runtime behaviour: path separators,
+# case-insensitive filenames and reserved device names only show up when the code
+# runs, which is the `windows` job in .github/workflows/ci.yml.
+step "windows cross-build"      run env GOOS=windows GOARCH=amd64 go build -C dlc-platform ./...
+step "windows cross-build (dlc)" run env GOOS=windows GOARCH=amd64 go build ./engine/... ./hosts/native/...
 
 # ---- full: the engine boundary and the web tier -------------------------
 if [ "$TIER" != "fast" ]; then

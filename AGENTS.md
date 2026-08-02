@@ -234,6 +234,29 @@ delete that left a row, and a projection that drifted — with no second tier, n
 golden file. If you add a mutating command, add that assertion to its test; it is the only check the index
 really needs.
 
+**One file per key, and that is a concurrency decision, not a layout preference.** A whole-file index made
+`Put` a read-modify-write, so two native processes creating a record at once each read, added, and rewrote —
+and one entry was silently lost. A file per key removes that with no lock: different keys are different
+files, and the same key is last-write-wins on one small file, which is exactly what the records themselves
+do. It also shrinks D10's write amplification instead of trading against it.
+
+**Index keys ARE the filenames, and the platform validates them out loud.** `.dlc-index/records/buy-milk`,
+not an encoded blob — the store stays readable, which is the same argument canonical JSON and slugged record
+names already make. The price is that a key must be a legal filename *everywhere*, so `Put` refuses:
+separators and Windows-illegal characters (`: * ? " < > |`), control bytes, a leading dot (reserved for
+housekeeping, and what lets a stray `.DS_Store` be skipped), a trailing dot or space (Windows strips them
+silently, so `a.` and `a` would become one file), reserved device names (`CON`, `NUL`, `COM1`… — extension
+or not), anything over 255 bytes, and **any key differing from an existing one only by case**.
+
+**That last rule is checked on every platform, including case-sensitive ones where it would work.** Windows
+and macOS are both case-insensitive by default, so `a` and `A` would silently merge two records'
+projections; a check that only fires on some machines lets an app pass on the developer's box and fail on a
+user's, which is the failure this project writes checks to prevent. The cost is a directory listing per
+`Put` — the same listing `Scan` already does — and it is worth it.
+
+An app needing opaque names does not get a flag: it implements `Store`. Encoding is a storage decision, and
+the seam is where storage decisions belong.
+
 **`rebuild-index` is INHERITED at method_id 200**, and registration follows the APP, not the host: an app
 gets the verb by calling `platform.SetIndexRebuilder`, and an app with no collection never sees it. Do not
 add a manifest field for the index — there was one for an afternoon, and it was reverted because a field
@@ -264,8 +287,42 @@ a softer option — every `execute` flushes, so a read is a write as far as the 
 `onExternalChange` is deliberately **not** part of `subscribe`: an app that re-reads on an engine event
 reads its own tree, which is right for its own writes and wrong for someone else's.
 
-**This is not sync.** Nothing merges. A CLI writing the same store is still unseen — cross-*process* is
-open, and the same reasoning will apply with a different trigger.
+**This is not sync.** Nothing merges.
+
+**Cross-PROCESS is not the same hazard, and does not currently exist.** It was worth checking rather than
+assuming: the only host holding a snapshot is the browser, whose store is `navigator.storage.getDirectory()`
+— OPFS, browser-private, unreachable from any other process. The native host holds no snapshot at all
+(plain `os` straight through to the granted root), so a second CLI process always reads current disk. The
+snapshot-clobber therefore cannot cross a process. It **would** the day the web tier accepts an
+FSA-granted real directory, which the plan describes and the code does not implement.
+
+## 3·9 Windows is a supported native target
+
+**Above `SafeJoin`, every path is "/"-separated.** App-relative paths are the engine's currency: they go
+into BFT bundles, into error messages the parity check compares, and into an app's own layout, and all of
+those must read identically on every tier. `filepath.Join` would emit `records\a.json` on Windows and a
+bundle exported there would stop matching one exported on Linux — the cross-tier interchange claim would
+quietly become false. Use `platform.JoinPath` for root-relative paths; conversion to the host separator
+happens once, at the bottom, in `SafeJoin`.
+
+**A filename is not a string.** Before turning any app-supplied value into a filename, remember Windows is
+case-insensitive, rejects `: * ? " < > |`, reserves `CON`/`PRN`/`AUX`/`NUL`/`COM1`-`LPT9` whatever the
+extension, and silently strips a trailing dot or space. The index validates keys against exactly that list
+(§3·7) and refuses uniformly on every platform. Anything else facing the same problem should reuse those
+rules rather than inventing a second, subtly different set.
+
+**Two checks, and they cover different things.** `ci.sh` cross-builds `GOOS=windows` on every push, which
+catches a unix-only import for the price of a compile. Only the `windows` job in the GitHub workflow catches
+BEHAVIOUR — separators, case-insensitivity, reserved names — because those need the code to actually run. A
+cross-build going green proves nothing about the filesystem.
+
+**No library, deliberately.** `gofrs/flock` and `natefinch/atomic` are the sane choices if locking or atomic
+replace is ever genuinely needed, and both would be native-host-only — but the engine compiles to wasm and
+embedded, where neither exists. Prefer a design that needs no platform API: one file per key beat a
+cross-platform lock, and it was less code.
+
+**Developing this repo on Windows is a different question** and the answer today is WSL: devbox is nix-based
+and does not run natively there. What is supported is the native tier an app SHIPS.
 
 ## 3a. The host layer
 

@@ -19,6 +19,29 @@ on:
     - cron: "0 6 * * *"
 
 jobs:
+  # The native tier on Windows. A separate job rather than a matrix, because it
+  # runs a DIFFERENT thing: devbox is nix-based and does not run natively on
+  # Windows, so this uses plain Go and covers only what plain Go can reach.
+  #
+  # That happens to be exactly the code where Windows differs — path separators,
+  # case-insensitive filenames, reserved device names — because `dlc-platform`
+  # holds the filesystem seam, path containment, BFT and the index, and its
+  # generated code is COMMITTED (§16.4), so no buf, no TinyGo, no browser.
+  #
+  # What this does not cover: the wasm and web tiers, which have no Windows story
+  # to differ on, and developing this repo on Windows, which is a devbox question
+  # and today's answer is WSL.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dlc-platform/go.mod
+      - name: platform tests (native tier)
+        run: go test -C dlc-platform ./...
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -38,10 +38,11 @@ service NotesService {
     option (devalbo.options.v1.cli_name) = "delete";
   }
 
-  // Held for the capabilities this app is meant to drive out (§13) — declared,
-  // not commented, so the numbers cannot be claimed twice in the meantime.
-  //   10004 = UpdateRecord
-  option (devalbo.options.v1.reserved_method_id) = 10004;
+  // Change a note's title or body
+  rpc UpdateRecord(UpdateRecordRequest) returns (UpdateRecordResponse) {
+    option (devalbo.options.v1.method_id) = 10004;
+    option (devalbo.options.v1.cli_name) = "update";
+  }
 }
 
 // A note. Stored as ONE canonical-JSON file per record (§7.1 split storage):
@@ -114,6 +115,37 @@ message OpenRecordRequest {
 }
 message OpenRecordResponse {
   Record record = 1;
+}
+
+// Update is the first command that can leave the index STALE rather than merely
+// absent: a create adds a projection, a delete removes one, and only this can
+// make an existing one disagree with the record it projects. That is the case
+// D6's "the index is a cache" was written for, and the case D4's rebuild
+// invariant is checked against after every mutation.
+message UpdateRecordRequest {
+  string id = 1 [
+    (devalbo.options.v1.help) = "record id",
+    (devalbo.options.v1.required) = true,
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+  // Both optional, and ABSENT MEANS UNCHANGED — which proto3 cannot express with
+  // a bare string, since "" and unset are the same bytes on the wire. So each
+  // field is paired with an explicit clear flag rather than being made
+  // `optional`: a caller that wants to empty a body says so, and one that only
+  // wants to fix a typo in the title cannot accidentally erase it.
+  string title = 2 [
+    (devalbo.options.v1.help) = "new title (unchanged if omitted)",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
+  string body = 3 [(devalbo.options.v1.help) = "new body (unchanged if omitted)"];
+  bool clear_body = 4 [(devalbo.options.v1.help) = "empty the body"];
+}
+message UpdateRecordResponse {
+  Record record = 1;
+  // What actually changed, so a caller can tell a real edit from a no-op. An
+  // update that changes nothing is not an error, but it is worth being able to
+  // see — it is also the case that must NOT emit an event.
+  bool changed = 2;
 }
 
 message DeleteRecordRequest {

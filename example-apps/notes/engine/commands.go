@@ -59,6 +59,7 @@ func init() {
 		handleListRecords,
 		handleOpenRecord,
 		handleDeleteRecord,
+		handleUpdateRecord,
 	))
 }
 
@@ -207,6 +208,66 @@ func handleOpenRecord(req *notesv1.OpenRecordRequest) (*notesv1.OpenRecordRespon
 		return nil, err
 	}
 	return &notesv1.OpenRecordResponse{Record: record}, nil
+}
+
+// handleUpdateRecord edits a record in place.
+//
+// THE COMMAND THE INDEX HAS BEEN WAITING FOR. Create adds a projection and
+// delete removes one; only this can leave an existing projection DISAGREEING
+// with the record it projects. Everything about it is therefore the same
+// discipline as create — write the file, then the index, then the event — and
+// the D4 assertion in the tests is what proves the second step was not
+// forgotten.
+//
+// The id does NOT change with the title. It is the filename and the index key,
+// and re-slugging would turn an edit into a move: a new file, a stale one to
+// delete, an index key to migrate, and any link to the old id broken. A rename
+// is a different operation and should look like one.
+func handleUpdateRecord(req *notesv1.UpdateRecordRequest) (*notesv1.UpdateRecordResponse, error) {
+	if req.Id == "" {
+		return nil, errors.New("update-record: id is required")
+	}
+	record, err := readRecord(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	// ABSENT MEANS UNCHANGED. proto3 cannot tell "" from unset for a bare
+	// string, so emptying the body takes an explicit flag — otherwise every
+	// caller that only wanted to fix a title would silently erase the body.
+	changed := false
+	if title := strings.TrimSpace(req.Title); title != "" && title != record.Title {
+		record.Title = title
+		changed = true
+	}
+	switch {
+	case req.ClearBody:
+		if record.Body != "" {
+			record.Body = ""
+			changed = true
+		}
+	case req.Body != "" && req.Body != record.Body:
+		record.Body = req.Body
+		changed = true
+	}
+
+	// A no-op writes nothing and announces nothing. Rewriting the file would
+	// change its mtime for no reason, and emitting would make every subscriber
+	// re-read to find exactly what they had — which is how a UI that re-lists on
+	// an event turns a stray keystroke into a full refresh.
+	if !changed {
+		return &notesv1.UpdateRecordResponse{Record: record, Changed: false}, nil
+	}
+
+	// File, index, event (D7) — the same order as create, for the same reason.
+	if err := writeRecord(record); err != nil {
+		return nil, err
+	}
+	if err := indexRecord(record); err != nil {
+		return nil, err
+	}
+	emitRecordChanged(record.GetId(), notesv1.MethodUpdateRecord)
+	return &notesv1.UpdateRecordResponse{Record: record, Changed: true}, nil
 }
 
 func handleDeleteRecord(req *notesv1.DeleteRecordRequest) (*notesv1.DeleteRecordResponse, error) {

@@ -14,12 +14,14 @@ import {
   DeleteRecordResponse,
   ListRecordsResponse,
   OpenRecordResponse,
+  UpdateRecordResponse,
 } from "@gen/notes/v1/commands.pb";
 import {
   MethodCreateRecord,
   MethodDeleteRecord,
   MethodListRecords,
   MethodOpenRecord,
+  MethodUpdateRecord,
 } from "@gen/notes/v1/commands.registry.pb";
 
 // The INHERITED platform messages. `dlc gen` copies these in from the platform
@@ -82,6 +84,12 @@ export const notesRenderers: Record<number, Renderer | undefined> = {
 
   [MethodDeleteRecord]: (bytes) =>
     DeleteRecordResponse.fromBinary(bytes).deleted ? "deleted" : "no such note",
+
+  // Worded as the native slot words it — the two tiers print the same thing.
+  [MethodUpdateRecord]: (bytes) => {
+    const r = UpdateRecordResponse.fromBinary(bytes);
+    return r.changed ? `updated ${r.record?.id}` : "no change";
+  },
 
   // The INHERITED verbs. An app gets these by being an ILC app; only their
   // printing is ours. No button in the UI exposes them, which is much of why a

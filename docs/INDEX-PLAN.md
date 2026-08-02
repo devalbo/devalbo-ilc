@@ -181,6 +181,37 @@ guards a second writer that does not exist yet, and a lock nothing can contend f
 tests. The failure it actually prevents is a torn *file*, which is a different problem with a different fix
 (write-then-rename), worth doing when something can tear.
 
+**Resolved (2026-08-02) by layout, not by locking — see below.**
+
+**Revisit (2026-08-02): the second writer exists.** `Put` is a read-modify-write of the whole index file,
+so two concurrent native processes — a script running `notes create` twice — can each read, add, and
+rewrite, losing one entry. The records survive; the projection of one does not, so `list` under-reports
+until `rebuild-index`. Three things make this bounded rather than urgent: only the derived thing is lost,
+D4's invariant is what makes the repair trustworthy, and no tier but native can even have a second process.
+The portable fix looked like a lock, and locking is where Windows hurts: `flock` is unix, `LockFileEx` is
+Windows, and an `O_EXCL` lockfile wedges the app when a process dies holding it.
+
+**So the layout changed instead: one file per key.** Different keys are different files and cannot conflict;
+the same key is last-write-wins on one small file, which is exactly what the records themselves do. No lock,
+no platform-specific code, and **D10 gets better rather than worse** — a `Put` now rewrites one small file
+instead of the whole projection, so the flash-endurance pressure that was going to force a KV backend on
+embedded is lower than when this plan was written.
+
+The seam did not move. `Store` is unchanged, `Index` is unchanged, notes is unchanged — which is the first
+real evidence that D2 drew the line in the right place, since this was exactly the kind of change the seam
+existed to absorb.
+
+**Keys are the filenames, validated rather than encoded.** Hex encoding was built first and reverted: it
+made every Windows hazard impossible, and made `.dlc-index/records/` unreadable — which is the one thing
+this project's storage model consistently refuses to trade. Instead `Put` refuses a key that cannot be a
+filename anywhere (separators, Windows-illegal characters, control bytes, leading dot, trailing dot or
+space, reserved device names, over 255 bytes) **and any key differing from an existing one only by case**,
+on every platform including case-sensitive ones — because a rule that fires only on some machines lets an
+app pass where it was written and fail where it runs. An app that genuinely needs opaque names implements
+`Store`; encoding is a storage decision and the seam is where those live. What is left unfixed is a `Clear` racing another
+process's `Put`, which can drop a concurrently-added entry mid-rebuild — rare, explicit, and repaired by
+running rebuild again.
+
 ### D8 — The KV capability is DEFERRED, and the manifest field goes with it
 
 Nothing in the repo has a host-provided KV store, so binding one now would be a capability with no

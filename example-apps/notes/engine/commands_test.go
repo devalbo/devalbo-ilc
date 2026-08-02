@@ -256,6 +256,104 @@ func TestCreateRequiresTitle(t *testing.T) {
 	}
 }
 
+// UPDATE IS THE COMMAND THE INDEX HAS BEEN WAITING FOR. Create adds a
+// projection and delete removes one; only this can leave an existing projection
+// disagreeing with the record it projects. So the D4 assertion here is doing
+// real work rather than repeating the create case.
+func TestUpdateKeepsTheIndexHonest(t *testing.T) {
+	inTempRoot(t)
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{
+		Title: "Buy milk", Body: "two litres",
+	}, nil)
+
+	var updated notesv1.UpdateRecordResponse
+	call(t, notesv1.MethodUpdateRecord, &notesv1.UpdateRecordRequest{
+		Id: "buy-milk", Title: "Buy oat milk",
+	}, &updated)
+	if !updated.GetChanged() {
+		t.Fatal("update reported no change")
+	}
+	assertIndexMatchesFiles(t)
+
+	// The LIST must show the new title, which is the projection having been
+	// rewritten rather than merely still existing.
+	var list notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &list)
+	if len(list.Entries) != 1 || list.Entries[0].GetTitle() != "Buy oat milk" {
+		t.Fatalf("list did not follow the edit: %v", list.Entries)
+	}
+	// …and the id did NOT move with the title. Re-slugging would turn an edit
+	// into a move: a new file, a stale one, an index key to migrate.
+	if list.Entries[0].GetId() != "buy-milk" {
+		t.Fatalf("the id followed the title: %q", list.Entries[0].GetId())
+	}
+}
+
+// ABSENT MEANS UNCHANGED, which proto3 cannot say with a bare string — so
+// emptying a body takes a flag. Without that, every caller fixing a typo in a
+// title would silently erase the body.
+func TestUpdateLeavesOmittedFieldsAlone(t *testing.T) {
+	inTempRoot(t)
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{
+		Title: "Buy milk", Body: "two litres",
+	}, nil)
+
+	call(t, notesv1.MethodUpdateRecord, &notesv1.UpdateRecordRequest{
+		Id: "buy-milk", Title: "Buy oat milk",
+	}, nil)
+
+	var opened notesv1.OpenRecordResponse
+	call(t, notesv1.MethodOpenRecord, &notesv1.OpenRecordRequest{Id: "buy-milk"}, &opened)
+	if opened.Record.GetBody() != "two litres" {
+		t.Fatalf("the body was lost by a title-only update: %q", opened.Record.GetBody())
+	}
+
+	// And emptying it is possible, but only on purpose.
+	call(t, notesv1.MethodUpdateRecord, &notesv1.UpdateRecordRequest{
+		Id: "buy-milk", ClearBody: true,
+	}, nil)
+	var cleared notesv1.OpenRecordResponse
+	call(t, notesv1.MethodOpenRecord, &notesv1.OpenRecordRequest{Id: "buy-milk"}, &cleared)
+	if cleared.Record.GetBody() != "" {
+		t.Fatalf("clear-body did not clear it: %q", cleared.Record.GetBody())
+	}
+	assertIndexMatchesFiles(t)
+}
+
+// An update that changes nothing writes nothing and announces nothing. An event
+// here would make every subscriber that re-lists on one do a full refresh for a
+// stray keystroke.
+func TestNoOpUpdateIsSilent(t *testing.T) {
+	inTempRoot(t)
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: "Buy milk"}, nil)
+
+	var seen []string
+	platform.SetEventSink(func(topic string, _ []byte) { seen = append(seen, topic) })
+	t.Cleanup(func() { platform.SetEventSink(nil) })
+
+	var resp notesv1.UpdateRecordResponse
+	call(t, notesv1.MethodUpdateRecord, &notesv1.UpdateRecordRequest{
+		Id: "buy-milk", Title: "Buy milk",
+	}, &resp)
+	if resp.GetChanged() {
+		t.Fatal("re-setting the same title reported a change")
+	}
+	if len(seen) != 0 {
+		t.Fatalf("a no-op update emitted %v", seen)
+	}
+}
+
+func TestUpdateRequiresAnExistingRecord(t *testing.T) {
+	inTempRoot(t)
+	body, err := (&notesv1.UpdateRecordRequest{Id: "never-existed", Title: "x"}).MarshalVT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := platform.Execute(notesv1.MethodUpdateRecord, body); r.Success {
+		t.Fatal("updating a record that does not exist succeeded")
+	}
+}
+
 // The app's whole state is a filesystem tree, so the INHERITED export-fs is a
 // complete backup — no notes-specific code involved.
 func TestExportIsACompleteBackup(t *testing.T) {

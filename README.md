@@ -191,7 +191,10 @@ The honest gaps, in the order they matter:
    snapshot whose flush prunes — a stale tab's write used to delete the other tab's work, measured as two
    tabs creating one note each and leaving one note on disk. The response is a reload, which is coarse but
    honest: a running component cannot be rebound to a new filesystem root. What is NOT here is a stale tab
-   catching up in place, or anything crossing a *process* — a CLI writing the same store is unseen.
+   catching up in place. **Cross-process is a different question and was checked rather than assumed:** the
+   snapshot-clobber cannot cross a process, because OPFS is browser-private and the native tier holds no
+   snapshot. What can is a lost index entry when two CLI processes write at once — repairable by
+   `rebuild-index`, and the first real case for the lock §7.1 deferred.
 
 ## License
 

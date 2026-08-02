@@ -45,6 +45,33 @@ func WriteTree(root string, files []File) error {
 	return nil
 }
 
+// JoinPath joins ROOT-RELATIVE path segments with "/".
+//
+// Not filepath.Join, and the difference matters on Windows. App-relative paths
+// are the engine's own currency — they go into BFT bundles, into error messages
+// compared by the parity check, and into an app's own storage layout — and all
+// of those must read identically on every tier. filepath.Join would emit
+// `records\a.json` on Windows, so a bundle exported there would not match one
+// exported on Linux and the cross-tier interchange claim would quietly stop
+// being true.
+//
+// Conversion to the host's separator happens once, at the bottom, in SafeJoin →
+// filepath.Join. Above that line everything is "/".
+func JoinPath(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if out == "" {
+			out = p
+			continue
+		}
+		out += "/" + p
+	}
+	return out
+}
+
 // SafeJoin resolves a template-relative path under root, rejecting anything that
 // would escape it. Template paths are ours today, but `import-fs` will accept
 // bundles from elsewhere and go through the same door — so the check belongs

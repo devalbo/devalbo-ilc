@@ -4,4 +4,4 @@ notes.v1.NotesService.CreateRecord 10000
 notes.v1.NotesService.DeleteRecord 10003
 notes.v1.NotesService.ListRecords 10001
 notes.v1.NotesService.OpenRecord 10002
-notes.v1.NotesService.[reserved].10004 10004
+notes.v1.NotesService.UpdateRecord 10004

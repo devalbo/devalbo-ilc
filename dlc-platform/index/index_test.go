@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	platform "github.com/devalbo/dlc-platform"
@@ -158,61 +160,149 @@ func TestWritesSurviveReopening(t *testing.T) {
 	}
 }
 
-// --- determinism (the parity contract) --------------------------------------
+// --- keys ARE filenames, and the rules are the same everywhere --------------
 
-// Native and wasm write the same bytes for the same index, whatever order the
-// entries arrived in. The parity check DIFFS THE FILESYSTEMS the two engines
-// write, so a nondeterministic index file would read exactly like a real
-// divergence — the worst kind of flake, because it looks like the bug the check
-// exists to find.
-func TestEncodingIsOrderIndependent(t *testing.T) {
-	forward := encode([]Pair{{Key: "a", Value: []byte("1")}, {Key: "b", Value: []byte("2")}, {Key: "c", Value: []byte("3")}})
-	backward := encode([]Pair{{Key: "c", Value: []byte("3")}, {Key: "b", Value: []byte("2")}, {Key: "a", Value: []byte("1")}})
-	if !bytes.Equal(forward, backward) {
-		t.Fatalf("insertion order changed the bytes:\n %x\n %x", forward, backward)
+// The readable half of the bargain: a key lands as itself, so the store can be
+// eyeballed. This is what the validation below is paying for.
+func TestKeysAreTheFilenames(t *testing.T) {
+	root := inTempRoot(t)
+	if err := open(t).Put("buy-milk", []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, Dir, "records", "buy-milk")); err != nil {
+		t.Fatalf("the key is not the filename: %v", err)
 	}
 }
 
-// Binary values are stored as given. A projection is an app's proto message, so
-// anything that mangled bytes — a text assumption, an encoding round trip —
-// would corrupt every index in a way only that app could notice.
-func TestBinaryValuesSurvive(t *testing.T) {
+// THE CASE TRAP. Windows and macOS are both case-insensitive by default, so "a"
+// and "A" would be one file and two records' projections would silently merge.
+//
+// Refused UNIFORMLY, including on a case-sensitive filesystem where it would
+// technically work — an app that runs on the machine it was written on and
+// fails on a user's is the failure this rule exists to prevent, and a check that
+// only fires on some machines cannot prevent it.
+func TestKeysDifferingOnlyByCaseAreRefused(t *testing.T) {
 	inTempRoot(t)
-	raw := []byte{0x00, 0xff, 0x0a, 0x7f, 0x80}
-	if err := open(t).Put("k", raw); err != nil {
+	ix := open(t)
+
+	if err := ix.Put("a", []byte("lower")); err != nil {
 		t.Fatal(err)
 	}
+	err := ix.Put("A", []byte("upper"))
+	if err == nil {
+		t.Fatal("a key differing only by case was accepted")
+	}
+	// The message must name BOTH keys: an app author sees this through their own
+	// command, and "keys collide" without the pair is unactionable.
+	if !strings.Contains(err.Error(), `"A"`) || !strings.Contains(err.Error(), `"a"`) {
+		t.Fatalf("error does not name both keys: %v", err)
+	}
+	// Re-writing the SAME key is not a collision with itself.
+	if err := ix.Put("a", []byte("again")); err != nil {
+		t.Fatalf("overwriting a key was treated as a collision: %v", err)
+	}
+}
+
+// Every way a key stops being a legal filename, refused with a reason. Each of
+// these is a real filesystem behaviour, not a style rule — see the comment block
+// in store.go for which system breaks on which.
+func TestUnusableKeysAreRefused(t *testing.T) {
+	inTempRoot(t)
+	ix := open(t)
+	for _, tc := range []struct{ name, key string }{
+		{"empty", ""},
+		{"separator", "a/b"},
+		{"backslash", `a\b`},
+		{"colon", "a:b"},
+		{"glob", "a*b"},
+		{"question", "a?b"},
+		{"quote", `a"b`},
+		{"angle", "a<b"},
+		{"pipe", "a|b"},
+		{"control byte", "a\x01b"},
+		{"leading dot", ".hidden"},
+		{"trailing dot", "trailing."},
+		{"trailing space", "trailing "},
+		{"reserved device", "CON"},
+		{"reserved with extension", "nul.json"},
+		{"too long", strings.Repeat("x", 300)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ix.Put(tc.key, []byte("v")); err == nil {
+				t.Fatalf("Put(%q) was accepted", tc.key)
+			}
+		})
+	}
+}
+
+// …and ordinary keys are not caught by any of it. A validation rule that also
+// refuses `buy-milk` would be worse than no rule.
+func TestOrdinaryKeysAreAccepted(t *testing.T) {
+	inTempRoot(t)
+	ix := open(t)
+	for _, key := range []string{
+		"buy-milk", "call-mum-2", "a", "note_1", "with space", "with.dot",
+		"unicode-é-日本", "CONtext", "communication",
+	} {
+		t.Run(key, func(t *testing.T) {
+			if err := ix.Put(key, []byte("v")); err != nil {
+				t.Fatalf("Put(%q): %v", key, err)
+			}
+		})
+	}
+}
+
+// A stray file is skipped, not read as an entry. With keys as filenames there is
+// no prefix to filter on, so the same validation does the work — which is why
+// leading dots are reserved.
+func TestStrayFilesAreIgnored(t *testing.T) {
+	root := inTempRoot(t)
+	ix := open(t)
+	if err := ix.Put("a", []byte("alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, Dir, "records", ".DS_Store"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ix.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal(keys(got), []string{"a"}) {
+		t.Fatalf("entries = %v", keys(got))
+	}
+}
+
+// --- one file per key, which is what removes the cross-process race ---------
+
+// Two writers, no lock, no lost update. This is the bug the whole-file store
+// had: both would read, add, and rewrite the entire index, and one entry would
+// vanish. Separate stores over the same directory stand in for separate
+// processes — the mechanism being tested is that the WRITES DO NOT OVERLAP, and
+// that is a property of the layout, not of who is running.
+func TestConcurrentKeysDoNotOverwriteEachOther(t *testing.T) {
+	inTempRoot(t)
+	first, second := open(t), open(t)
+
+	// Interleaved on purpose: each store reads nothing and writes only its own
+	// file, so ordering cannot matter. Under the old layout this sequence lost
+	// whichever entry was written first.
+	if err := first.Put("a", []byte("alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Put("b", []byte("beta")); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Put("c", []byte("gamma")); err != nil {
+		t.Fatal(err)
+	}
+
 	got, err := open(t).Entries()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got[0].Value, raw) {
-		t.Fatalf("value = % x, want % x", got[0].Value, raw)
-	}
-}
-
-// A file this format cannot read is an EMPTY index, never a partial one. Empty
-// is repairable by rebuild-index; partial-but-plausible is a wrong answer served
-// with confidence.
-func TestUnreadableFilesDecodeToNothing(t *testing.T) {
-	full := encode([]Pair{{Key: "a", Value: []byte("alpha")}, {Key: "b", Value: []byte("beta")}})
-	for _, tc := range []struct {
-		name string
-		raw  []byte
-	}{
-		{"empty", nil},
-		{"foreign magic", []byte("SQLite format 3\x00")},
-		{"truncated mid-entry", full[:len(full)-3]},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := decode(tc.raw)
-			if err != nil {
-				t.Fatalf("decode returned an error instead of an empty index: %v", err)
-			}
-			if len(got) != 0 {
-				t.Fatalf("decoded %v from unreadable bytes", keys(got))
-			}
-		})
+	if !equal(keys(got), []string{"a", "b", "c"}) {
+		t.Fatalf("entries = %v, want all three", keys(got))
 	}
 }
 
