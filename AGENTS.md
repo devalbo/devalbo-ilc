@@ -239,6 +239,34 @@ gets the verb by calling `platform.SetIndexRebuilder`, and an app with no collec
 add a manifest field for the index — there was one for an afternoon, and it was reverted because a field
 reporting a fact nothing can vary is what `ENVIRONMENT-PLAN.md` D6 exists to prevent.
 
+## 3·8 The web tier holds a SNAPSHOT, and two tabs is the case that proves it
+
+The browser host hydrates all of OPFS into an in-memory tree at boot, runs commands against it, and mirrors
+it back after a write. That mirror **prunes**: anything OPFS holds that the tree lacks is deleted
+(`writeDir` in `opfs.ts`). One tab, that is invisible. Two tabs, it is data loss — a tab that hydrated
+before another tab's write deletes that write on its next write. Measured: with the guard below removed,
+two tabs creating one note each leave **one note on disk**.
+
+**Three rules follow, and each was learned by a test rather than by reasoning.**
+
+**Broadcast on the WRITE, not on an event.** A staleness signal built on engine events is silent for every
+handler that writes without emitting — `dlc new` writes 35 files and emits nothing. Same argument `onFlush`
+already makes for filesystem watchers, one origin wider.
+
+**Flush only when the tree CHANGED** (`treeFingerprint`). The host flushes after every command because the
+engine cannot say whether it wrote; without a change check, a second tab's list-on-load broadcasts and
+invalidates the first tab for *reading*. A read must never invalidate anybody.
+
+**A stale tab REFUSES commands, and the app reloads.** It cannot catch up in place: the component captured
+its preopen at instantiation and cannot be rebound (`worker.ts`). Serving reads from a stale snapshot is not
+a softer option — every `execute` flushes, so a read is a write as far as the disk is concerned.
+
+`onExternalChange` is deliberately **not** part of `subscribe`: an app that re-reads on an engine event
+reads its own tree, which is right for its own writes and wrong for someone else's.
+
+**This is not sync.** Nothing merges. A CLI writing the same store is still unseen — cross-*process* is
+open, and the same reasoning will apply with a different trigger.
+
 ## 3a. The host layer
 
 **`hosts/` splits the same way `engine/` does** (Decision 34): inherited **host runtime** (`hosts/web/` —

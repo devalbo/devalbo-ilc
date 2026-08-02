@@ -144,6 +144,53 @@ export async function onFlush(fn: () => void): Promise<() => void> {
 const flushListeners = new Set<() => void>();
 let flushAttached: Promise<void> | null = null;
 
+/**
+ * Hear that ANOTHER TAB on this origin changed the store. Returns an
+ * unsubscribe.
+ *
+ * THE THIRD SIGNAL, and the one with teeth. `subscribe` is what this engine
+ * announced; `onFlush` is what this host persisted; this is another context
+ * persisting — and unlike the other two it means your engine is finished.
+ *
+ * It rides the FLUSH, not events, for the reason `onFlush` exists at all: a
+ * flush happens after every command, an event only when a handler chooses to
+ * emit. A staleness signal built on events is silent for exactly the writes
+ * nobody remembered to announce — `dlc new` writes 35 files and emits nothing,
+ * which is how the first version of this shipped a tab that stayed happily
+ * stale.
+ *
+ * Why it is not folded into `subscribe`: an app that re-reads on an engine event
+ * reads its OWN tree. That is right for its own writes and wrong for another
+ * tab's, because this engine's snapshot does not contain them and cannot be made
+ * to (the component captured its filesystem root at instantiation).
+ *
+ * By the time this fires, `execute` is already refusing commands — a stale
+ * whole-tree snapshot flushed back to OPFS would PRUNE the other tab's writes,
+ * so the worker stops rather than destroying them. The one useful response is
+ * therefore `location.reload()`, which is what notes does.
+ */
+export async function onExternalChange(fn: () => void): Promise<() => void> {
+  externalListeners.add(fn);
+  externalAttached ??= connect().onExternalChange(
+    Comlink.proxy(() => {
+      for (const listener of [...externalListeners]) {
+        try {
+          listener();
+        } catch (e) {
+          console.error("ilc: external-change listener threw", e);
+        }
+      }
+    }),
+  );
+  await externalAttached;
+  return () => {
+    externalListeners.delete(fn);
+  };
+}
+
+const externalListeners = new Set<() => void>();
+let externalAttached: Promise<void> | null = null;
+
 // NO TOPIC CONSTANTS HERE, deliberately.
 //
 // `TopicDataChanged = "ilc.data-changed"` used to live in this file AND in

@@ -76,6 +76,59 @@ export async function flushTreeToOPFS(
 }
 
 /**
+ * A cheap content digest of the engine's in-memory tree.
+ *
+ * WHY THIS EXISTS: the host flushes the whole tree after every command, because
+ * the engine cannot say whether it wrote — which means a READ used to rewrite
+ * every file and, once tabs could hear each other, told every other tab their
+ * store had changed. Opening a second tab invalidated the first one for doing
+ * nothing but listing.
+ *
+ * So the host asks a question it CAN answer: is the tree different from the one
+ * I last persisted? Same answer, no cooperation from the engine needed.
+ *
+ * FNV-1a over paths and bytes rather than `JSON.stringify(_getFileData())`,
+ * which the shim itself warns against: stringify expands every Uint8Array into
+ * `{0:n,1:n,…}` and was pathologically slow on a scaffold-sized tree. This walks
+ * the live tree once, allocating nothing.
+ *
+ * A digest can collide in principle. The consequence of a collision is a skipped
+ * flush, so the bar is "not by accident" rather than "not by an adversary" —
+ * and lengths, names and bytes all feed it, which no plausible edit survives.
+ */
+export function treeFingerprint(entry: FileDataEntry): string {
+  let h = 0x811c9dc5;
+  const mix = (byte: number) => {
+    h ^= byte;
+    // >>> 0 keeps it an unsigned 32-bit value; Math.imul is the standard way to
+    // get a 32-bit multiply out of a float64 without losing the low bits.
+    h = Math.imul(h, 0x01000193) >>> 0;
+  };
+  const mixString = (s: string) => {
+    for (let i = 0; i < s.length; i++) mix(s.charCodeAt(i) & 0xff);
+    mix(0);
+  };
+  const walk = (node: FileDataEntry) => {
+    if (node.dir) {
+      // Sorted, so iteration order cannot change the digest for an unchanged
+      // tree — the same reason every other ordered output in this project sorts.
+      for (const name of Object.keys(node.dir).sort()) {
+        mixString(name);
+        walk(node.dir[name]);
+      }
+      return;
+    }
+    const source = node.source ?? new Uint8Array();
+    const bytes =
+      typeof source === "string" ? new TextEncoder().encode(source) : source;
+    mixString(String(bytes.length));
+    for (let i = 0; i < bytes.length; i++) mix(bytes[i]);
+  };
+  walk(entry);
+  return h.toString(16);
+}
+
+/**
  * Parse `_getFileData()` JSON back into a FileData tree with Uint8Array sources.
  * JSON.stringify turns a Uint8Array into `{0:n,1:n,…}`, so it needs reviving.
  */

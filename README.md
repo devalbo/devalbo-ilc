@@ -185,9 +185,13 @@ The honest gaps, in the order they matter:
    runtime in `dlc-platform/`, this app's presentation and input in `hosts/<tier>/`, one slot per tier
    declared in `dlc.toml`. Host code renders and never decides, enforced by host parity. What remains is
    that a slot is only checkable against another slot — a single-tier app's rendering is unverified.
-4. 📋 **Events do not cross a tab or a process.** Same graph only — worker → main thread, or native
-   in-process. A second tab on the same OPFS origin does not see this one's writes; that needs a
-   `BroadcastChannel` and is the natural follow-up.
+4. 🚧 **Cross-tab is SAFE but coarse; cross-process is still open.** A second tab on the same OPFS origin
+   now learns that the store moved (`BroadcastChannel`, keyed on the flush rather than on events, since a
+   write that emits nothing still moves the store) and **stops**, because the web tier holds a whole-tree
+   snapshot whose flush prunes — a stale tab's write used to delete the other tab's work, measured as two
+   tabs creating one note each and leaving one note on disk. The response is a reload, which is coarse but
+   honest: a running component cannot be rebound to a new filesystem root. What is NOT here is a stale tab
+   catching up in place, or anything crossing a *process* — a CLI writing the same store is unseen.
 
 ## License
 

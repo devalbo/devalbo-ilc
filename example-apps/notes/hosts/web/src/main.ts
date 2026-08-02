@@ -10,11 +10,33 @@
 // event stream, all of which are engine-side. So the slot needs its own way to
 // be wrong out loud, and it only has one if the engine can be swapped out.
 import { enginePort } from "@devalbo/dlc-web/port";
+import { onExternalChange } from "@devalbo/dlc-web/api";
 
 import { mountNotes } from "./view";
 import type { NotesView } from "./view";
 
 const view = mountNotes(enginePort);
+
+// ANOTHER TAB WROTE — reload, because this engine is finished.
+//
+// Wired here rather than in `view.ts` for the reason everything else is: the
+// view takes an `EnginePort` and knows nothing about which host it has, and this
+// is a host fact with no engine in it. It is also not something a slot could
+// sensibly render — the answer is not a different view, it is a different
+// engine.
+//
+// Reload rather than a "refresh" button, and rather than a banner: by the time
+// this fires the worker is already refusing commands, because a stale
+// whole-tree snapshot flushed back to OPFS would PRUNE the other tab's writes.
+// A tab left standing is a dead tab that looks alive.
+//
+// No reload loop: reloading writes nothing, so it broadcasts nothing.
+onExternalChange(() => {
+  location.reload();
+}).catch((e) => {
+  const out = document.getElementById("out");
+  if (out) out.textContent += `ERROR watching for external changes: ${(e as Error).message}\n`;
+});
 
 // `window.app` — drive the app from the dev console.
 //
