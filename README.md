@@ -188,9 +188,14 @@ identical tree through the CLI.
 
 The honest gaps, in the order they matter:
 
-1. 📋 **`dlc-platform` and `@devalbo/dlc-web` are not published**, so every scaffold needs
-   `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
-   proto code, which `/gen/` currently ignores.
+1. 🚧 **The Go module still needs `--platform-path`; the npm package no longer does.**
+   `@devalbo/dlc-web` is consumable as a git ref (see the quick start). `dlc-platform` is not, and the
+   blocker is structural rather than missing work: its module path is `github.com/devalbo/dlc-platform`,
+   but it lives in a subdirectory of `github.com/devalbo/devalbo-ilc`, and Go resolves a module path to its
+   own repo. Two ways out, both real decisions — **move it to that repo** (import paths never change, which
+   is what its go.mod already promises) or **rename the path** to `…/devalbo-ilc/dlc-platform` and tag
+   `dlc-platform/vX.Y.Z` (one repo, but every app's module graph then contains the tool's repo, which
+   `verify-scaffold.sh` currently asserts against).
 2. 📋 **Desktop, embedded, and the remaining capabilities** (sync) are designed and
    unbuilt — see the tasks doc. **The index landed** (`docs/INDEX-PLAN.md`) after being re-scoped away from
    SQLite: `ORDER BY` was the only argument for SQL, and moving the sort into Go makes the index a

@@ -298,12 +298,43 @@ func scaffoldVars(req *dlcv1.NewRequest) map[string]string {
 		// the root-relative one silently resolves to a sibling directory that
 		// does not exist, and npm reports only "package not found".
 		"PlatformPathFrontend": platformPathFrom(webSlot, req.PlatformPath),
-		"PlatformReplace":      platformReplace(req.PlatformPath),
+		// What the web tier's package.json actually depends on. A LOCAL CHECKOUT
+		// when one was named, a GIT REF otherwise — npm reads both, and the second
+		// is what lets a scaffolded app build with no copy of this repo on disk.
+		"PlatformWebDep":  platformWebDep(webSlot, req.PlatformPath),
+		"PlatformReplace": platformReplace(req.PlatformPath),
 		// The manifest must describe what was actually emitted — a [tiers.web]
 		// section in a project with no frontend/ would be a lie the build would
 		// later trip over.
 		"TierSections": tierSections(requestedTiers(req)),
 	}
+}
+
+// PlatformWebRef is the git ref a scaffolded app depends on when no local
+// checkout was named.
+//
+// A REF, NOT A REGISTRY VERSION, and the mechanism is worth stating because it
+// constrains the layout: npm cannot install a package from a SUBDIRECTORY of a
+// git repo — the `#fragment` is a committish, and there is no equivalent of
+// pip's `#subdirectory=`. So `dlc-platform/web` is published as a branch whose
+// ROOT is the package, produced by `scripts/release-dlc-web.sh` (a git subtree
+// split) and tagged. That tag is this constant.
+//
+// Bump it in lockstep with the package's version when a release is cut; a ref
+// that does not exist yet fails at `npm install` with a git error, which is
+// loud but names the wrong problem.
+const PlatformWebRef = "github:devalbo/devalbo-ilc#dlc-web-v0.1.0"
+
+// platformWebDep chooses between a local checkout and the published ref.
+//
+// The local path wins when given, because that is what development against an
+// unreleased platform needs — and it is what this repo's own checks use, so CI
+// exercises the file: path while a real user gets the git one.
+func platformWebDep(subdir, path string) string {
+	if path == "" {
+		return PlatformWebRef
+	}
+	return "file:" + platformPathFrom(subdir, path) + "/dlc-platform/web"
 }
 
 // platformPathFrom re-bases a project-root-relative platform path for a file in

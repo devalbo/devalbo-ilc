@@ -1,9 +1,27 @@
 {
   "name": "@devalbo/dlc-web",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "ILC web host: jco worker, OPFS-backed WASI root, Comlink adapter. Consumed by scaffolded apps as a dependency \u2014 never copied in, so the preview2-shim pin and the OPFS bridge stay fixable in one place.",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/devalbo/devalbo-ilc#readme",
+  "bugs": "https://github.com/devalbo/devalbo-ilc/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devalbo/devalbo-ilc.git",
+    "directory": "dlc-platform/web"
+  },
+  "keywords": [
+    "ilc",
+    "wasm",
+    "webassembly",
+    "component-model",
+    "wasi",
+    "opfs",
+    "local-first",
+    "jco"
+  ],
   "exports": {
     "./api": "./api.ts",
     "./port": "./port.ts",
@@ -20,6 +38,12 @@
     "./files": "./files.ts",
     "./inspector": "./inspector.ts"
   },
+  "files": [
+    "*.ts",
+    "shim/",
+    "README.md",
+    "LICENSE"
+  ],
   "peerDependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",
     "comlink": "^4.4.2",

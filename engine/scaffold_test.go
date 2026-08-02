@@ -93,6 +93,36 @@ func TestShippedTemplatesRender(t *testing.T) {
 	}
 }
 
+// The web tier's dependency has two forms and the DEFAULT is the git ref — that
+// is the whole point of the git-based distribution: a scaffold has to build for
+// someone with no copy of this repo on disk.
+//
+// The `file:` form is what this repo's own checks use (they pass
+// --platform-path), so CI exercises the local path while a real user gets the
+// other one. Both are pinned here because nothing else compares them.
+func TestWebDependencyPrefersTheGitRef(t *testing.T) {
+	noPath := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", Tiers: []string{"native", "web"}})
+	if got := noPath["PlatformWebDep"]; got != PlatformWebRef {
+		t.Errorf("with no --platform-path: got %q, want the published ref %q", got, PlatformWebRef)
+	}
+
+	local := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", PlatformPath: "/opt/ilc", Tiers: []string{"native", "web"}})
+	if got := local["PlatformWebDep"]; got != "file:/opt/ilc/dlc-platform/web" {
+		t.Errorf("with --platform-path: got %q, want a file: dependency", got)
+	}
+
+	// A RELATIVE path must be re-based for hosts/web/package.json, which is four
+	// levels down — the bug platformPathFrom was written for. A root-relative
+	// path here resolves to a sibling directory that does not exist, and npm
+	// reports only "package not found".
+	// Three levels: hosts/web/package.json → hosts → the project root → its
+	// parent, which is where ".." pointed from the project root.
+	rel := scaffoldVars(&dlcv1.NewRequest{Name: "my-app", PlatformPath: "..", Tiers: []string{"native", "web"}})
+	if got := rel["PlatformWebDep"]; got != "file:../../../dlc-platform/web" {
+		t.Errorf("relative --platform-path: got %q", got)
+	}
+}
+
 // The dictionary is the contract between the COMMAND and templates/: every token
 // a template may use comes from a NewRequest field or a derivation of one. Pin
 // the set, so adding a request field without wiring it (or vice versa) is loud.
@@ -101,7 +131,7 @@ func TestScaffoldVarsDictionary(t *testing.T) {
 	want := []string{
 		"ProjectName", "ProjectVersion", "Module", "PkgName",
 		"PlatformPath", "PlatformPathFrontend", "PlatformReplace",
-		"TierSections",
+		"PlatformWebDep", "TierSections",
 	}
 	if len(vars) != len(want) {
 		t.Errorf("dictionary has %d keys, want %d: %v", len(vars), len(want), vars)

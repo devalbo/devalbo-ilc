@@ -45,6 +45,11 @@ run_check "T-B2.3" "scaffold builds and runs (dlc new -> gen -> build -> run)" .
 run_check "T-B2.4" "scaffold golden (the tree is exactly what we meant)" make -s verify-scaffold-golden
 run_check "T-B2.5" "example apps build and pass (they consume the platform)" ./scripts/verify-example-apps.sh
 run_check "T-B2.6" "platform gen is committed and current (consumers cannot run buf)" ./scripts/verify-platform-gen.sh
+# The npm half of the same claim. `exports` and `files` are two lists that must
+# agree, edited at different times, and a mismatch is invisible here — every file
+# is on disk in this repo, so every import resolves. It breaks only for someone
+# who installed the package.
+run_check "T-B2.7" "@devalbo/dlc-web ships what it advertises" ./scripts/verify-npm-package.sh
 
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then
