@@ -1,8 +1,8 @@
 # The derived index — implementation plan (§6.2, §7.1)
 
-**Status: BUILT 2026-08-02** — Phases 2 and 3 are done and the index is live in notes. Phase 0 (the
+**Status: DONE 2026-08-02** — Phases 2–5 are complete and the index is live in notes. Phase 0 (the
 synchronous-query gate) ran and is kept for its findings; Phase 1 shipped, was superseded, and is reverted.
-Phases 4–6 remain. Was `SQLITE-INDEX-PLAN.md`, and the reversal is §0. Written in the shape of [`EVENTS-PLAN.md`](./EVENTS-PLAN.md),
+Only **Phase 6** remains, deferred until embedded forces a real KV backend. Was `SQLITE-INDEX-PLAN.md`, and the reversal is §0. Written in the shape of [`EVENTS-PLAN.md`](./EVENTS-PLAN.md),
 [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md) and [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md): design
 decisions first, phases that each leave the tree green, and nothing claimed until it has been broken on
 purpose.
@@ -371,15 +371,27 @@ expectation can live, and `TestDlcOffersNoIndexVerb` is it. Falsified by giving 
 in the harness writes one, the existing filesystem diff compares its bytes across tiers. That is why the
 format is sorted and deterministic — the check is already waiting for it.
 
-### Phase 5 — write it down, and the dogfood pass
+### Phase 5 — write it down, and the dogfood pass — **✅ DONE (2026-08-02)**
 
-- `AGENTS.md`: the never-authoritative rule (D6), the write order (D7), and "the index never travels" (D5).
-- `DEVALBO-ILC-GO-PLAN.md` §6.2 / §7.1 / §6.6: **§6.2's SQLite capability becomes this**, and §6.6's
-  "keep custom `sqlite-host`, needs `ORDER BY`" row is the sentence this plan overturned — it should say so
-  rather than being quietly edited. Decision 12's capability list loses `sqlite-host`.
-- **Dogfood review:** `dlc` will not adopt this — it has no collection to list — and that is a legitimate
-  answer, recorded so the next reviewer does not re-derive it. notes is the consumer; tictactoe has no
-  persistence at all.
+- `AGENTS.md` **§3·7** — the three rules that are easy to break quietly: never authoritative (D6), write
+  file → index → event (D7), never travels (D5), plus the rebuild invariant as a *standing instruction*
+  ("if you add a mutating command, add that assertion to its test") and the "do not add a manifest field"
+  warning with the reason it was reverted.
+- `DEVALBO-ILC-GO-PLAN.md` — **§6.2 is now the derived index** rather than a SQLite capability; **§7.1**
+  carries the write order, the never-authoritative rule, the exclusion and the rebuild invariant, and drops
+  the lock file with the reason; **§6.6's** index row says outright that "needs `ORDER BY`" was the sentence
+  this overturned. Decisions **7**, **9**, **12** and **20** updated; `sqlite-host` is gone from the WIT
+  sketch, the world's imports, the component diagram, the environment matrix, the toolchain table, the
+  `dlc.toml` example and the pitfalls list.
+- **Dogfood review:** `dlc` does not adopt the index — it has no collection to list — and that is recorded
+  as a legitimate answer *and pinned by a test* (`TestDlcOffersNoIndexVerb`, Phase 4). notes is the
+  consumer; tictactoe has no persistence at all.
+
+**One consequence worth its own line: Decision 33's strict/lenient knob is now UNOWNED.** It was explicitly
+parked on "a capability that can genuinely be missing at runtime (the SQLite index)" — and the index turned
+out never to be absent, so the deferral lost its home. D33 now says so, and hands the question to the next
+capability that can actually go missing, which is the only way it gets answered with a real consumer rather
+than in the abstract.
 
 ### Phase 6 (deferred, not scheduled) — a host-provided KV store
 
@@ -433,4 +445,5 @@ behind the same `Store` seam, and inherits D9's two constraints. **The app and i
 8. [x] The `Store` seam has been read as if implementing it on littlefs, and nothing in it assumes a file —
    checked by `memStore` in `index/index_test.go`, which has no filesystem anywhere in it and deliberately
    scans in reverse insertion order to prove ordering lives above the seam.
-9. [ ] `AGENTS.md` carries D5, D6 and D7; the plan's §6.2/§6.6 record that SQL was reconsidered and why.
+9. [x] `AGENTS.md` carries D5, D6 and D7 (§3·7); the plan's §6.2/§6.6/§7.1 record that SQL was
+   reconsidered and why, and Decisions 7/9/12/20/33 are updated.

@@ -4,7 +4,7 @@ A Go-centric re-plan of ILC (Inverted Line of Command). Supersedes the tri-langu
 direction in [`DEVALBO-ILC-PLAN.md`](./archives/DEVALBO-ILC-PLAN.md) for the purpose of this build; incorporates
 [`DEVALBO-ILC-WITH-GO-DRAFT.md`](./archives/DEVALBO-ILC-WITH-GO-DRAFT.md),
 [`DEVALBO-ILC-WITH-GO-2-DRAFT.md`](./archives/DEVALBO-ILC-WITH-GO-2-DRAFT.md) (split-storage / WASI-filesystem /
-SQLite-index / events), and the design interview recorded 2026-07-24.
+derived index / events), and the design interview recorded 2026-07-24.
 
 _Plan date: 2026-07-24._
 
@@ -79,12 +79,12 @@ set, or fewer tiers. The rest are platform invariants.
 | 4 | Capability boundary | **Neutral WIT world** — polyglot-capable; Rust/C-via-WASI can interop |
 | 5 | Embedded floor | **Go/WASM is the floor** (no Rust `no_std` tier); Rust-via-WASI still welcome |
 | 6 | FileSystem | **WASI standard** via Go `os`; host `setPreopens` the root — *not* a custom capability |
-| 7 | Storage model | **Split:** JSON files = source of truth; **SQLite = disposable derived index** |
+| 7 | Storage model | **Split:** JSON files = source of truth; **a disposable derived index** beside them — a projection the engine owns, not SQLite *(re-scoped 2026-07-29, §6.2)* |
 | 8 | On-disk format | **Proto-schema'd canonical JSON** (protobuf governs shape/evolution; binary proto on the wire) |
-| 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT-SQLite |
+| 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT |
 | 10 | Dispatch | **Local-only in V1** (no envelope/routing yet) |
 | 11 | Async bridge (Rich/CM vs WAMR split) | **Rich/CM:** Spike 5 ✅ — stock jco **JSPI** (Node ≥24 + `--experimental-wasm-jspi` + async import/export) awaits Promise host imports; sync transpile cannot (negative control). **No ILC shims.** **Portable/WAMR:** Spike 5 ✅ — TinyGo wasip1 + blocking `wasmimport` host (WAMR native-fn shape). See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
-| 12 | Capability set | WASI FS · SQLite-index · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5) |
+| 12 | Capability set | WASI FS · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5). **No index capability:** the index is engine-owned, so there is nothing for a host to provide or an app to branch on (§6.2) |
 | 13 | Display | **Discovery (`describe`) + draw-command list + retained widget tree**; output-only |
 | 14 | Input *(entry renamed by Decision 28)* | **One universal entry**; host maps native input → command (serial REPL / input-map on MCUs). Originally `execute-cli(argv)`; now `execute(method, request)` — the principle (one entry, host-built input) is unchanged. |
 | 15 | Reactivity | Engine emits **events**; host subscribes; UI invalidates + re-fetches |
@@ -92,7 +92,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 17 | Tiers | **All six supported in V1** (Web · Desktop · CLI · ESP32-S3 · RP2350 · RP2040); an *app* picks a subset (§16.1) |
 | 18 | Embedded exec | **Mixed by capacity:** ESP32-S3 / RP2350 → WAMR+wasm; RP2040 → native TinyGo |
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
-| 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export *(renamed `execute` by Decision 28)*; test host → **WASI Virt**; `sqlite-host` / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
+| 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export *(renamed `execute` by Decision 28)*; test host → **WASI Virt**; the index's storage seam / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
 | 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
 | 22 | ~~CLI interpreter — in-engine~~ **⚠ SUPERSEDED by Decision 28** | *Retained for history.* Originally: the CLI parser lived **inside the engine** (host forwards argv to `execute-cli`), TinyGo-safe, ffcli default (Spike 4). **Reversed by Decision 28** — parsing is a host-side front-end; the engine takes a structured request. Spike 4's bake-off is re-scoped to the *host* parser (ffcli still the reference); its findings (kong panics, cobra `-name`, hand-rolled the leanest) stand as data. |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit *(now `execute`, Decision 28)*, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
@@ -105,7 +105,7 @@ set, or fewer tiers. The rest are platform invariants.
 | 30 | Command surface splits two ways — in-engine vs host-side | A `dlc` command is an **in-engine `execute` handler** if it only touches the **filesystem / app-data** (portable — runs in terminal *and* browser): `new`, `export-fs`, `import-fs`, app-domain commands. It's **host-side orchestration** if it must **spawn the dev toolchain or inspect the machine** (native-only, can't run in wasm/browser): `build`, `run`, `verify`, `doctor`, `gen`, `host add`, `proto`. The native `dlc` host **routes**: a toolchain verb → handle in-host; anything else → build the request and forward to the engine's `execute` (Decisions 28/29). Not a violation of the old 'host forwards argv' — host verbs are *dlc-the-tool's*, not the *app's* surface. Governs where each handler lives + how the native `main()` dispatches. |
 | 31 | Single proto-bytes command boundary; `supported-abis()` negotiation; rich WIT reserved for CM-only caps | The guest exposes **one command boundary** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` + proto-bytes payload; Decisions 28/29) — universal across wasip2 **and** WAMR (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings/resources need the Component Model WAMR lacks — Decision 25). **Rich typed DX is host-side:** the host's generated binding (es-lite/go-lite) presents typed calls and serializes to the one byte boundary — no second guest ABI. A tiny **`supported-abis() -> list<u8>`** export (byte-ABI, readable even on WAMR) lets the guest advertise its boundaries + versions so a host picks the richest it supports. A **second, rich WIT guest boundary is reserved for Component-Model-only capabilities** (streams, `resource` handles, `wasi:http`, CM async) with no byte equivalent — added *per-capability*, negotiated, degrading to byte/absent on WAMR — never for the general command surface. When both exist they're two bindings over one shared registry (the caps-seam pattern), not duplicated logic. |
 | 32 | Capability introspection: **manifest for static facts, events for changes** — carried as data on the one command boundary. *BUILT — [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md); see §6.4a for how the shipped design differs.* | An app asks "what can this host do?" (display resolution, colour format, which render paths, is there an index) **without a new WIT surface**. The host pushes a protobuf **environment manifest** at launch — phase 1 of the two-phase launch (§5.5) — via a platform command in the core-lifecycle block (`SetEnvironment`, id reserved in 1–99), and **re-sends it whenever a fact changes** (window resize, rotation, a display hot-plugged). Static facts are therefore cheap and always present; volatile facts arrive as an update rather than a poll, and the engine may fan that out to the UI through Events (§6.3). **Why data, not new imports:** we just consolidated to a single `execute(method, request)` boundary (Decision 31), and a per-capability `describe()` import would reopen a second one — one that WAMR-portable tiers would have to mirror. A manifest is bytes on the boundary already proven to cross every tier, versioned by `buf breaking` like everything else. **Absence becomes a data question, not a linking one:** WIT has no optional imports, so a component cannot link against a display the host lacks; the world still declares the capability and a tier without a screen supplies a stub, but the engine never calls it because the manifest already said `display: none`. That keeps ONE artifact across tiers (which the Decision 26 parity check depends on) instead of forking the world per tier. **Cost:** the manifest is a second schema to evolve alongside the command surface, and a host that forgets to re-send after a resize leaves the engine on stale facts — so re-sending is the host contract, and `describe()`-style live queries stay available as a per-capability escape hatch for anything genuinely too volatile to push (none identified yet). |
-| 33 | Events is an IMPORT, and absence is a no-op — capabilities declare **reach**, not **announcement** | The engine's first custom **import** (`devalbo:ilc/events`, `emit(topic: string, payload: list<u8>)`), and the template every later capability inherits. **Flat scalars + bytes, mirroring `execute`** — a rich WIT record would require the Component Model and strand the WAMR/embedded tier (Decision 31); `string + list<u8>` lowers to pointer/length pairs a `//go:wasmimport` can express. **This does not reopen Decision 31:** that governs what the engine *exports* (one command entry, no second way in); imports are the other direction and are how capabilities were always meant to arrive (§5.1). **No return value:** a return would invite hosts to answer, and an answer would make the engine wait on a host — on the web tier, blocking the worker inside a synchronous component call. **Fire-and-forget, and absence is a no-op, never an error:** an app must never be able to tell whether anyone is listening, because on some tier nobody is, and code that branches on it would behave differently per tier — the divergence this architecture exists to prevent. So there is no strict/lenient switch here; the knob only has teeth for a capability that can genuinely be *missing at runtime* (the SQLite index — §7.1's `unavailable` must be survivable), and belongs there, host-side, never observable by app code. **Topics are namespaced strings** (`ilc.data-changed`, `notes.record-changed`), payloads are proto messages (§7.2) — an app inventing a topic needs no registry allocation, unlike a `method_id`; the cost is that a typo'd topic silently matches nothing. **Payloads are deliberately not diffs:** the files are the truth (§7.1), and a precise change list would be a second source a subscriber could act on without re-reading. **Capabilities in `dlc.toml` declare what an app can REACH, not what it can ANNOUNCE** — console/filesystem/display/index/network are privileges a host could refuse; emitting carries nothing back and cannot be refused, so events is **not** declared. A manifest entry that gates nothing and can be denied by no one is a comment, not a permission. **Events join parity** (a third dimension, interleaved into the result stream) because an emission is an observable effect of a command: if native emits and wasm does not, the tiers have diverged where a user would notice. **Host-side ordering guarantee:** the web host holds a command's events until its OPFS flush completes, so an event never arrives before the change it announces is durable. **Re-entrancy is the standing hazard** — a host must not call `execute` from a sink; the web host is safe by construction (message boundary), a native host must defer. |
+| 33 | Events is an IMPORT, and absence is a no-op — capabilities declare **reach**, not **announcement** | The engine's first custom **import** (`devalbo:ilc/events`, `emit(topic: string, payload: list<u8>)`), and the template every later capability inherits. **Flat scalars + bytes, mirroring `execute`** — a rich WIT record would require the Component Model and strand the WAMR/embedded tier (Decision 31); `string + list<u8>` lowers to pointer/length pairs a `//go:wasmimport` can express. **This does not reopen Decision 31:** that governs what the engine *exports* (one command entry, no second way in); imports are the other direction and are how capabilities were always meant to arrive (§5.1). **No return value:** a return would invite hosts to answer, and an answer would make the engine wait on a host — on the web tier, blocking the worker inside a synchronous component call. **Fire-and-forget, and absence is a no-op, never an error:** an app must never be able to tell whether anyone is listening, because on some tier nobody is, and code that branches on it would behave differently per tier — the divergence this architecture exists to prevent. So there is no strict/lenient switch here; the knob only has teeth for a capability that can genuinely be *missing at runtime*, host-side, never observable by app code. **That knob is now unowned:** it was parked on the index, and the index turned out never to be absent (§6.2), so the next capability that can genuinely go missing at runtime inherits the question — with a real consumer, which is the only way to answer it. **Topics are namespaced strings** (`ilc.data-changed`, `notes.record-changed`), payloads are proto messages (§7.2) — an app inventing a topic needs no registry allocation, unlike a `method_id`; the cost is that a typo'd topic silently matches nothing. **Payloads are deliberately not diffs:** the files are the truth (§7.1), and a precise change list would be a second source a subscriber could act on without re-reading. **Capabilities in `dlc.toml` declare what an app can REACH, not what it can ANNOUNCE** — console/filesystem/display/network are privileges a host could refuse; emitting carries nothing back and cannot be refused, so events is **not** declared. A manifest entry that gates nothing and can be denied by no one is a comment, not a permission. **Events join parity** (a third dimension, interleaved into the result stream) because an emission is an observable effect of a command: if native emits and wasm does not, the tiers have diverged where a user would notice. **Host-side ordering guarantee:** the web host holds a command's events until its OPFS flush completes, so an event never arrives before the change it announces is durable. **Re-entrancy is the standing hazard** — a host must not call `execute` from a sink; the web host is safe by construction (message boundary), a native host must defer. |
 | 34 | The **host layer**: per-app, per-tier code is a named slot with a contract — and Display becomes **optional** *(the optional-vs-required axis is superseded by Decision 35 — it is push-vs-pull)* | *Planned — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md).* `engine/` vs `engine/platform/` drew a line between an app's own code and what every app inherits; **`hosts/` never got the same line**, and it shows: `hosts/web/` is pure runtime, `hosts/native/` mixes runtime with `dlc`'s own commands, and `notes` ships the same layer twice under two names (`hosts/native/` and `frontend/`). So: **host runtime** (inherited, identical for every app) vs **tier slot** (`hosts/<tier>/`, this app's presentation and input on that tier), one per tier declared in `dlc.toml`. **The app's `.proto` is the interface between an engine and its hosts** — commands in, events out, nothing else crosses. That reframes the schema as the app's published API to multiple independent host implementations, which is why **Decision 33's "topics are not a wire contract" reverses**: once a host *renders* from a payload, changing that payload breaks hosts, so event schemas get declared and **locked** like `method_id`. **The rule that carries the whole layer: host code renders, it never decides.** Parity compares command results, the written filesystem, and the event stream — all engine-side — so a tier slot is invisible to it *by construction*. Two hosts that each compute whether a board is won will eventually disagree on one tier only, with every existing check green. The engine decides `winner`; a host may highlight the winning line the engine named, and may not find one. Mechanically enforced by **host parity** (two slots, one synthetic event stream, compare normalized renderings), which is the only automatable check this layer will ever have. **This adds a THIRD render path to §6.4** — semantic events the host interprets — and it is *additive and already optional by Decision 33's D4*: a host that does not recognize a topic ignores it and the app cannot tell, so an app emits semantic events unconditionally and works with a dumb host (re-read the files, render app-side) and a smart host (draw natively) with no app-side branching. **Display therefore drops to optional and becomes the app author's call**, because the semantic path costs one small slot per tier and no new capability, no new schema, no new WIT — where draw-list + widget tree cost a whole capability and are only better when an app wants to write presentation *once*. **Consequence for Decision 32:** the manifest's headline justification was so a handler could branch on display facts, and a host-rendered app never learns there is a screen; what stays load-bearing is the non-display half (is there an index, what kind of FS root). **Cold start is a command, not an event** — events are ephemeral by design, so a slot that renders only from the stream is blank on reload; prime with a query, take events as deltas. **And an event payload may be rendered but never written back from**, which keeps §7.1 intact: a render is not a mutation and a stale one self-corrects on the next event, whereas a write-back makes the event a second source of truth. |
 | 35 | Render decisions belong to the **tier**; a shared render is **pulled**, never pushed | *Direction — nothing built. See §6.4 and [`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1e.* **A tier knows its timing and its constraints better than the engine can** — refresh rate, whether partial updates are cheap, how much RAM a framebuffer may take, whether it is on battery, what is already on screen. An engine emitting draw commands knows none of that, and telling it would take a manifest field per constraint: a list with no end. **So the split is three-way.** **Timing** is the tier's — when to repaint. **Whether to use a shared render at all** is the tier's — a constrained tier may decline the draw list and render from semantic state instead (Decision 34's third path). **Content, when asked, is the engine's** — so two tiers that *do* use it cannot disagree about what is true, which is the Decision 34 rule this preserves. **Mechanically that makes Display an EXPORT, not an import:** `render(state) -> draw-list` as the app's own command in its own `method_id` band, pulled over the `execute(method, request)` boundary Decision 31 already insists is the only way in — **no new WIT, no new import, and no stub obliged on a screenless tier** (`keeb-native` has no display at all). **Which makes "is Display optional?" the wrong question.** Decision 34 asked optional-vs-required; the axis is **push-vs-pull**, and a *required* pulled render is harmless because nothing must call it. **It also strengthens §6.4's justification.** That section argues for the semantic path from *dissimilarity of output* — DOM, a TFT grid and terminal ASCII share no structure. This argument survives a case that one does not: two tiers on ONE screen (`badge-native` / `badge-wamr`) look like the case where a shared draw list should win, until you notice **one runs an interpreter and the other does not**, so their envelopes differ though their pixels are identical. It is not the pair that decides, it is who knows the cost. **Decision 32 is untouched, and it is worth saying so.** Its argument — WIT has no optional imports, so absence cannot be expressed by omitting one, so express it as data — is general to *any* import; Display was the illustration, not the basis. The filesystem is an import too (`wasi:filesystem`, via `include wasi:cli/imports`), so a tier without one still links it and the host supplies something that fails. That is the manifest's load-bearing case today, and pulling a render changes nothing about it. **What pull removes is the LINKING obligation, not the INFORMATION need**, and conflating those is easy: no import means no stub owed by a screenless tier, but an app that draws its own presentation still has to know the canvas. So resolution and colour format enter the manifest **when the first app uses an app-side render path** and not before (§6.4a, which records why they are absent today). **And when a host-provided key-value store eventually lands, the honest fact is "does this host provide a key-value store", not "is there an index"** — `INDEX-PLAN.md` D8, after `Environment.index` was added and reverted the same day for exactly that reason. **Cost:** an import can draw *mid-handler* and a pulled command cannot, so the engine can never paint during a command. For state-driven UIs — every app here — the host repainting after a change is sufficient and arguably better, since the host chooses the moment. **And the draw vocabulary is the app author's to keep straight** between the engine and each slot: nothing enforces it, and **host parity compares renderings, not intentions**, so a rasterizer that quietly reinterprets a command is invisible to every check that exists. That is the same exposure the semantic path already has, and the reason "the author coordinates the tier and the engine" is a responsibility rather than a formality. |
 
@@ -185,9 +185,9 @@ hosts/desktop/build/    # wails output
 │   └── parity-runner/              # dev tool: golden method-vectors through the native engine (§11)
 ├── gen/                            # generated: wit-bindgen-go (caps) + buf (proto) for go & ts
 ├── hosts/
-│   ├── native/                     # Go host: engine in-process (Decision 26) + os FS + modernc sqlite (desktop/CLI)
+│   ├── native/                     # Go host: engine in-process (Decision 26) + os FS (desktop/CLI)
 │   ├── desktop/                    # Wails wrapper over hosts/native + webview
-│   ├── web/                        # TypeScript host: worker.ts (jco + OPFS + sqlite-wasm), api.ts, hooks/
+│   ├── web/                        # TypeScript host: worker.ts (jco + OPFS), api.ts, hooks/
 │   └── embedded/                   # ESP32-S3/RP2350: C host (ESP-IDF/arduino-pico) embedding WAMR + platformio.ini;
 │                                    #   RP2040: native TinyGo (Go) linking the engine
 ├── frontend/                       # React + Vite UI (web + desktop webview)
@@ -211,8 +211,7 @@ hosts/desktop/build/    # wails output
 | Proto codegen (TS) | **`protoc-gen-es-lite`** (`@aptre/protobuf-es-lite`) — matching reflection-free TS/JS, built to pair with `protobuf-go-lite` (same maintainer). Web host only. |
 | Engine → wasm | **TinyGo `-target=wasip2`** → a WASM component in one shot (validated — Spike 1; TinyGo supplies `cabi_realloc` + wires `_initialize`). World `include`s `wasi:cli/imports`; WASI WIT deps vendored under `wit/deps/`. The `wasip1`+`wasm-tools` **adapter path is abandoned** (fragile — §5.3). |
 | Web instantiation | **`@bytecodealliance/jco`** transpile + `preview2-shim` (WASI/OPFS) |
-| Web SQLite | **`@sqlite.org/sqlite-wasm`** (OPFS) |
-| Native/desktop/CLI runtime | **engine linked in-process** (native Go, Decision 26) + `modernc.org/sqlite` + **Wails v2**; wasmtime kept for the wasm parity build |
+| Native/desktop/CLI runtime | **engine linked in-process** (native Go, Decision 26) + **Wails v2**; wasmtime kept for the wasm parity build |
 | Embedded runtime | **WAMR** on ESP32-S3 / RP2350 (official Espressif WAMR ESP-IDF component); **TinyGo native** (RP2040) |
 | Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
 | Async | Spike 5: Rich/CM ✅ (jco JSPI on Node ≥24); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
@@ -274,7 +273,7 @@ image; Devbox ships a reproducible recipe that also runs **natively** on the dev
 
 ```
                     ┌───────────────────────── engine.wasm (Go, shared, portable) ─────────────────────────┐
-                    │  imports: wasi:filesystem, wasi:cli(stdio), sqlite-host, event-host, display-host    │
+                    │  imports: wasi:filesystem, wasi:cli(stdio), event-host, display-host                 │
                     │  exports: execute(method: u32, request: list<u8>) -> command-result                    │
                     └───────────────────────────────────────────────────────────────────────────────────────┘
    web        desktop         cli            esp32-s3         rp2350           rp2040
@@ -328,7 +327,7 @@ in-process, with that same wasm built for the parity check (Decision 26).
 | **Web** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **jco** | WIT imports (Component Model) | baseline |
 | **Desktop** | native binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity/web reuse) | **direct Go linkage** (`caps_native`); wasm build uses WIT imports | engine runs **in-process** (Decision 26); wasm anchors identity |
 | **CLI** | native `dlc` binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity) | **direct Go linkage** (`caps_native`); wasm may expose `wasi:cli/command` `run()` | engine runs **in-process** (Decision 26); wasm = CI parity |
-| **ESP32-S3** | `engine.core.wasm` | TinyGo→wasip1 → **WAMR** (no adapter) | **WAMR native-function registration** (C) | **no CM / WASI-0.2**; console = WASI-p1 fds → UART; sqlite = `unavailable`; caps are C native fns |
+| **ESP32-S3** | `engine.core.wasm` | TinyGo→wasip1 → **WAMR** (no adapter) | **WAMR native-function registration** (C) | **no CM / WASI-0.2**; console = WASI-p1 fds → UART; the index is engine-owned, so it needs no capability; caps are C native fns |
 | **RP2350** | `engine.core.wasm` *or* native | TinyGo→wasip1 → WAMR **if** it ports, else native TinyGo | WAMR native fns, or direct Go linkage | as ESP32-S3, or as RP2040 |
 | **RP2040** | native firmware | TinyGo→`pico` (**no wasm**) | **direct Go linkage** (no imports, no WASI) | no wasm, no WASI; caps are direct Go calls |
 
@@ -342,12 +341,12 @@ change. Keep it in `engine/caps_wasip2.go` / `caps_wasip1.go` / `caps_native.go`
 **Core-wasm capability ABI (why micro is not lossy).** The Component Model only supplies the *typed*
 wiring (Canonical ABI); it is **not** the source of capabilities, so its absence on WAMR loses none. On
 WAMR the same caps are injected via **WASI Preview 1** (filesystem → littlefs, stdio → UART) plus **WAMR
-native-function registration** for the custom ones (`sqlite-host` / `event-host` / `display-host`), which
+native-function registration** for the custom ones (`event-host` / `display-host`), which
 the engine imports as `//go:wasmimport`. What core-wasm can't do is marshal rich types automatically — so
 the custom caps exchange **protobuf bytes over `(ptr, len)`** in guest linear memory (the *same* `list<u8>`
 payloads used on the Component-Model boundary). The micro boundary is therefore **defined and
 capability-complete, just hand-marshaled**. The only caps that degrade on micro do so for **hardware**
-reasons, not the ABI — `sqlite-host` → `unavailable` (file-scan fallback) and full networking — both
+reasons, not the ABI — full networking — both
 surfacing as the `unavailable` variant the engine already handles.
 
 ### 5.4 Host selection & launch model
@@ -395,7 +394,7 @@ only**. **Serverless / new hosts** are just more entry points (a Lambda handler 
 Starting an ILC app is two phases — conceptually always, operationally *usually one command*:
 
 1. **Launch the environment.** The host constructs the injected `Environment`: preopen the WASI filesystem
-   root (native dir / OPFS·FSA / littlefs), open the capability providers (sqlite, events, display),
+   root (native dir / OPFS·FSA / littlefs), open the capability providers (events, display),
    assemble the capability set for this tier. May be **seeded** — e.g. `import-fs` a fixture or snapshot
    (§7.3), which is exactly test/dev setup.
    Phase 1 ends by telling the engine what it just built: the **environment manifest** (§6.4a,
@@ -445,7 +444,7 @@ their stress test.
 - **Byte boundary (protobuf over `(ptr,len)`)** in portable mode — identical on the Component Model and
   core wasm; custom caps bind as **WAMR native functions**, and the host **bounds-checks** guest pointers.
 - **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json`; the engine's *handlers* stay reflection-free. The CLI **parser is host-side** (Decision 28), so on native it may use any lib (cobra/kong/`huh`); TinyGo-safety applies to handlers, not the parser.
-- **Handle `unavailable` for every capability** — SQLite→file-scan, network/RTC maybe-absent; degrade,
+- **Handle `unavailable` for every capability** — network/RTC maybe-absent; degrade,
   never hard-fail.
 - **Short, run-to-completion, non-blocking handlers** — no long-lived goroutines / busy-waits (watchdog +
   power budget).
@@ -458,7 +457,7 @@ their stress test.
 
 **Avoid:**
 - Rich-typed host boundaries in portable mode (can't lower to core wasm); **reflection / `encoding/json` /
-  `net/http` / large stdlib** (breaks or bloats TinyGo); **assuming a capability exists** (SQLite / network
+  `net/http` / large stdlib** (breaks or bloats TinyGo); **assuming a capability exists** (network
   / RTC / a big POSIX FS); **long-running goroutines / busy-waits / preemptive-scheduling assumptions**;
   allocation-heavy hot paths / deep recursion / large stack frames; **high-frequency small flash writes**;
   any direct hardware poke "just for embedded" (kills portability the instant it lands).
@@ -474,12 +473,6 @@ package devalbo:ilc;
 
 // Console I/O is NOT a custom interface — it uses standard WASI stdio
 // (wasi:cli/stdout|stderr|stdin on wasip2; fd_write/fd_read on WAMR's WASI-p1).
-
-interface sqlite-host {
-  // Derived index only. May be unavailable (embedded) → engine degrades to a file scan.
-  // (wasi:keyvalue is the standard KV alternative; we keep SQL because the index needs ORDER BY.)
-  execute-query: func(sql: string, params: list<string>) -> result<string /*rows-json*/, string>;
-}
 
 interface event-host {
   // shape mirrors wasi:messaging (producer) — lands the deferred MQTT/sync story on the standard
@@ -513,7 +506,6 @@ world engine {
   import wasi:cli/stdout;               // console = standard WASI stdio (not a custom interface)
   import wasi:cli/stderr;
   import wasi:cli/stdin;
-  import sqlite-host;
   import event-host;
   import display-host;
   // `execute` is the custom PERSISTENT entry (callable many times on a live instance, for reactive
@@ -528,14 +520,26 @@ world engine {
 
 ### 6.1 FileSystem — WASI standard (§5.2). Not a custom interface.
 
-### 6.2 SQLite-index — split storage
+### 6.2 Derived index — split storage ✅ BUILT
 
-- **SQLite is only an index** over the JSON source-of-truth files. It is imported (not linked) because
-  TinyGo cannot CGO a real driver; the host provides it: **web** → `@sqlite.org/sqlite-wasm` on OPFS;
-  **desktop/CLI** → `modernc.org/sqlite` (pure Go); **embedded** → usually **`unavailable`**.
-- **Graceful degradation:** on ESP32-S3 / RP2350 / RP2040, `execute-query` returns `unavailable`; the
-  engine falls back to scanning the JSON directory (fine for small on-device datasets). Same handler,
-  no index required — the split-storage model makes the index genuinely optional.
+**Not a capability, and not SQLite.** The index is a **projection the engine owns**: the app defines what
+it stores as an ordinary proto message, and queries it in Go — `sort.Slice`, a filter loop, a slice for
+paging. Only STORAGE is a seam, shaped like `wasi:keyvalue` (`Put`/`Delete`/`Scan`/`Clear`) and file-backed
+today. See [`INDEX-PLAN.md`](./INDEX-PLAN.md) §0 for the argument that turned this around; the short form is
+that `ORDER BY` was the entire case for SQL, and a sort in Go is the same sort the fallback already used.
+
+- **The load-bearing property:** ordering and filtering happen ABOVE the seam, so a storage backend can
+  change a *duration* but never a *result*. Swapping backends is a performance change by construction —
+  unlike SQL, where the backend *was* the query engine and every swap risked semantics.
+- **No graceful degradation, because nothing can be absent.** The index's floor is a file on the filesystem
+  the app already has, so it exists on every tier including embedded. App code has **one** path: no
+  `HasIndex()`, no fallback branch, no `unavailable` to handle. The scan did not disappear — it lives in
+  `rebuild-index`, the one operation whose job is reconstructing a projection from the source of truth.
+- **`rebuild-index` is inherited** at method_id 200. The platform owns the verb; the app supplies the scan
+  through `SetIndexRebuilder`, so an app with no collection is never handed a verb that could only fail.
+- **A host-provided KV store is deferred** to the tier that forces it, which is **embedded**: a whole-file
+  rewrite per write is a flash-endurance problem (§5.6) before it is a speed one. When it lands, the app and
+  its queries do not change — that is the test of whether this seam was drawn right.
 
 ### 6.3 Events — reactivity
 
@@ -607,13 +611,14 @@ How a handler learns what the host can do, **without a second boundary**.
 > **Narrowed by Decision 34.** The headline justification here was display facts — resolution, colour
 > format, which render paths exist — so a handler could branch. An app on the semantic render path never
 > learns there is a screen, so that half of the manifest is only needed by the *app-side* Display paths,
-> which are now optional. What stays load-bearing regardless of Display: **is there a SQLite index** (§7.1's
-> `unavailable` fallback) and **what kind of FS root**. Those are also where the strict/lenient knob
-> deferred by Decision 33 was already headed.
+> which are now optional. What stays load-bearing regardless of Display: **what kind of FS root**, and
+> whether it is isolated. **Not** the index — it turned out to need no manifest field at all, because it is
+> engine-owned and therefore always present (§6.2). A field that reports a fact nothing can vary is what
+> ENVIRONMENT-PLAN D6 exists to prevent, and this one was built, then reverted, for exactly that reason.
 
 | Kind of fact | Delivery | Example |
 | --- | --- | --- |
-| **Static** | manifest pushed at launch (phase 1, §5.5) | colour format, render paths supported, is there a SQLite index, FS root kind |
+| **Static** | manifest pushed at launch (phase 1, §5.5) | colour format, render paths supported, FS root kind and isolation |
 | **Volatile** | the host **re-sends** the manifest on change | display resolution after a resize or rotation |
 | **Absent** | a field in the manifest says so | `display: none` on a headless CLI |
 
@@ -649,7 +654,7 @@ the interface *shape* follows the standard so we can adopt or bridge to it later
 | CLI entry (one-shot) | **`wasi:cli/command`** (`run` + `get-arguments` + `exit`) | **Adopt** for the CLI tier; keep the custom persistent `execute` for reactive/multi-call tiers | stable |
 | Filesystem | **`wasi:filesystem`** | already adopted (§5.2) | stable |
 | Test host | **WASI Virt** (compose virtual FS + captured stdio) | **Adopt** on wasip2 tiers | available |
-| Index / store | `wasi:keyvalue` (KV); `wasi-sql` | **Keep custom** `sqlite-host` (needs `ORDER BY`); note KV as the simple-case standard | keyvalue Phase 2; sql early |
+| Index / store | `wasi:keyvalue` (KV); `wasi-sql` | **Mirror `wasi:keyvalue`.** This row used to read "keep custom `sqlite-host`, needs `ORDER BY`" — and `ORDER BY` turned out to be the *whole* case for SQL, so moving the sort into Go removed it (§6.2, INDEX-PLAN §0). A KV store cannot order, which is exactly why ordering belongs above the seam. No host capability today; the seam is file-backed | ✅ seam built; host store deferred |
 | Events / pub-sub | `wasi:messaging` (producer) | **Mirror** in `event-host`; lands the deferred MQTT/sync story on the standard | Phase 2/3 |
 | Display | `wasi-gfx:frame-buffer` / `:surface` (+input) | **Mirror** in `display-host`; don't hard-depend (Phase 2, unstable, WebGPU-centric) | Phase 2 |
 | Network (deferred) | **`wasi:http`** / `wasi:sockets` | future Network capability | http stable |
@@ -661,16 +666,30 @@ the interface *shape* follows the standard so we can adopt or bridge to it later
 **Platform vs app (§0.1):** the **serialization** (protobuf boundary/wire, §7.2) is a **platform
 invariant** — every app uses it. The **split-storage model** (§7.1) is an **optional pattern an app opts
 into**: apps needing indexed local persistence use it; a stateless transformer or calculator skips it
-entirely (console + maybe filesystem, no SQLite index).
+entirely (console + maybe filesystem, no index).
 
-### 7.1 Split-storage model *(optional, app opt-in)*
+### 7.1 Split-storage model *(optional, app opt-in)* ✅ BUILT
 
 - **Source of truth:** proto-schema'd **canonical-JSON** files on the (WASI) filesystem.
-- **Index:** SQLite, purely to avoid full-directory scans; **disposable and rebuildable**.
-- **Write flow (atomic):** `create <id>.lock` → write `<id>.json` → update SQLite index → remove
-  `<id>.lock` → `emit-event("data-changed", …)`.
-- **Recovery:** a `rebuild-index` handler (its own `method_id`) scans all JSON files and rebuilds the index
-  from scratch. The index is never authoritative.
+- **Index:** a projection the engine owns (§6.2), purely to avoid full-directory scans; **disposable and
+  rebuildable**. Present on every tier, so an app never branches on it.
+- **Write flow: FILE first, INDEX second, EVENT last.** A subscriber that re-reads on the event must find
+  both already consistent, and a process that dies in between leaves the truth on disk with only the
+  derived thing behind — which is what `rebuild-index` repairs. **No lock file** (this said `create
+  <id>.lock` for a long time): commands are serialized within an instance, so the lock guards a second
+  writer that does not exist, and a lock nothing can contend for is a branch nothing tests. The failure it
+  was reaching for is a torn *file*, which has a different fix (write-then-rename) and is worth doing when
+  something can tear.
+- **Recovery:** `rebuild-index` (inherited, method_id 200) scans the JSON files and rebuilds from scratch.
+- **The index is NEVER authoritative.** A query returns identifiers and ordering; the record itself is read
+  from its file. Where a list view genuinely needs values, the projection is a **cache** of exactly what
+  that view renders — and a cache that disagrees with a file is a bug `rebuild-index` fixes. Widen it
+  deliberately, never with fields a stale value could mislead someone about.
+- **The index never travels.** It is derived, so it is excluded from `export-fs` bundles: two stores that
+  differ only in their index must not compare unequal.
+- **The invariant that replaces most machinery:** the maintained index equals a rebuilt one. That one
+  property catches a create that forgot to index, a delete that left a row, and a projection that drifted —
+  with no second tier, no second backend, and no golden file.
 
 ### 7.2 One serialization story (protobuf)
 
@@ -685,7 +704,7 @@ entirely (console + maybe filesystem, no SQLite index).
 ### 7.3 Filesystem export/import (first-class)
 
 Because an app's entire state is a **filesystem tree** (the split-storage source-of-truth JSON docs; the
-SQLite index is disposable), the whole environment is portable as a **filesystem bundle**. Export/import is
+the index is disposable and never travels), the whole environment is portable as a **filesystem bundle**. Export/import is
 a **platform primitive** — engine-side, using only the filesystem capability, so it behaves identically on
 every tier (native disk, browser OPFS/FSA, in-memory test FS, embedded littlefs).
 
@@ -781,23 +800,23 @@ were over-provisioned by three orders of magnitude. The realistic future claiman
 
 ## 9. Sync (deferred, simple)
 
-Because SQLite is a disposable index, **multi-node sync operates only on the JSON documents** (Decision 9):
+Because the index is disposable, **multi-node sync operates only on the JSON documents** (Decision 9):
 last-writer-wins document sync over a sync folder / simple transport; each node **rebuilds its index
-locally**. No CRDT-SQLite engine, no cross-tier extension problem. (Automerge per-document is the
+locally**. No CRDT database, no cross-tier extension problem. (Automerge per-document is the
 documented upgrade path if concurrent-edit loss becomes real — out of V1 scope.)
 
 ---
 
 ## 10. Environment matrix (explicit — Decision 17)
 
-| Environment | Engine exec | Host lang | FS root | SQLite index | Display | Console/Input |
+| Environment | Engine exec | Host lang | FS root | Display | Console/Input |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Web** | TinyGo→wasm, **jco** | TypeScript | **OPFS** / **FSA-granted dir** | `sqlite-wasm` (worker) | React (canvas / widget-tree) | `console.*` / React events |
-| **Desktop** | **native in-process** (wasm for parity) | Go (Wails) | `~/.config/<app>` | `modernc.org/sqlite` | Wails webview React | stdio / Wails IPC |
-| **CLI** | **native in-process** (wasm for parity) | Go | cwd / config dir | `modernc.org/sqlite` | none (Console) | argv / stdin |
-| **ESP32-S3** | wasm, **WAMR** | **C** (ESP-IDF) | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / touch input-map |
-| **RP2350** | wasm, **WAMR** | **C** (arduino-pico) / Go | flash / littlefs | *unavailable* → file scan | TFT (draw-list) | UART REPL / buttons |
-| **RP2040** | **native TinyGo** (no wasm) | **Go** | littlefs | *unavailable* → file scan | TFT (draw-list, optional) | UART REPL / buttons |
+| **Web** | TinyGo→wasm, **jco** | TypeScript | **OPFS** / **FSA-granted dir** | React (canvas / widget-tree) | `console.*` / React events |
+| **Desktop** | **native in-process** (wasm for parity) | Go (Wails) | `~/.config/<app>` | Wails webview React | stdio / Wails IPC |
+| **CLI** | **native in-process** (wasm for parity) | Go | cwd / config dir | none (Console) | argv / stdin |
+| **ESP32-S3** | wasm, **WAMR** | **C** (ESP-IDF) | flash / littlefs | TFT (draw-list) | UART REPL / touch input-map |
+| **RP2350** | wasm, **WAMR** | **C** (arduino-pico) / Go | flash / littlefs | TFT (draw-list) | UART REPL / buttons |
+| **RP2040** | **native TinyGo** (no wasm) | **Go** | littlefs | TFT (draw-list, optional) | UART REPL / buttons |
 
 Absent capabilities never crash — they return `unavailable` and the engine degrades (the ILC invariant).
 
@@ -814,7 +833,7 @@ matrix + the cross-tier identity check.
 | **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) builds byte-identical** (sha256); web runs it, CLI/desktop link the engine natively in-process (Decision 26). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes across the native runs and the wasm parity run. (Embedded's core-wasm build + its identity check are deferred with the tier.) |
 | **CLI** | `go build` (engine linked) + `tinygo`→wasm for parity | engine in-process (wasm loaded only for the parity check) | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it; native and wasm-parity outputs match |
 | **Desktop** | `wails build` (engine linked in-process) | Wails boots the linked engine + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
-| **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); SQLite index file in OPFS; event repaints; DevTools shows no host-cap errors |
+| **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); the index file sits beside it in OPFS; event repaints; DevTools shows no host-cap errors |
 | **ESP32-S3** | `tinygo` builds `engine.core.wasm`; **`pio run -t upload`** flashes the WAMR host firmware (wasm embedded) | WAMR instantiates on boot | **`pio device monitor`**: `create-record …`; touch a row | JSON on littlefs; TFT renders the list via `draw`; `describe()` reports 320×240/rgb565; `execute-query`→`unavailable` path exercised (file-scan fallback) |
 | **RP2350** | as ESP32-S3 via PlatformIO (`board=rpipico2`) **if** WAMR ports; else native TinyGo fallback | WAMR (or native) on boot | `pio device monitor` / buttons | same behavior from the *same* `engine.core.wasm` (WAMR) or same source (native); confirms the second embedded target |
 | **RP2040** | `tinygo build` **native** (engine linked) + flash | firmware boot | serial REPL / buttons | same behavior from the **native** build — proves one-source parity where wasm doesn't fit |
@@ -840,7 +859,7 @@ records its findings in `spikes/<name>/README.md`; any finding that contradicts 
 | **0a — Repo migration** | Tag + remove the retired tri-language Phase-1 code; scaffold the Go layout (**§2**) | working tree matches §3; `compiler`/`packages`/root Cargo removed (tagged); `go.mod` + `devbox.json` in place |
 | **0b — Spikes** | The five §11 spikes | All green (or plan adjusted to the reality) |
 | **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (native, engine in-process — Decision 26); `dlc new` emits a minimal self-shaped skeleton; `dlc doctor` (readiness as a command, §16.7); `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; `dlc doctor` reports readiness; golden **FS snapshot** defined |
-| **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: SQLite-index (native + web), Events, lock-file write flow, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
+| **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: the derived index (both tiers, one code path), Events, the file→index→event write order, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
 | **3 — the host layer, then embedded** | **Host layer first** (Decision 34, `HOST-LAYER-PLAN.md`): tier slots, locked event schemas, host parity, tic-tac-toe as App #3. Then **ESP32-S3 WAMR host**; RP2350 + RP2040(native). The **Display capability** (draw-list + widget tree) is optional and follows only if an app wants app-side rendering across tiers | one engine renders as DOM and as ASCII from semantic events, and host parity has been watched to fail on a slot that decided something; then the same engine on an ESP32-S3 TFT; `unavailable` file-scan fallback verified; RP2040 native parity |
 | **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **core module** across the five wasm tiers; golden parity on all six; verification matrix green |
 | **5 — (deferred)** | File LWW sync; protobuf envelope + multi-handler routing; Input capability; Automerge upgrade path | — |
@@ -849,11 +868,11 @@ records its findings in `spikes/<name>/README.md`; any finding that contradicts 
 
 ## 13. Pilot — shared notes/list (Decision 16)
 
-A local-first notes-or-tasks app. Records are proto-schema'd JSON files; SQLite indexes `{id, title,
+A local-first notes-or-tasks app. Records are proto-schema'd JSON files; the derived index projects `{id, title,
 updated_at}`. Handlers: `create-record`, `list-records`, `open-record <id>`, `update-record <id> …`,
 `delete-record <id>`, `rebuild-index`. UI: React on web/desktop; a scrollable list on the ESP32-S3 TFT via
 the Display draw-list. Input: React events / Wails IPC / serial REPL / touch input-map. Sync: file LWW
-(Phase 5). It exercises **every V1 capability** (WASI FS, SQLite-index, Events, Display, Console) across
+(Phase 5). It exercises **every V1 capability** (WASI FS, Events, Display, Console) plus the derived index across
 **every tier**, and is the concrete substrate for the §11 verification matrix.
 
 ---
@@ -914,7 +933,7 @@ in §0.1.
 ### 16.1 The two knobs an app sets
 
 - **Capabilities used (opt-in).** The WIT world is a *superset*; an app imports only what it needs — a
-  calculator: console only; notes: filesystem + sqlite-index + display + events; a sensor logger:
+  calculator: console only; notes: filesystem + display + events; a sensor logger:
   filesystem + network + display. Unused caps are simply not imported; a tier that lacks a *used* cap
   returns `unavailable` and the engine degrades (§6.2).
 - **Tiers targeted (opt-in).** CLI-only, CLI+web, CLI+embedded, or all six (§10). Each tier is a host you
@@ -952,13 +971,13 @@ Two concrete apps come before the platform is abstracted:
    `import-fs` of a template bundle (§7.3). `dlc` proves the two easy tiers (**CLI + web**, via OPFS/FSA)
    on the two simplest caps.
 2. **App #2 — notes/list** (the breadth pilot, §13). Generated *by* `dlc new`, then filled in. Proves the
-   parts `dlc` doesn't touch: Display, SQLite-index, desktop, embedded, rich protobuf. Its tiers/caps are
+   parts `dlc` doesn't touch: Display, the derived index, desktop, embedded, rich protobuf. Its tiers/caps are
    added to both the platform and `dlc new`'s flags as they land — the scaffolder **co-evolves**.
 3. **Extract `dlc-platform/`** once both apps share it (hosts, WIT, build seam, verify harness,
    scaffolder). **Concrete-first, extract-after** — two real consumers before the shared module.
 
 Caveat: `dlc` exercises only console + filesystem, so `dlc new`'s flags start minimal (`--tiers=cli,web`)
-and grow as notes drives out Display / SQLite / embedded.
+and grow as notes drives out Display / embedded.
 
 ### 16.5 Bootstrapping a new app: interview + scaffolder (two layers)
 
@@ -1081,7 +1100,7 @@ name     = "notes"
 module   = "github.com/me/notes"
 platform = "dlc-platform@0.3.1"        # the versioned framework dependency (§16.6)
 
-capabilities = ["console", "filesystem", "sqlite-index", "events", "display"]
+capabilities = ["console", "filesystem", "events", "display"]   # the index is not one — it is engine-owned (§6.2)
 tiers        = ["cli", "web", "desktop", "esp32-s3"]   # an embedded tier ⇒ portable byte ABI (§5.6)
 storage      = "split"                 # or "none" (§7.1)
 ui           = "react"                 # or "tft" / "none"

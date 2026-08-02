@@ -113,15 +113,15 @@ what the listener is watching:
 "files moved" from "the app said something happened" — app-coupled reasoning that misses a command which
 writes without emitting, since a flush happens after *every* `execute` while an event fires only when a
 handler chooses. And a view of app state driven by flushes has to re-read everything on every command,
-including reads, because a flush carries no payload — tolerable while the store is small and wrong once the
-SQLite index lands.
+including reads, because a flush carries no payload — tolerable while the store is small and wrong at any
+real size.
 
 **A capability's absence is a no-op, never an error** (Decision 33). App code must not be able to tell
 whether anyone is listening, because on some tier nobody is, and code that branches on it behaves
 differently per tier — the divergence this architecture exists to prevent.
 
 **`dlc.toml` capabilities declare what an app can REACH, not what it can ANNOUNCE.** Console, filesystem,
-display, index, network are privileges a host could refuse. Emitting carries nothing back and cannot be
+display, network are privileges a host could refuse. The index is not among them — it is engine-owned (§3·7). Emitting carries nothing back and cannot be
 refused, so it is not declared. See Decision 33 before adding the next capability to that list.
 
 ## 3·5 The filesystem root is GRANTED, never assumed
@@ -203,6 +203,41 @@ browser that regains a storage grant is stuck with a surface that no longer matc
 — demonstrated twice, once with every filesystem verb missing on both sides and the run still green. That
 is why `GetCommandSurface` exists and why the surface is a parity vector. When you add a capability, add it
 to the surface vectors too.
+
+## 3·7 The derived index is DERIVED — three rules that are easy to break quietly
+
+The index (§6.2, `dlc-platform/index`) is a projection the engine owns, stored behind a
+`wasi:keyvalue`-shaped seam. It is not a capability, it cannot be absent, and app code never branches on
+it. What follows is what makes "derived" true rather than aspirational.
+
+**1. The index is NEVER authoritative.** A query returns identifiers and ordering; the record itself is
+read from its own file. The moment a handler renders a *value* out of the index, the index is a second
+source of truth and a stale row reaches a user. Where a list view genuinely needs values, the projection is
+a CACHE of exactly what that view renders — widen it deliberately, never with fields a stale value could
+mislead someone about. notes makes this structural: `ListRecordsResponse` carries a projection with no body
+field, so a list cannot serve a stale body even by accident.
+
+**2. Write FILE first, INDEX second, EVENT last.** A subscriber that re-reads on the event must find both
+already consistent. If the process dies in between, the truth is on disk with only the derived thing
+behind — which is what `rebuild-index` repairs. Emitting first races every listener against the write it is
+announcing.
+
+**3. The index never travels.** It is excluded from `export-fs` bundles (`platform.IndexDir`, matched by
+full path in `ReadTree`). Two stores that differ only in their index must not compare unequal, and a
+restored bundle must not carry a projection built from someone else's files. Note it IS visible in a file
+browser — it is a real file, and the view whose whole job is "the files are the truth" must not tell a
+tidier story than the disk does.
+
+**The invariant that replaces most of the machinery: the maintained index equals a rebuilt one.** Assert it
+after every mutation test (`assertIndexMatchesFiles` in notes). It catches a create that forgot to index, a
+delete that left a row, and a projection that drifted — with no second tier, no second backend, and no
+golden file. If you add a mutating command, add that assertion to its test; it is the only check the index
+really needs.
+
+**`rebuild-index` is INHERITED at method_id 200**, and registration follows the APP, not the host: an app
+gets the verb by calling `platform.SetIndexRebuilder`, and an app with no collection never sees it. Do not
+add a manifest field for the index — there was one for an afternoon, and it was reverted because a field
+reporting a fact nothing can vary is what `ENVIRONMENT-PLAN.md` D6 exists to prevent.
 
 ## 3a. The host layer
 
