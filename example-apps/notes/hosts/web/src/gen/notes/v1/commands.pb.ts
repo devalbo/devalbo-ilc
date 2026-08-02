@@ -107,6 +107,58 @@ export const CreateRecordResponse: MessageType<CreateRecordResponse> = /* @__PUR
 });
 
 /**
+ * RecordEntry is the PROJECTION the derived index stores — one per record,
+ * holding what a list view renders and nothing more (docs/INDEX-PLAN.md D6).
+ *
+ * The index is never authoritative. `open` reads the record's own file, because
+ * the moment a handler renders a value out of the index, the index is a second
+ * source of truth and a stale row reaches a user. What is here is a CACHE of
+ * exactly what `list` draws, and a cache that disagrees with a file is a bug
+ * `rebuild-index` fixes.
+ *
+ * Widening this is a deliberate act, not a convenience. Every field added is a
+ * value that can go stale between a write and a rebuild.
+ *
+ * @generated from message notes.v1.RecordEntry
+ */
+export interface RecordEntry {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id?: string;
+  /**
+   * @generated from field: string title = 2;
+   */
+  title?: string;
+  /**
+   * The first line of the body, CAPPED. Bounded on purpose: an index that stored
+   * whole bodies would be the whole store, which is why the plan rules out
+   * full-text search rather than nearly-implementing it. Hosts still truncate
+   * this to their own width — where to cut a line for a 24-column table is
+   * presentation, and presentation is the slot's (Decision 34).
+   *
+   * @generated from field: string body_preview = 3;
+   */
+  bodyPreview?: string;
+  /**
+   * @generated from field: int64 created_at = 4;
+   */
+  createdAt?: bigint;
+
+};
+
+export const RecordEntry: MessageType<RecordEntry> = /* @__PURE__ */ createMessageType({
+    typeName: "notes.v1.RecordEntry",
+    fields: [
+        { no: 1, name: "id", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "title", kind: "scalar", T: ScalarType.STRING },
+        { no: 3, name: "body_preview", kind: "scalar", T: ScalarType.STRING },
+        { no: 4, name: "created_at", kind: "scalar", T: ScalarType.INT64 },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * @generated from message notes.v1.ListRecordsRequest
  */
 export interface ListRecordsRequest {
@@ -120,16 +172,19 @@ export const ListRecordsRequest: MessageType<ListRecordsRequest> = /* @__PURE__ 
  */
 export interface ListRecordsResponse {
   /**
-   * @generated from field: repeated notes.v1.Record records = 1;
+   * A projection served from the index, not whole records read by opening every
+   * file. A list literally CANNOT render a stale body, because it has none.
+   *
+   * @generated from field: repeated notes.v1.RecordEntry entries = 1;
    */
-  records?: Record[];
+  entries?: RecordEntry[];
 
 };
 
 export const ListRecordsResponse: MessageType<ListRecordsResponse> = /* @__PURE__ */ createMessageType({
     typeName: "notes.v1.ListRecordsResponse",
     fields: [
-        { no: 1, name: "records", kind: "message", T: () => Record, repeated: true },
+        { no: 1, name: "entries", kind: "message", T: () => RecordEntry, repeated: true },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

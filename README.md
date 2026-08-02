@@ -101,7 +101,8 @@ degradation path is designed but unexercised: only Console + Filesystem exist, a
 | **Host-side arg parsing** (Decision 28) | ✅ every tier builds requests — argv in `hosts/native`, a form on the web. The engine has **one** entry, `execute(method, request)` |
 | **Events** (§6.3) — the engine's first custom capability *import*: `platform.Emit(topic, payload)` → host subscription → UI re-reads | ✅ same code both tiers; parity compares the emitted stream; the browser repaints for a write no UI handler made |
 | **Environment manifest** (§6.4a) — the host states what it can DO; capability verbs register from it, so a command a host cannot serve is marked unavailable rather than failing as `unknown method_id` | ✅ `platform.Boot` sends it; parity compares the manifest **and** the registered command surface; a capability can go away mid-session and come back |
-| SQLite index · Display · Network · sync | 📋 the index is next — the manifest is what makes its `unavailable` expressible |
+| **Derived index** (§6.2) — a projection the engine owns, stored behind a `wasi:keyvalue`-shaped seam that is file-backed today | ✅ `rebuild-index` is inherited; notes maintains one and `list` answers from it **with no branch on any tier**. Not SQLite: the sort is Go, so the backend can change a duration but never a result. The invariant is that a maintained index equals a rebuilt one |
+| Display · Network · sync | 📋 |
 
 ## Repository layout
 
@@ -170,11 +171,13 @@ The honest gaps, in the order they matter:
 1. 📋 **`dlc-platform` and `@devalbo/dlc-web` are not published**, so every scaffold needs
    `--platform-path`. Publishing the Go module additionally requires committing the platform's generated
    proto code, which `/gen/` currently ignores.
-2. 📋 **Desktop, embedded, and the remaining capabilities** (the derived index, sync) are designed and
-   unbuilt — see the tasks doc. The **index is the current focus** and has a plan
-   (`docs/INDEX-PLAN.md`); it was re-scoped away from SQLite once it became clear that `ORDER BY` was the
-   only argument for SQL, and that moving the sort into Go makes the index a projection cache the engine
-   can own on every tier — including embedded, which SQLite could never reach. Events is the capability
+2. 📋 **Desktop, embedded, and the remaining capabilities** (sync) are designed and
+   unbuilt — see the tasks doc. **The index landed** (`docs/INDEX-PLAN.md`) after being re-scoped away from
+   SQLite: `ORDER BY` was the only argument for SQL, and moving the sort into Go makes the index a
+   projection cache the engine owns on every tier — including embedded, which SQLite could never reach. It
+   costs no host capability, so there is nothing for an app to branch on. What remains there is a real KV
+   backend, which **embedded forces first** — a whole-file rewrite per write is a flash-endurance problem
+   before it is a speed one. Events is the other capability
    that landed, and it built the `caps_native` / `caps_wasip2` seam the rest of them inherit. **Display is now optional** (Decision 34): an app either
    renders app-side through that capability, or emits a *semantic* event and lets each host draw it
    however that tier likes — the second costs no capability at all, so it goes first.

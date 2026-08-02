@@ -118,14 +118,9 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 				}
 				return nil
 			}),
-			// dlc keeps NO index — it has no collection to list — so its engine
-			// never registers this verb and the CLI marks it unavailable. The
-			// renderer exists anyway because the CLI surface is generated from the
-			// platform's .proto for every app that inherits it, and a declared
-			// command with no renderer is a startup error by design (see
-			// cli/run.go). Recorded rather than worked around: "dlc does not adopt
-			// the index" is a legitimate answer (INDEX-PLAN.md Phase 5), not an
-			// omission for a later reader to re-derive.
+			// dlc has no collection, so its engine never registers this verb and
+			// the CLI marks it unavailable — but every command in the inherited
+			// surface owes a renderer (cli/run.go).
 			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
 				_, err := fmt.Fprintf(out, "indexed %d entries\n", r.GetEntries())
 				return err

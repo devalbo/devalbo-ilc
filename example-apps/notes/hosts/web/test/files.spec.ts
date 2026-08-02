@@ -74,6 +74,31 @@ test("sizes are shown, because existing and being right are different claims", a
   await expect(page.getByTestId("count")).toHaveText("1", { timeout: 30_000 });
 
   await page.goto("/files.html");
-  await expect(page.getByTestId("files-summary")).toContainText("1 file(s)");
+  // TWO files for one note: the record and the derived index beside it. The
+  // browser shows the filesystem as it IS — hiding the index here would make the
+  // one view whose whole job is "the files are the truth" tell a tidier story
+  // than the disk does.
+  await expect(page.getByTestId("files-summary")).toContainText("2 file(s)");
   await expect(page.getByTestId("files-list")).toContainText("B");
+  await expect(page.getByTestId("file-records/buy-milk.json")).toBeVisible();
+});
+
+// The index is a real file in the store and a DERIVED one — which is exactly the
+// pair of facts a bundle has to tell apart. It shows up in the file browser (see
+// above) and must not show up in an export.
+test("the index is on disk but never in a bundle", async ({ page }) => {
+  await page.getByTestId("title").fill("Buy milk");
+  await page.getByTestId("create").click();
+  await expect(page.getByTestId("count")).toHaveText("1", { timeout: 30_000 });
+
+  await page.goto("/files.html");
+  await expect(page.getByTestId("files-summary")).toContainText("2 file(s)");
+
+  const bundle = await page.evaluate(async () => {
+    const url = "/test/driver.ts";
+    const { exportBundle } = (await import(/* @vite-ignore */ url)) as typeof import("./driver");
+    return exportBundle();
+  });
+  expect(bundle).toContain("buy-milk.json");
+  expect(bundle).not.toContain(".dlc-index");
 });

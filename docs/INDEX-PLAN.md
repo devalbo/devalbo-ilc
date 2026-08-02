@@ -1,8 +1,8 @@
 # The derived index — implementation plan (§6.2, §7.1)
 
-**Status: REVISED 2026-07-29** — was `SQLITE-INDEX-PLAN.md`, and the reversal is §0. Phase 0 (the
-synchronous-query gate) ran and is kept for its findings; Phase 1 shipped and is now recommended for
-**revert**. No other code has moved. Written in the shape of [`EVENTS-PLAN.md`](./EVENTS-PLAN.md),
+**Status: BUILT 2026-08-02** — Phases 2 and 3 are done and the index is live in notes. Phase 0 (the
+synchronous-query gate) ran and is kept for its findings; Phase 1 shipped, was superseded, and is reverted.
+Phases 4–6 remain. Was `SQLITE-INDEX-PLAN.md`, and the reversal is §0. Written in the shape of [`EVENTS-PLAN.md`](./EVENTS-PLAN.md),
 [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md) and [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md): design
 decisions first, phases that each leave the tree green, and nothing claimed until it has been broken on
 purpose.
@@ -55,8 +55,7 @@ store in the OPFS root would hit.
 
 - **`list-records` reads every file to show a list of titles.** At notes' size that is free; the shape is
   what is wrong, and it is the shape every app scaffolded from the template will copy.
-- **Notes' `open` / `update` / `rebuild-index` are blocked on it** (`DEVALBO-DLC-GO-TASKS.md`), and
-  `rebuild-index` has held reserved id 10005 since the app was written.
+- **Notes' `open` / `update` / `rebuild-index` are blocked on it** (`DEVALBO-DLC-GO-TASKS.md`).
 - **§7.1 has promised a disposable index since the beginning** and nothing has ever built one, so the
   "disposable" half — rebuild, exclusion from bundles, never authoritative — is entirely untested prose.
 
@@ -310,20 +309,39 @@ and getting it wrong costs a silently missing command.
 command surface is unchanged and there is nothing new for the surface vectors to compare — the vectors
 arrive with notes in Phase 4, driven by an app that actually has one.
 
-### Phase 3 — notes uses it, and its scan moves into rebuild
+### Phase 3 — notes uses it, and its scan moves into rebuild — **✅ DONE (2026-08-02)**
 
 | File | Change |
 | --- | --- |
-| `example-apps/notes/proto/notes/v1/commands.proto` | `RecordEntry` projection; `RebuildIndex` claiming reserved **10005** |
-| `example-apps/notes/engine/commands.go` | create/delete maintain the index; **`handleListRecords` queries it, with no branch**; the scan becomes the rebuilder |
-| `example-apps/notes/engine/commands_test.go` | D4 after every mutation; ordering is stable |
+| `example-apps/notes/proto/notes/v1/commands.proto` | `RecordEntry` projection; `ListRecordsResponse` returns entries, not records |
+| `example-apps/notes/engine/commands.go` | create/delete maintain the index; **`handleListRecords` queries it, with no branch**; the scan becomes `rebuildIndex`, wired through `SetIndexRebuilder` |
+| `example-apps/notes/engine/commands_test.go` | D4 after every mutation; rebuild repairs a deleted index; `open` reads the file, not the index |
+| both slots + `slot-driver.ts` | render the projection |
+| `hosts/web/test/files.spec.ts` | the index is on disk **and** absent from a bundle — D5 on the tier where the bridge is |
 
-The comment in `handleListRecords` today says the scan *"becomes the `unavailable` branch rather than being
-rewritten"*. Under this plan that is wrong and the comment should say why: there is no branch, and the scan
-moves to the rebuilder.
+**`RebuildIndex` did NOT claim notes' reserved 10005**, which the plan assumed it would. The verb is
+inherited from the platform at id 200 and the app supplies only the scan, so the app-side id was never
+needed — the reservation was deleted rather than kept and explained. That is the design working: an
+inherited verb costs an app no id at all.
 
-*Falsify:* delete the index-maintenance call from `handleCreateRecord` → the D4 assertion fires
-immediately, in the app's own tests, with no new harness.
+*Falsified, both watched going red:* deleting the index write from `handleCreateRecord` → `index drifted:
+maintained [], rebuilt [apple zebra]`; deleting it from `handleDeleteRecord` → `maintained [apple zebra],
+rebuilt [apple]`. In the app's own tests, with no new harness, exactly as D4 predicted.
+
+**Three things Phase 3 decided that the plan left open:**
+
+1. **`ListRecordsResponse` returns the PROJECTION, not records.** D6 says a list must not render values out
+   of the index, and the structural way to guarantee that is to make the response incapable of carrying
+   one: there is no body field to serve stale. `open` still reads the record's own file, and a body longer
+   than the projection's cap is what proves the two are different reads.
+2. **The preview is capped in the ENGINE (200 bytes), truncated in the SLOT.** Bounding what is *stored* is
+   a storage decision — an index holding whole bodies would be the whole store, which is why full-text
+   search is ruled out rather than nearly-built. Where to cut a line for a 24-column table is presentation
+   and stays in the slot (Decision 34).
+3. **The index is VISIBLE in the web file browser, and that stayed.** One note is now two files, and the
+   obvious tidy-up — hide it — would make the one view whose whole job is "the files are the truth" tell a
+   neater story than the disk does. The browser test now asserts both halves: on disk, absent from a
+   bundle.
 
 ### Phase 4 — the checks that are worth a script
 
@@ -383,19 +401,19 @@ behind the same `Store` seam, and inherits D9's two constraints. **The app and i
 
 ## 6. Definition of done
 
-1. [ ] `./scripts/ci.sh full` green.
+1. [x] `./scripts/ci.sh full` green.
 2. [x] The synchronous-answer question is settled in writing — Phase 0, and it now binds Phase 6.
-3. [ ] `list-records` answers from the index on every tier, with **no branch in app code**.
-4. [ ] The maintained index equals a rebuilt one, asserted after every mutation, **watched going red**.
-5. [ ] An exported bundle contains no index file, asserted natively and in the browser. — **half done:**
-   natively in `TestIndexIsExcludedFromABundle`, plus the two cases that path suggested (asking for the
-   index directory *itself*, and a user's own directory that happens to share the name). The browser half
-   is Phase 4, and is cheap now that the exclusion is engine-side rather than in the OPFS bridge.
+3. [x] `list-records` answers from the index on every tier, with **no branch in app code**.
+4. [x] The maintained index equals a rebuilt one, asserted after every mutation, **watched going red** —
+   falsified from both sides, a create that does not index and a delete that leaves a row.
+5. [x] An exported bundle contains no index file, asserted natively and in the browser —
+   `TestIndexIsExcludedFromABundle` plus the two cases that path suggested (asking for the index directory
+   *itself*, and a user's own directory that happens to share the name), and `files.spec.ts` in Chromium.
 6. [x] `rebuild-index` reconstructs an index deleted out from under a running app — `Clear` is
    unconditional and `Scan` of a missing store is empty rather than an error, so a deleted index rebuilds
    from the files with no special case.
-7. [ ] No handler renders a value out of the index (D6), by inspection. — nothing renders from it yet;
-   re-inspect when notes queries it in Phase 3.
+7. [x] No handler renders a value out of the index (D6) — structural rather than by inspection:
+   `ListRecordsResponse` carries a projection with no body to serve stale, and `open` reads the file.
 8. [x] The `Store` seam has been read as if implementing it on littlefs, and nothing in it assumes a file —
    checked by `memStore` in `index/index_test.go`, which has no filesystem anywhere in it and deliberately
    scans in reverse insertion order to prove ordering lives above the seam.

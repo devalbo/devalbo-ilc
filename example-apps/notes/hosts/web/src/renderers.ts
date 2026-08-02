@@ -54,7 +54,7 @@ export const notesRenderers: Record<number, Renderer | undefined> = {
   },
 
   [MethodListRecords]: (bytes) => {
-    const recs = ListRecordsResponse.fromBinary(bytes).records ?? [];
+    const recs = ListRecordsResponse.fromBinary(bytes).entries ?? [];
     if (recs.length === 0) return "(no notes)";
     // A HEADER, and the body excerpt. Without them this printed two columns of
     // id and title — usually identical, because the id is slugged from the
@@ -65,7 +65,7 @@ export const notesRenderers: Record<number, Renderer | undefined> = {
       ...recs.map((r) => ({
         id: r.id ?? "",
         title: r.title ?? "",
-        body: excerpt(r.body ?? ""),
+        body: excerpt(r.bodyPreview ?? ""),
       })),
     ];
     const w = (k: "id" | "title") => Math.max(...rows.map((r) => r[k].length));
@@ -106,9 +106,8 @@ export const notesRenderers: Record<number, Renderer | undefined> = {
       ? "nothing to remove"
       : removed.map((r) => "  - " + r).join("\n");
   },
-  // The derived index. This app maintains none today, so the verb is marked
-  // unavailable — but a renderer is owed by every command in the inherited
-  // surface, and the two tiers must print the same thing (host parity).
+  // The count tells "the rebuild did nothing" apart from "there are no notes".
+  // Worded as the native slot words it — the two tiers print the same thing.
   [MethodRebuildIndex]: (bytes) =>
     `indexed ${RebuildIndexResponse.fromBinary(bytes).entries ?? 0} note(s)`,
 };

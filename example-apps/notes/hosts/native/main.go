@@ -90,7 +90,7 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				return err
 			}),
 			notesv1.MethodListRecords: render(func(out io.Writer, r *notesv1.ListRecordsResponse) error {
-				if len(r.Records) == 0 {
+				if len(r.Entries) == 0 {
 					_, err := fmt.Fprintln(out, "(no notes)")
 					return err
 				}
@@ -100,9 +100,12 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				if _, err := fmt.Fprintf(out, "%-24s %-24s %s\n", "ID", "TITLE", "BODY"); err != nil {
 					return err
 				}
-				for _, rec := range r.Records {
+				// The engine hands over a PROJECTION — id, title, a bounded body
+				// preview — never a whole record. Cutting that preview to this
+				// table's width is this slot's decision and stays here.
+				for _, e := range r.Entries {
 					if _, err := fmt.Fprintf(out, "%-24s %-24s %s\n",
-						rec.GetId(), rec.GetTitle(), excerpt(rec.GetBody())); err != nil {
+						e.GetId(), e.GetTitle(), excerpt(e.GetBodyPreview())); err != nil {
 						return err
 					}
 				}
@@ -158,11 +161,8 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				}
 				return nil
 			}),
-			// notes is the app the index exists for, but it does not maintain one
-			// YET (INDEX-PLAN.md Phase 3) — so this renderer is here and the verb
-			// is marked unavailable until create/list/delete start using it. The
-			// count is the whole response on purpose: it distinguishes "the
-			// rebuild did nothing" from "the collection is empty".
+			// The count is the whole response on purpose: it tells "the rebuild
+			// did nothing" apart from "the collection is empty".
 			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
 				_, err := fmt.Fprintf(out, "indexed %d note(s)\n", r.GetEntries())
 				return err

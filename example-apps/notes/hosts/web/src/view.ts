@@ -128,10 +128,14 @@ export function mountNotes(
       return;
     }
     const decoded = ListRecordsResponse.fromBinary(r.output);
-    records = (decoded.records ?? []).map((rec) => ({
+    // A PROJECTION from the index — id, title, a bounded body preview — never
+    // a whole record. Cutting the preview to what a list line can show is this
+    // slot's decision (excerpt below); bounding what is stored was the
+    // engine's.
+    records = (decoded.entries ?? []).map((rec) => ({
       id: rec.id ?? "",
       title: rec.title ?? "",
-      body: rec.body ?? "",
+      body: rec.bodyPreview ?? "",
     }));
     dom.count.textContent = String(records.length);
     dom.list.replaceChildren(

@@ -18,6 +18,8 @@
 import { execute } from "@devalbo/dlc-web/api";
 import { CreateRecordRequest } from "@gen/notes/v1/commands.pb";
 import { MethodCreateRecord } from "@gen/notes/v1/commands.registry.pb";
+import { ExportFsRequest, ExportFsResponse } from "@gen/devalbo/ilc/v1/platform.pb";
+import { MethodExportFs } from "@gen/devalbo/ilc/v1/platform.registry.pb";
 
 /** Create a note without touching the DOM. Throws on refusal — the test wants a
  *  failure here to look like a failure, not like a missing event. */
@@ -32,4 +34,13 @@ export async function createDirect(title: string): Promise<void> {
     }),
   );
   if (!r.success) throw new Error(r.error ?? "create failed");
+}
+
+/** The BFT bundle as text, so a test can assert what is and is not in it. */
+export async function exportBundle(): Promise<string> {
+  const r = await execute(MethodExportFs, ExportFsRequest.toBinary({}));
+  if (!r.success) throw new Error(r.error ?? "export failed");
+  return new TextDecoder().decode(
+    ExportFsResponse.fromBinary(r.output).bundle ?? new Uint8Array(),
+  );
 }

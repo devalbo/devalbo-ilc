@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/devalbo/dlc-platform"
+	ilcv1 "github.com/devalbo/dlc-platform/gen/go/devalbo/ilc/v1"
 
 	_ "github.com/devalbo/devalbo-ilc/example-apps/notes/engine" // registers commands
 	notesv1 "github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/notes/v1"
@@ -56,6 +57,48 @@ func call(t *testing.T, method uint32, req interface{ MarshalVT() ([]byte, error
 	}
 }
 
+// assertIndexMatchesFiles is D4 (docs/INDEX-PLAN.md): the MAINTAINED index
+// equals a REBUILT one.
+//
+// One assertion for the whole class this design is exposed to — a create that
+// forgets to index, a delete that leaves a row, a projection that drifts from
+// the record it projects. It needs no second tier, no second backend and no
+// golden file, which is why it is cheap enough to run after every mutation
+// rather than once in a dedicated test.
+//
+// It compares through `list`, deliberately: that is the observable an app
+// actually serves, so a divergence is stated in the terms a user would see.
+func assertIndexMatchesFiles(t *testing.T) {
+	t.Helper()
+
+	var maintained notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &maintained)
+
+	call(t, platform.MethodRebuildIndex, &ilcv1.RebuildIndexRequest{}, nil)
+
+	var rebuilt notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &rebuilt)
+
+	if len(maintained.Entries) != len(rebuilt.Entries) {
+		t.Fatalf("index drifted: maintained %v, rebuilt %v", ids(maintained.Entries), ids(rebuilt.Entries))
+	}
+	for i := range maintained.Entries {
+		m, r := maintained.Entries[i], rebuilt.Entries[i]
+		if m.GetId() != r.GetId() || m.GetTitle() != r.GetTitle() ||
+			m.GetBodyPreview() != r.GetBodyPreview() || m.GetCreatedAt() != r.GetCreatedAt() {
+			t.Fatalf("entry %d drifted: maintained %v, rebuilt %v", i, m, r)
+		}
+	}
+}
+
+func ids(entries []*notesv1.RecordEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.GetId())
+	}
+	return out
+}
+
 // Split storage (§7.1): the record IS a readable JSON file, and that file is the
 // source of truth. Asserting the file — not just the response — is what makes
 // this a test of the storage model rather than of the return value.
@@ -89,12 +132,14 @@ func TestListOpenDelete(t *testing.T) {
 		call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: title}, nil)
 	}
 
-	// Sorted, because ListDir sorts — unsorted directory order would differ
-	// between filesystems and diverge native vs wasm.
+	assertIndexMatchesFiles(t)
+
+	// Sorted, and now sorted IN GO over the index rather than by directory
+	// order. Same answer, from a projection instead of two file opens.
 	var list notesv1.ListRecordsResponse
 	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &list)
-	if len(list.Records) != 2 || list.Records[0].Id != "apple" {
-		t.Fatalf("list: %v", list.Records)
+	if len(list.Entries) != 2 || list.Entries[0].GetId() != "apple" {
+		t.Fatalf("list: %v", ids(list.Entries))
 	}
 
 	var opened notesv1.OpenRecordResponse
@@ -119,6 +164,7 @@ func TestListOpenDelete(t *testing.T) {
 	if again.Deleted {
 		t.Error("second delete claimed to remove something")
 	}
+	assertIndexMatchesFiles(t)
 }
 
 // Events (§6.3) — what the engine ANNOUNCES is part of what a command does.
@@ -222,6 +268,68 @@ func TestExportIsACompleteBackup(t *testing.T) {
 	}
 	if !strings.Contains(string(bundle.Output), "keep-me.json") {
 		t.Error("the bundle does not contain the record")
+	}
+	// …and NOT the index (D5). A backup carrying a projection would restore one
+	// built from someone else's files, and would make two identical stores
+	// compare unequal.
+	if strings.Contains(string(bundle.Output), platform.IndexDir) {
+		t.Errorf("the index travelled in the bundle: %s", bundle.Output)
+	}
+}
+
+// The index is DISPOSABLE, and this is what that means in practice: delete it
+// out from under a running app and one inherited command puts it back.
+//
+// Note what is not needed — no migration, no repair mode, no version check. The
+// answer to "what does the index say" is always "rebuild it and see".
+func TestRebuildRepairsADeletedIndex(t *testing.T) {
+	root := inTempRoot(t)
+	for _, title := range []string{"Zebra", "Apple"} {
+		call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: title}, nil)
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, platform.IndexDir)); err != nil {
+		t.Fatal(err)
+	}
+	// Gone means gone: an empty list, not an error. That is the honest state of
+	// a store nothing has written to.
+	var empty notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &empty)
+	if len(empty.Entries) != 0 {
+		t.Fatalf("a deleted index still listed %v", ids(empty.Entries))
+	}
+
+	var rebuilt ilcv1.RebuildIndexResponse
+	call(t, platform.MethodRebuildIndex, &ilcv1.RebuildIndexRequest{}, &rebuilt)
+	if rebuilt.GetEntries() != 2 {
+		t.Fatalf("rebuilt %d entries, want 2", rebuilt.GetEntries())
+	}
+
+	var list notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &list)
+	if len(list.Entries) != 2 || list.Entries[0].GetTitle() != "Apple" {
+		t.Fatalf("after rebuild: %v", ids(list.Entries))
+	}
+}
+
+// D6: the index holds what a LIST renders, and `open` reads the record's own
+// file. A body longer than the projection's cap proves the two are different
+// reads rather than the same one — the list is truncated, the record is whole.
+func TestOpenReadsTheFileNotTheIndex(t *testing.T) {
+	inTempRoot(t)
+	body := strings.Repeat("x", 500)
+	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: "Long", Body: body}, nil)
+
+	var list notesv1.ListRecordsResponse
+	call(t, notesv1.MethodListRecords, &notesv1.ListRecordsRequest{}, &list)
+	if got := len(list.Entries[0].GetBodyPreview()); got != 200 {
+		t.Fatalf("the projection stored %d bytes of body; it must be bounded", got)
+	}
+
+	var opened notesv1.OpenRecordResponse
+	call(t, notesv1.MethodOpenRecord, &notesv1.OpenRecordRequest{Id: "long"}, &opened)
+	if opened.Record.GetBody() != body {
+		t.Fatalf("open returned %d bytes; the record's own file has %d", len(opened.Record.GetBody()), len(body))
 	}
 }
 

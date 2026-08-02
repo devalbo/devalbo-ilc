@@ -100,10 +100,8 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 				}
 				return nil
 			}),
-			// The derived index (§6.2). A new app keeps none, so this verb is
-			// marked unavailable until you call platform.SetIndexRebuilder — the
-			// renderer is here because every command in the inherited surface owes
-			// one, and because it is the shape to copy when you add an index.
+			// The derived index (§6.2). Call platform.SetIndexRebuilder in your
+			// engine to give this verb something to do.
 			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
 				_, err := fmt.Fprintf(out, "indexed %d entries\n", r.GetEntries())
 				return err

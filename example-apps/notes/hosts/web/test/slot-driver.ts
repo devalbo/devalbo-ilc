@@ -30,7 +30,7 @@ let view: NotesView;
 
 /** What the engine will answer `list-records` with, until changed. */
 function listReply(records: Rec[]) {
-  return ok(ListRecordsResponse.toBinary({ records }));
+  return ok(ListRecordsResponse.toBinary({ entries: records }));
 }
 
 /**

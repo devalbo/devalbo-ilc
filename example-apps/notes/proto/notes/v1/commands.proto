@@ -41,9 +41,7 @@ service NotesService {
   // Held for the capabilities this app is meant to drive out (§13) — declared,
   // not commented, so the numbers cannot be claimed twice in the meantime.
   //   10004 = UpdateRecord
-  //   10005 = RebuildIndex  (needs the SQLite-index capability)
   option (devalbo.options.v1.reserved_method_id) = 10004;
-  option (devalbo.options.v1.reserved_method_id) = 10005;
 }
 
 // A note. Stored as ONE canonical-JSON file per record (§7.1 split storage):
@@ -77,9 +75,34 @@ message CreateRecordResponse {
   string path = 2; // where it landed, relative to the filesystem root
 }
 
+// RecordEntry is the PROJECTION the derived index stores — one per record,
+// holding what a list view renders and nothing more (docs/INDEX-PLAN.md D6).
+//
+// The index is never authoritative. `open` reads the record's own file, because
+// the moment a handler renders a value out of the index, the index is a second
+// source of truth and a stale row reaches a user. What is here is a CACHE of
+// exactly what `list` draws, and a cache that disagrees with a file is a bug
+// `rebuild-index` fixes.
+//
+// Widening this is a deliberate act, not a convenience. Every field added is a
+// value that can go stale between a write and a rebuild.
+message RecordEntry {
+  string id = 1;
+  string title = 2;
+  // The first line of the body, CAPPED. Bounded on purpose: an index that stored
+  // whole bodies would be the whole store, which is why the plan rules out
+  // full-text search rather than nearly-implementing it. Hosts still truncate
+  // this to their own width — where to cut a line for a 24-column table is
+  // presentation, and presentation is the slot's (Decision 34).
+  string body_preview = 3;
+  int64 created_at = 4;
+}
+
 message ListRecordsRequest {}
 message ListRecordsResponse {
-  repeated Record records = 1;
+  // A projection served from the index, not whole records read by opening every
+  // file. A list literally CANNOT render a stale body, because it has none.
+  repeated RecordEntry entries = 1;
 }
 
 message OpenRecordRequest {

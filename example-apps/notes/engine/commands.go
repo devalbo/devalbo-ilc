@@ -2,17 +2,24 @@
 //
 // SPLIT STORAGE (§7.1) in practice: each record is ONE canonical-JSON file under
 // `records/`, and that file is the source of truth. There is no database here.
-// An index would only ever be a query accelerator, and a disposable one — which
-// is precisely what lets this same code run on a tier that has no index at all.
+//
+// The DERIVED INDEX (docs/INDEX-PLAN.md) sits beside those files: a projection
+// of what a list view renders, maintained on every write and thrown away
+// whenever it is doubted. It is not a second source of truth and it never
+// travels in a bundle. Note what is absent — there is no branch anywhere in this
+// file for "this tier has no index", because the index is a projection the
+// engine owns and its floor is a file, so it exists wherever `records/` does.
 package engine
 
 import (
 	"errors"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/devalbo/dlc-platform"
+	"github.com/devalbo/dlc-platform/index"
 
 	"github.com/devalbo/devalbo-ilc/example-apps/notes/gen/go/dlcconfig"
 
@@ -24,9 +31,28 @@ import (
 // recordsDir holds one JSON file per record, relative to the host-bound root.
 const recordsDir = "records"
 
+// records is the index over recordsDir, keyed by record id.
+//
+// Opened at init and not lazily: Open only composes a path, so there is nothing
+// to fail at that can be fixed by waiting, and a nil index reached from three
+// handlers is a worse failure than a loud one here.
+var records = mustIndex("records")
+
+func mustIndex(name string) *index.Index {
+	ix, err := index.Open(name)
+	if err != nil {
+		panic("notes: opening the " + name + " index: " + err.Error())
+	}
+	return ix
+}
+
 func init() {
 	platform.RegisterAll()
 	platform.SetVersion(dlcconfig.Display())
+	// The platform owns `rebuild-index`; notes owns the knowledge of what to
+	// scan. This call is also what registers the verb — an app with no index
+	// does not get one.
+	platform.SetIndexRebuilder(rebuildIndex)
 
 	platform.RegisterRaw(notesv1.NotesServiceHandlers(
 		handleCreateRecord,
@@ -54,7 +80,14 @@ func handleCreateRecord(req *notesv1.CreateRecordRequest) (*notesv1.CreateRecord
 		Body:      req.Body,
 		CreatedAt: req.CreatedAt,
 	}
+	// FILE FIRST, INDEX SECOND, EVENT LAST (D7). A subscriber that re-lists on
+	// the event must find both already consistent; and if this dies in between,
+	// the truth is on disk with only the derived thing behind — which is exactly
+	// what `rebuild-index` repairs.
 	if err := writeRecord(record); err != nil {
+		return nil, err
+	}
+	if err := indexRecord(record); err != nil {
 		return nil, err
 	}
 	emitRecordChanged(id, notesv1.MethodCreateRecord)
@@ -64,31 +97,105 @@ func handleCreateRecord(req *notesv1.CreateRecordRequest) (*notesv1.CreateRecord
 	}, nil
 }
 
-// handleListRecords scans the directory.
+// handleListRecords answers from the index. ONE code path, on every tier.
 //
-// A FULL SCAN, deliberately, and this is the finding App #2 exists to produce:
-// §7.1 wants a SQLite index here, and the platform has none — so the fallback
-// path is the only path. It is also proof the fallback is real, since every
-// tier runs it today. When the index lands, this becomes the `unavailable`
-// branch rather than being rewritten.
+// There is no `HasIndex()` check, no degraded mode and no fallback to a scan —
+// not because the fallback was deleted, but because there is nothing for it to
+// fall back from: the index's floor is a file on the filesystem this app already
+// has. The scan still exists; it moved to rebuildIndex, which is the one
+// operation whose job is reconstructing a projection from the source of truth.
+//
+// This is also where an ORDERING lives — in Go, over a materialized slice. That
+// was the whole argument for SQL, and moving it here is what let the index stop
+// being a query engine.
 func handleListRecords(*notesv1.ListRecordsRequest) (*notesv1.ListRecordsResponse, error) {
-	paths, err := platform.ListDir(recordsDir)
+	pairs, err := records.Entries()
 	if err != nil {
-		// No directory yet is an empty list, not a failure.
-		return &notesv1.ListRecordsResponse{}, nil
+		return nil, errors.New("list-records: " + err.Error())
 	}
 	resp := &notesv1.ListRecordsResponse{}
-	for _, name := range paths {
-		if !strings.HasSuffix(name, ".json") {
-			continue
+	for _, p := range pairs {
+		var entry notesv1.RecordEntry
+		if err := entry.UnmarshalVT(p.Value); err != nil {
+			// A projection that will not decode is a corrupt index, not a corrupt
+			// record — so say which, and name the repair. Anything else sends
+			// someone looking through their notes for damage that is not there.
+			return nil, errors.New("list-records: the index is unreadable (run rebuild-index): " + err.Error())
 		}
-		record, err := readRecord(strings.TrimSuffix(name, ".json"))
-		if err != nil {
-			return nil, err
-		}
-		resp.Records = append(resp.Records, record)
+		resp.Entries = append(resp.Entries, &entry)
 	}
+	// By id, which is what the directory listing gave before and what the tests
+	// and both slots expect. Sorting here rather than trusting the store is the
+	// point of D2: a KV store does not promise an order, so the app states one.
+	sort.Slice(resp.Entries, func(i, j int) bool { return resp.Entries[i].GetId() < resp.Entries[j].GetId() })
 	return resp, nil
+}
+
+// rebuildIndex reconstructs the index by scanning `records/` — the scan that
+// used to be `list`, in the one place it belongs.
+//
+// Reached through the platform's inherited `rebuild-index` verb, which is why
+// it returns a count rather than a response message: the platform owns the
+// envelope, this owns the knowledge.
+func rebuildIndex() (uint32, error) {
+	return records.Rebuild(func(put func(string, []byte) error) error {
+		names, err := platform.ListDir(recordsDir)
+		if err != nil {
+			// No directory yet means no records, which rebuilds to an empty index
+			// rather than failing. A fresh app has never written one.
+			return nil
+		}
+		for _, name := range names {
+			if !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			record, err := readRecord(strings.TrimSuffix(name, ".json"))
+			if err != nil {
+				return err
+			}
+			value, err := project(record).MarshalVT()
+			if err != nil {
+				return err
+			}
+			if err := put(record.GetId(), value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// project turns a record into what a list view renders (D6) — and nothing more.
+func project(r *notesv1.Record) *notesv1.RecordEntry {
+	return &notesv1.RecordEntry{
+		Id:          r.GetId(),
+		Title:       r.GetTitle(),
+		BodyPreview: preview(r.GetBody()),
+		CreatedAt:   r.GetCreatedAt(),
+	}
+}
+
+// preview is the first line of a body, capped.
+//
+// Capped in the ENGINE because it is a storage decision — an index holding whole
+// bodies would be the whole store. Where to cut that line for a 24-column table
+// is a different decision, and it belongs to the slot.
+func preview(body string) string {
+	line, _, _ := strings.Cut(body, "\n")
+	const max = 200
+	if len(line) > max {
+		return line[:max]
+	}
+	return line
+}
+
+// indexRecord writes one record's projection.
+func indexRecord(r *notesv1.Record) error {
+	value, err := project(r).MarshalVT()
+	if err != nil {
+		return err
+	}
+	return records.Put(r.GetId(), value)
 }
 
 func handleOpenRecord(req *notesv1.OpenRecordRequest) (*notesv1.OpenRecordResponse, error) {
@@ -114,6 +221,13 @@ func handleDeleteRecord(req *notesv1.DeleteRecordRequest) (*notesv1.DeleteRecord
 	// there changed nothing, and an event saying otherwise would make every
 	// subscriber re-read for no reason — and would make a no-op look like a write
 	// to anyone counting events.
+	//
+	// The index still gets the Delete either way: it costs nothing (an absent key
+	// is a no-op there too) and it is the branch where a leftover row would hide
+	// if the file and the index ever disagreed about whether the record existed.
+	if err := records.Delete(req.Id); err != nil {
+		return nil, errors.New("delete-record: " + err.Error())
+	}
 	if ok {
 		emitRecordChanged(req.Id, notesv1.MethodDeleteRecord)
 	}
