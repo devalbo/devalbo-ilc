@@ -64,9 +64,14 @@ Pin every version in `devbox.json` (+ its lockfile). The **versions matter to wh
 
 ## 3. Platform support
 
+**This section is about the machine you BUILD on.** Where the apps you build can RUN is a different
+question — see the Windows note in [`README.md`](../README.md#windows-apps-ship-there-you-build-them-elsewhere).
+
 - **macOS** (arm64 / x86_64) — fully supported.
 - **Linux** (x86_64 / arm64) — fully supported.
-- **Windows** — via **WSL2** (Nix + Devbox run in the WSL Linux environment, not native Windows).
+- **Windows** — via **WSL2** (Nix + Devbox run in the WSL Linux environment, not native Windows). Native
+  Windows is a **deliberate non-goal for the build side**: devbox is nix-based, and a scaffolded project's
+  `make gen` assumes a unix shell. The binaries you build here do run on native Windows.
 
 ---
 

@@ -83,6 +83,26 @@ make dev-web                               # ✅ dlc in the browser (React UI, O
 📋 A capability a tier lacks returns `unavailable` and the engine degrades gracefully. The graceful-
 degradation path is designed but unexercised: only Console + Filesystem exist, and both tiers have them.
 
+### Windows: apps SHIP there; you BUILD them elsewhere
+
+Two different questions, and only one of them is yes today.
+
+| | State |
+| --- | --- |
+| **A binary your app ships** runs natively on Windows | ✅ the CLI tier cross-builds for `GOOS=windows` on every push, and `dlc-platform`'s tests — dispatch, path containment, BFT, the index — run on a `windows-latest` runner |
+| **Developing an app** (or this repo) on Windows | 🚧 **WSL2**, per [prerequisites](docs/DEVALBO-DLC-PREREQUISITES.md#5-supported-platforms). Devbox is nix-based, and a scaffolded project's `make gen` assumes a unix shell |
+
+**This is a deliberate boundary, not an oversight.** Making `dlc new` produce something buildable on native
+Windows means replacing `make` with `dlc` subcommands and finding a non-nix toolchain story — a real
+project, and one nobody has asked for yet. It is worth doing when a Windows *developer* turns up; it is not
+worth doing speculatively.
+
+**What the ship-side promise actually covers**, since "runs on Windows" is easy to over-claim: paths above
+the filesystem seam stay `/`-separated so a bundle exported on Windows matches one exported on Linux, and
+anything an app turns into a filename is validated against Windows' rules — case-insensitivity, the illegal
+characters, the reserved device names — **on every platform**, so a rule cannot pass on your machine and
+fail on a user's. See `AGENTS.md` §3·9.
+
 > **The CLI does not use a wasm runtime** (Decision 26). It links the engine as a native Go package, which
 > sidesteps `wasmtime-go`'s missing Component Model API and keeps dev fast. The wasm component remains the
 > contract — CI diffs the two.
