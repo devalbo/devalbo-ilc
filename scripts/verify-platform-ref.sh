@@ -115,14 +115,20 @@ fi
 # the first attempt would either cry wolf on every release (you tag, then check
 # immediately) or teach everyone to ignore it. Going direct answers the only
 # question that matters: does the tag exist at the source?
+# `go list -m <module>@<version>`, NOT `go mod download <module>@<version>`:
+# download exits 0 without resolving anything when the argument is not in the
+# build list, so it can report success for a version that does not exist. This
+# probe decides whether a failure is real, so a vacuous success here would turn
+# a genuine "you forgot to tag" into a passing check.
+version="${goreq##* }"
 step "…the proxy said no; asking GitHub directly to find out why"
 if ( cd "$PROJ" && GOPROXY=direct GOSUMDB=off GOFLAGS=-mod=mod \
-	go mod download github.com/devalbo/devalbo-ilc/dlc-platform ) >"$WORK/godirect.log" 2>&1; then
+	go list -m "github.com/devalbo/devalbo-ilc/dlc-platform@$version" ) >"$WORK/godirect.log" 2>&1; then
 	printf "  ${G}✓${Z} go: %s exists at the source\n" "${goreq#require }"
 	printf "  ${R}!${Z} but the module proxy has not caught up yet — TRANSIENT\n"
 	echo "      sum.golang.org cached a 404 from before the tag was pushed. It expires"
 	echo "      on its own; nothing here is wrong. To confirm by hand right now:"
-	echo "          GOPROXY=direct GOSUMDB=off go mod download <module>"
+	echo "          GOPROXY=direct GOSUMDB=off go list -m <module>@<version>"
 	exit 0
 fi
 
