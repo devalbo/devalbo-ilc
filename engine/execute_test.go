@@ -229,6 +229,49 @@ func TestUnknownMethod(t *testing.T) {
 	}
 }
 
+// dlc DOES NOT ADOPT THE DERIVED INDEX, and that is a decision rather than an
+// omission: it has no collection to list. `dlc new` writes a tree and `echo`
+// writes nothing, so there is nothing to project and a `rebuild-index` here
+// could only ever fail.
+//
+// Pinned with a test because the parity vectors CANNOT pin it. They carry
+// requests only and compare native against wasm, so both tiers agreeing on a
+// wrong surface is green — including agreeing to offer a verb this app should
+// not have. An expectation has to live somewhere that has one.
+//
+// If dlc ever grows a collection, the fix is one SetIndexRebuilder call and
+// deleting this test, in that order.
+func TestDlcOffersNoIndexVerb(t *testing.T) {
+	// Booted, not merely rooted: dlc registers from the manifest, so without this
+	// the surface is core-only and the assertion below would pass for the wrong
+	// reason — rebuild-index absent because NOTHING is registered yet.
+	inTempRoot(t)
+
+	var surface ilcv1.GetCommandSurfaceResponse
+	if err := surface.UnmarshalVT(call(t, platform.MethodGetCommandSurface, &ilcv1.GetCommandSurfaceRequest{})); err != nil {
+		t.Fatal(err)
+	}
+
+	registered := map[uint32]bool{}
+	for _, id := range surface.GetMethodIds() {
+		registered[id] = true
+	}
+	if registered[platform.MethodRebuildIndex] {
+		t.Errorf("dlc registered rebuild-index (%d) — it has no collection to project", platform.MethodRebuildIndex)
+	}
+	// Asserted alongside a verb dlc DOES inherit, so this cannot pass by the
+	// surface being empty or the response failing to decode.
+	if !registered[platform.MethodExportFs] {
+		t.Fatalf("export-fs is missing from dlc's surface: %v", surface.GetMethodIds())
+	}
+
+	// And it is undispatchable, not merely unlisted — a host reading the surface
+	// and a host calling blind must reach the same conclusion.
+	if r := engine.ExecuteMethod(platform.MethodRebuildIndex, nil); r.Success {
+		t.Error("rebuild-index dispatched in an app that keeps no index")
+	}
+}
+
 // export-fs → import-fs across the command boundary: scaffold, bundle the tree,
 // import it somewhere else, and get the same files. This is the browser's
 // "download my project" and `dlc new` in one round-trip (§7.3).

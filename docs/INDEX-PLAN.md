@@ -343,17 +343,33 @@ rebuilt [apple]`. In the app's own tests, with no new harness, exactly as D4 pre
    neater story than the disk does. The browser test now asserts both halves: on disk, absent from a
    bundle.
 
-### Phase 4 — the checks that are worth a script
+### Phase 4 — the checks that are worth a script — **✅ DONE (2026-08-02), and smaller than planned**
 
 | File | Change |
 | --- | --- |
-| `verify/parity/method-vectors.json` | vectors that create, list, delete and rebuild |
-| a browser test | an exported bundle contains no index file (D5), asserted on the tier where the bridge is |
+| ~~`verify/parity/method-vectors.json`~~ | **not done, and should not be** — see below |
+| `example-apps/notes/hosts/web/test/files.spec.ts` | ✅ (landed in Phase 3) the index is on disk **and** absent from an exported bundle, in Chromium against the real OPFS bridge |
+| `engine/execute_test.go` | ✅ `TestDlcOffersNoIndexVerb` — dlc offers no index verb, and it is undispatchable rather than merely unlisted |
 
-Existing native↔wasm parity does most of the work here for free: the index is engine-side, so both tiers
-run the same code over the same files, and a divergence would show up in the vectors already being
-compared. **No `verify-index-parity.sh`** — the old plan needed one because SQL and Go had to agree; D4's
-rebuild equivalence replaces it and lives in unit tests.
+**No `verify-index-parity.sh`** — the old plan needed one because SQL and Go had to agree; D4's rebuild
+equivalence replaces it and lives in unit tests.
+
+**And no index vectors either, which was not the plan.** Two facts collide:
+
+1. The vectors run against **dlc's** engine, and dlc keeps no collection — so there is nothing there to
+   create, list, or rebuild. Index vectors would need a second engine in the harness, which is a structural
+   change to `cmd/parity-runner` for a capability whose engine-side code is already covered.
+2. **The vectors carry requests only.** Parity compares native against wasm with no expected output, so two
+   tiers agreeing on a *wrong* surface is green. That is fine for its actual job — catching divergence — but
+   it means a vector can never pin "this verb should be absent".
+
+So the honest check for the decision made in Phase 2 (*registration is an app fact*) is a test where an
+expectation can live, and `TestDlcOffersNoIndexVerb` is it. Falsified by giving dlc a rebuilder:
+`dlc registered rebuild-index (200) — it has no collection to project`.
+
+**What parity still covers for free:** the index is engine-side Go over ordinary files, so the moment an app
+in the harness writes one, the existing filesystem diff compares its bytes across tiers. That is why the
+format is sorted and deterministic — the check is already waiting for it.
 
 ### Phase 5 — write it down, and the dogfood pass
 
