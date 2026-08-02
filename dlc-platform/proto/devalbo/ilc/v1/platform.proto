@@ -20,7 +20,7 @@ import "devalbo/options/v1/options.proto";
 //
 //	     1 –    99   core lifecycle (version; later describe, supported-abis)
 //	   100 –   199   filesystem     (export/import/reset; later read/write/delete/list)
-//	   200 –   299   index (SQLite)
+//	   200 –   299   index (a projection the ENGINE owns — not SQLite; INDEX-PLAN.md §0)
 //	   300 –   399   events
 //	   400 –   499   display
 //	   500 –   599   network
@@ -82,6 +82,21 @@ service PlatformService {
   // Delete everything under a prefix
   rpc ResetFs(ResetFsRequest) returns (ResetFsResponse) {
     option (devalbo.options.v1.method_id) = 102;
+  }
+  // --- index block (200–299) ---
+  // Rebuild the derived index by scanning the files it projects.
+  //
+  // The PLATFORM owns this verb and the APP owns the knowledge — only the app
+  // knows its records live under `records/` and what is worth projecting, so the
+  // work itself comes from SetIndexRebuilder (the same split as SetVersion).
+  //
+  // It is also the correctness anchor (INDEX-PLAN.md D4): the maintained index
+  // must equal a rebuilt one, which is what catches a create that forgot to
+  // index or a delete that left a row behind. Registered only when an app has
+  // actually supplied a rebuilder — an app with no collection to project (dlc
+  // itself) does not get a verb that could only fail.
+  rpc RebuildIndex(RebuildIndexRequest) returns (RebuildIndexResponse) {
+    option (devalbo.options.v1.method_id) = 200;
   }
 }
 
@@ -281,6 +296,17 @@ message ResetFsRequest {
 }
 message ResetFsResponse {
   repeated string removed = 1; // top-level entries that were deleted
+}
+
+// ---- the derived index (§6.2, §7.1) ---------------------------------------
+
+message RebuildIndexRequest {}
+message RebuildIndexResponse {
+  // How many entries the rebuilt index holds. The one number worth returning:
+  // it makes "rebuild did nothing" distinguishable from "rebuild ran and the
+  // collection is empty", which is the difference between a broken rebuilder and
+  // an empty store.
+  uint32 entries = 1;
 }
 
 // ---- events (§6.3) --------------------------------------------------------

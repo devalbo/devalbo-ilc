@@ -15,6 +15,7 @@ const (
 	MethodExportFs          uint32 = 100
 	MethodImportFs          uint32 = 101
 	MethodResetFs           uint32 = 102
+	MethodRebuildIndex      uint32 = 200
 )
 
 // PlatformServiceHandlers builds the dispatch map for PlatformService from typed handlers.
@@ -27,6 +28,7 @@ func PlatformServiceHandlers(
 	exportFsFn func(*ExportFsRequest) (*ExportFsResponse, error),
 	importFsFn func(*ImportFsRequest) (*ImportFsResponse, error),
 	resetFsFn func(*ResetFsRequest) (*ResetFsResponse, error),
+	rebuildIndexFn func(*RebuildIndexRequest) (*RebuildIndexResponse, error),
 ) map[uint32]func([]byte) ([]byte, error) {
 	return map[uint32]func([]byte) ([]byte, error){
 		MethodVersion: func(request []byte) ([]byte, error) {
@@ -90,6 +92,17 @@ func PlatformServiceHandlers(
 				return nil, err
 			}
 			resp, err := resetFsFn(&req)
+			if err != nil {
+				return nil, err
+			}
+			return resp.MarshalVT()
+		},
+		MethodRebuildIndex: func(request []byte) ([]byte, error) {
+			var req RebuildIndexRequest
+			if err := req.UnmarshalVT(request); err != nil {
+				return nil, err
+			}
+			resp, err := rebuildIndexFn(&req)
 			if err != nil {
 				return nil, err
 			}

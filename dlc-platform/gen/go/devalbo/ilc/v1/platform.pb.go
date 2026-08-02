@@ -567,6 +567,38 @@ func (x *ResetFsResponse) GetRemoved() []string {
 	return nil
 }
 
+type RebuildIndexRequest struct {
+	unknownFields []byte
+}
+
+func (x *RebuildIndexRequest) Reset() {
+	*x = RebuildIndexRequest{}
+}
+
+func (*RebuildIndexRequest) ProtoMessage() {}
+
+type RebuildIndexResponse struct {
+	unknownFields []byte
+	// How many entries the rebuilt index holds. The one number worth returning:
+	// it makes "rebuild did nothing" distinguishable from "rebuild ran and the
+	// collection is empty", which is the difference between a broken rebuilder and
+	// an empty store.
+	Entries uint32 `protobuf:"varint,1,opt,name=entries,proto3" json:"entries,omitempty"`
+}
+
+func (x *RebuildIndexResponse) Reset() {
+	*x = RebuildIndexResponse{}
+}
+
+func (*RebuildIndexResponse) ProtoMessage() {}
+
+func (x *RebuildIndexResponse) GetEntries() uint32 {
+	if x != nil {
+		return x.Entries
+	}
+	return 0
+}
+
 // DataChangedEvent is the payload of the platform's `ilc.data-changed` topic:
 // "the filesystem under this prefix changed, re-read what you care about".
 //
@@ -863,6 +895,37 @@ func (m *ResetFsResponse) CloneVT() *ResetFsResponse {
 }
 
 func (m *ResetFsResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *RebuildIndexRequest) CloneVT() *RebuildIndexRequest {
+	if m == nil {
+		return (*RebuildIndexRequest)(nil)
+	}
+	r := new(RebuildIndexRequest)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *RebuildIndexRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *RebuildIndexResponse) CloneVT() *RebuildIndexResponse {
+	if m == nil {
+		return (*RebuildIndexResponse)(nil)
+	}
+	r := new(RebuildIndexResponse)
+	r.Entries = m.Entries
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *RebuildIndexResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
@@ -1175,6 +1238,41 @@ func (this *ResetFsResponse) EqualVT(that *ResetFsResponse) bool {
 
 func (this *ResetFsResponse) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*ResetFsResponse)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *RebuildIndexRequest) EqualVT(that *RebuildIndexRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *RebuildIndexRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*RebuildIndexRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *RebuildIndexResponse) EqualVT(that *RebuildIndexResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Entries != that.Entries {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *RebuildIndexResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*RebuildIndexResponse)
 	if !ok {
 		return false
 	}
@@ -2062,6 +2160,78 @@ func (x *ResetFsResponse) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the RebuildIndexRequest message to JSON.
+func (x *RebuildIndexRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the RebuildIndexRequest to JSON.
+func (x *RebuildIndexRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the RebuildIndexRequest message from JSON.
+func (x *RebuildIndexRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		// no fields
+	})
+}
+
+// UnmarshalJSON unmarshals the RebuildIndexRequest from JSON.
+func (x *RebuildIndexRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the RebuildIndexResponse message to JSON.
+func (x *RebuildIndexResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Entries != 0 || s.HasField("entries") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("entries")
+		s.WriteUint32(x.Entries)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the RebuildIndexResponse to JSON.
+func (x *RebuildIndexResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the RebuildIndexResponse message from JSON.
+func (x *RebuildIndexResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "entries":
+			s.AddField("entries")
+			x.Entries = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the RebuildIndexResponse from JSON.
+func (x *RebuildIndexResponse) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the EnvironmentChangedEvent message to JSON.
 func (x *EnvironmentChangedEvent) MarshalProtoJSON(s *json.MarshalState) {
 	if x == nil {
@@ -2711,6 +2881,75 @@ func (m *ResetFsResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *RebuildIndexRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RebuildIndexRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *RebuildIndexRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *RebuildIndexResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RebuildIndexResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *RebuildIndexResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Entries != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Entries))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *EnvironmentChangedEvent) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -3347,6 +3586,75 @@ func (m *ResetFsResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error)
 	return len(dAtA) - i, nil
 }
 
+func (m *RebuildIndexRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RebuildIndexRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *RebuildIndexRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *RebuildIndexResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RebuildIndexResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *RebuildIndexResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Entries != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Entries))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *EnvironmentChangedEvent) MarshalVTStrict() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -3587,6 +3895,27 @@ func (m *ResetFsResponse) SizeVT() (n int) {
 	var l int
 	_ = l
 	n += protobuf_go_lite.SizeStringSlice(1, m.Removed)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *RebuildIndexRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *RebuildIndexResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Entries)
 	n += len(m.unknownFields)
 	return n
 }
@@ -3841,6 +4170,28 @@ func (x *ResetFsResponse) MarshalProtoText() string {
 }
 
 func (x *ResetFsResponse) String() string {
+	return x.MarshalProtoText()
+}
+func (x *RebuildIndexRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	protobuf_go_lite.TextStartMessage(&sb, "RebuildIndexRequest")
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *RebuildIndexRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *RebuildIndexResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "RebuildIndexResponse")
+	if x.Entries != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "entries")
+		protobuf_go_lite.TextWriteUint(&sb, x.Entries)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *RebuildIndexResponse) String() string {
 	return x.MarshalProtoText()
 }
 func (x *EnvironmentChangedEvent) MarshalProtoText() string {
@@ -4659,6 +5010,99 @@ func (m *ResetFsResponse) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Removed = append(m.Removed, v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RebuildIndexRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RebuildIndexRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RebuildIndexRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RebuildIndexResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RebuildIndexResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RebuildIndexResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Entries", wireType)
+			}
+			m.Entries = 0
+			m.Entries, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -5579,6 +6023,99 @@ func (m *ResetFsResponse) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Removed = append(m.Removed, v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RebuildIndexRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RebuildIndexRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RebuildIndexRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RebuildIndexResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RebuildIndexResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RebuildIndexResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Entries", wireType)
+			}
+			m.Entries = 0
+			m.Entries, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

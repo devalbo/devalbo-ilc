@@ -43,5 +43,11 @@ export const PlatformServiceCLI = [
       { name: "prefix", field: 1, kind: "string", short: "p", help: "subtree to delete (default: whole root)" },
     ],
   },
+  {
+    name: "rebuild-index",
+    method: 200,
+    request: "RebuildIndexRequest",
+    summary: "Rebuild the derived index by scanning the files it projects",
+  },
 ] as const;
 

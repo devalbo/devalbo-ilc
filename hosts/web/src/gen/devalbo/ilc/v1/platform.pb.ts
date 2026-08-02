@@ -548,6 +548,39 @@ export const ResetFsResponse: MessageType<ResetFsResponse> = /* @__PURE__ */ cre
 });
 
 /**
+ * @generated from message devalbo.ilc.v1.RebuildIndexRequest
+ */
+export interface RebuildIndexRequest {
+
+};
+
+export const RebuildIndexRequest: MessageType<RebuildIndexRequest> = /* @__PURE__ */ createEmptyMessageType<RebuildIndexRequest>("devalbo.ilc.v1.RebuildIndexRequest", true);
+
+/**
+ * @generated from message devalbo.ilc.v1.RebuildIndexResponse
+ */
+export interface RebuildIndexResponse {
+  /**
+   * How many entries the rebuilt index holds. The one number worth returning:
+   * it makes "rebuild did nothing" distinguishable from "rebuild ran and the
+   * collection is empty", which is the difference between a broken rebuilder and
+   * an empty store.
+   *
+   * @generated from field: uint32 entries = 1;
+   */
+  entries?: number;
+
+};
+
+export const RebuildIndexResponse: MessageType<RebuildIndexResponse> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.RebuildIndexResponse",
+    fields: [
+        { no: 1, name: "entries", kind: "scalar", T: ScalarType.UINT32 },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * DataChangedEvent is the payload of the platform's `ilc.data-changed` topic:
  * "the filesystem under this prefix changed, re-read what you care about".
  *

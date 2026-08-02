@@ -50,4 +50,10 @@ var PlatformServiceCLI = []clispec.Command{
 			{Name: "prefix", Field: 1, Kind: clispec.KindString, Short: "p", Help: "subtree to delete (default: whole root)"},
 		},
 	},
+	{
+		Name:    "rebuild-index",
+		Method:  MethodRebuildIndex,
+		Request: "RebuildIndexRequest",
+		Summary: "Rebuild the derived index by scanning the files it projects",
+	},
 }

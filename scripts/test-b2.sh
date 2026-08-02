@@ -34,6 +34,11 @@ run_check() { # id  label  command...
 }
 
 run_check "T-B2.0" "engine command registry + dispatch (unit)" go test ./engine/
+# The platform is a separate module, so it needs its own invocation — and went
+# without one until 2026-08-02. Everything an app INHERITS lives here, which
+# makes it the code least able to afford being untested: a break reaches every
+# app at once.
+run_check "T-B2.0b" "platform: dispatch, containment, BFT, manifest, index (unit)" go test -C dlc-platform ./...
 run_check "T-B2.1" "native↔wasm parity (results + filesystem)" ./scripts/verify-parity.sh
 run_check "T-B2.2" "parity self-test (the check can detect drift)" ./scripts/verify-parity-selftest.sh
 run_check "T-B2.3" "scaffold builds and runs (dlc new -> gen -> build -> run)" ./scripts/verify-scaffold.sh

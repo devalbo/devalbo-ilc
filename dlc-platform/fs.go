@@ -66,15 +66,56 @@ func SafeJoin(root, path string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
+// IndexDir is where derived indexes live, relative to the filesystem root.
+//
+// It lives HERE rather than in the index package because the rule it exists to
+// enforce is a tree-reading rule: **the index never travels** (INDEX-PLAN.md
+// D5). It is derived, so it must not ride along in an export-fs bundle, and two
+// stores that differ only in their index must not compare unequal.
+//
+// Dotted so it sorts and reads as machinery rather than as someone's data, and
+// singular — every index an app keeps is a file inside it, so there is exactly
+// one path for the exclusion below to know about.
+//
+// Worth contrasting with how the SQLite plan would have done this: the exclusion
+// lived in the web host's OPFS bridge, had to be repeated in any second host
+// runtime, and was invisible to parity. Here it is engine-side Go, so both tiers
+// run it and the parity check compares the result.
+const IndexDir = ".dlc-index"
+
 // ReadTree loads everything under root into a BFT tree. Directory entries are
 // read in whatever order the filesystem reports; encodeBFT sorts, so the bundle
 // is deterministic regardless.
+//
+// The index directory is skipped wherever it appears (D5).
 func ReadTree(root string) (*bftNode, error) {
 	node := newDir()
+	// Exporting the index directory ITSELF yields nothing, rather than yielding
+	// the index. The exclusion below skips it as a child; asking for it directly
+	// would otherwise walk straight past that check and hand back the one tree
+	// D5 says must never leave.
+	if root == indexRoot() {
+		return node, nil
+	}
 	if err := readInto(root, "", node); err != nil {
 		return nil, err
 	}
 	return node, nil
+}
+
+// indexRoot is the one absolute path the tree reader refuses to descend into.
+//
+// Returns "" when no host has granted a root, rather than asking Root() and
+// taking its panic. ReadTree is given the directory to read as an ARGUMENT and
+// has never needed the root before; making it panic on a tree it can perfectly
+// well read would be a new failure mode invented by an exclusion. Empty never
+// matches a real path, so the exclusion simply does not apply — which is right,
+// because with no root there is no platform-written index either.
+func indexRoot() string {
+	if !RootGranted() {
+		return ""
+	}
+	return filepath.Join(Root(), IndexDir)
 }
 
 func readInto(dir, prefix string, node *bftNode) error {
@@ -85,6 +126,16 @@ func readInto(dir, prefix string, node *bftNode) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		path := filepath.Join(dir, name)
+		// D5: the index is derived and never travels.
+		//
+		// Matched by full PATH, not by name. Excluding any directory called
+		// `.dlc-index` anywhere in the tree would silently swallow a user's own —
+		// unlikely, but the kind of unlikely that is impossible to debug from the
+		// other end ("my export is missing a folder"). Only the one the platform
+		// itself writes is skipped.
+		if path == indexRoot() {
+			continue
+		}
 		if entry.IsDir() {
 			child := newDir()
 			node.entries[name] = child

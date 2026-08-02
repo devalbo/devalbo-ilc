@@ -11,6 +11,7 @@ export const MethodGetCommandSurface = 4;
 export const MethodExportFs = 100;
 export const MethodImportFs = 101;
 export const MethodResetFs = 102;
+export const MethodRebuildIndex = 200;
 
 /** Every PlatformService id, for hosts that enumerate. */
 export const PlatformServiceMethods = {
@@ -20,4 +21,5 @@ export const PlatformServiceMethods = {
   ExportFs: 100,
   ImportFs: 101,
   ResetFs: 102,
+  RebuildIndex: 200,
 } as const;

@@ -64,6 +64,9 @@ const (
 	MethodImportFs = ilcv1.MethodImportFs
 	MethodResetFs  = ilcv1.MethodResetFs
 
+	// index (200–299)
+	MethodRebuildIndex = ilcv1.MethodRebuildIndex
+
 	// AppMethodBase is the first id an app may claim. Not generated: it is the
 	// range boundary itself, which the .proto documents but cannot express.
 	//

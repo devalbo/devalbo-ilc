@@ -84,6 +84,14 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 				}
 				return nil
 			}),
+			// tictactoe has no persistence at all, so it keeps no index and this
+			// verb is marked unavailable. The renderer is still owed: the CLI
+			// surface is generated from the platform's .proto for every app that
+			// inherits it (see cli/run.go's missing-renderer rule).
+			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
+				_, err := fmt.Fprintf(out, "indexed %d entries\n", r.GetEntries())
+				return err
+			}),
 			ilcv1.MethodResetFs: render(func(out io.Writer, r *ilcv1.ResetFsResponse) error {
 				// The engine returns the TOP-LEVEL entries it removed, not a
 				// file count — `records/` is one entry holding many notes. This

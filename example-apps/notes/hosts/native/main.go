@@ -158,6 +158,15 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader, no
 				}
 				return nil
 			}),
+			// notes is the app the index exists for, but it does not maintain one
+			// YET (INDEX-PLAN.md Phase 3) — so this renderer is here and the verb
+			// is marked unavailable until create/list/delete start using it. The
+			// count is the whole response on purpose: it distinguishes "the
+			// rebuild did nothing" from "the collection is empty".
+			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
+				_, err := fmt.Fprintf(out, "indexed %d note(s)\n", r.GetEntries())
+				return err
+			}),
 		},
 	}
 }

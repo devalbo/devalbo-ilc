@@ -87,6 +87,12 @@ step "vet"                      run go vet ./engine/... ./cmd/... ./hosts/...
 # hosts/native/manifest_test.go — the dlc.toml slot gate — would have passed CI
 # by never running. Vet and test should cover the same tree.
 step "unit tests"               run go test ./engine/... ./hosts/...
+# dlc-platform is a SEPARATE MODULE (§16.4), so `./...` from the repo root does
+# not reach it — and it had therefore never run its own tests in CI at all, while
+# holding dispatch, path containment, BFT, and the environment manifest. Found
+# while adding the index: six existing test files, none of them executed here.
+# `go test -C` is what crosses a module boundary without a subshell cd.
+step "platform unit tests"      run go test -C dlc-platform ./...
 
 # ---- full: the engine boundary and the web tier -------------------------
 if [ "$TIER" != "fast" ]; then

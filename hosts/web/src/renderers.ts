@@ -14,12 +14,14 @@ import { MethodNew, MethodEcho } from "@gen/devalbo/dlc/v1/commands.registry.pb"
 import {
   ExportFsResponse,
   ImportFsResponse,
+  RebuildIndexResponse,
   ResetFsResponse,
   VersionResponse,
 } from "@gen/devalbo/ilc/v1/platform.pb";
 import {
   MethodExportFs,
   MethodImportFs,
+  MethodRebuildIndex,
   MethodResetFs,
   MethodVersion,
 } from "@gen/devalbo/ilc/v1/platform.registry.pb";
@@ -55,4 +57,9 @@ export const dlcRenderers: Record<number, Renderer | undefined> = {
     const removed = ResetFsResponse.fromBinary(b).removed ?? [];
     return removed.length === 0 ? "nothing to remove" : removed.map((r) => "  - " + r).join("\n");
   },
+  // The derived index. This app maintains none today, so the verb is marked
+  // unavailable — but a renderer is owed by every command in the inherited
+  // surface, and the two tiers must print the same thing (host parity).
+  [MethodRebuildIndex]: (b) =>
+    `indexed ${RebuildIndexResponse.fromBinary(b).entries ?? 0} entries`,
 };

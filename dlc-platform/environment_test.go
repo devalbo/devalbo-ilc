@@ -14,16 +14,21 @@ import (
 func cleanEnv(t *testing.T) {
 	t.Helper()
 	prevEnv, prevDiscovered := env, discovered
+	// The rebuilder is global too, and it DECIDES REGISTRATION — a test that set
+	// one and did not put it back would hand the next test an index block it
+	// never asked for, in a package whose tests are all about what is registered.
+	prevRebuilder := indexRebuilder
 	prevRegistry := map[uint32]Handler{}
 	for k, v := range registry {
 		prevRegistry[k] = v
 	}
 	t.Cleanup(func() {
-		env, discovered = prevEnv, prevDiscovered
+		env, discovered, indexRebuilder = prevEnv, prevDiscovered, prevRebuilder
 		registry = prevRegistry
 	})
 	resetEnvironment()
 	discovered = nil
+	indexRebuilder = nil
 	registry = map[uint32]Handler{}
 }
 

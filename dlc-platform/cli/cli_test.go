@@ -570,6 +570,11 @@ func runAgainstLiveEngine(t *testing.T, fsAvailability ilcv1.Availability, args 
 			platform.MethodExportFs: func(io.Writer, []byte) error { return nil },
 			platform.MethodImportFs: func(io.Writer, []byte) error { return nil },
 			platform.MethodResetFs:  func(io.Writer, []byte) error { return nil },
+			// Every command in the generated surface owes a renderer, whether or
+			// not this fixture's engine registers it — that is the missing-renderer
+			// rule, and leaving one out here would fail every test in this helper
+			// with a message about the wrong command.
+			platform.MethodRebuildIndex: func(io.Writer, []byte) error { return nil },
 		},
 		Stdout: &stdout,
 		Stderr: &stderr,
@@ -616,9 +621,25 @@ func TestAvailableCommandIsNotMarked(t *testing.T) {
 	if !strings.Contains(help, "export-fs") {
 		t.Fatalf("export-fs missing from the help entirely: %q", help)
 	}
-	if strings.Contains(help, "unavailable on this host") {
+	// Scoped to export-fs's own LINE, not the whole help text. It read the whole
+	// text until rebuild-index arrived — a command this fixture's app genuinely
+	// does not provide (no index rebuilder), and therefore genuinely marked. A
+	// blanket "nothing anywhere is marked" was asserting something broader than
+	// this test's own name, and the first honestly-unavailable command broke it.
+	if strings.Contains(helpLine(help, "export-fs"), "unavailable on this host") {
 		t.Fatalf("export-fs marked unavailable on a host that has a filesystem: %q", help)
 	}
+}
+
+// helpLine returns the help line naming cmd, so an assertion about ONE command
+// cannot be tripped by another.
+func helpLine(help, cmd string) string {
+	for _, line := range strings.Split(help, "\n") {
+		if strings.Contains(line, cmd) {
+			return line
+		}
+	}
+	return ""
 }
 
 // --- flags after positionals (the permute step) -----------------------------

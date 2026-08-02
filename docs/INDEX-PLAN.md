@@ -241,35 +241,74 @@ files in the OPFS root collides with the engine's bridge in two specific, loud w
 *Keep or retire?* Keep until something binds a host-provided store, since it is the only evidence for D9.
 Retire it then, per `spikes/README.md`'s rule about spikes that duplicate a live check.
 
-### Phase 1 — the manifest field — **LANDED, then SUPERSEDED (2026-07-29)**
+### Phase 1 — the manifest field — **LANDED, SUPERSEDED, then REVERTED (2026-07-29)**
 
 Shipped: `Index { availability }`, `Environment.index = 3`, `HasIndex()`, `BootOptions.Index`, the TS
 encoder field, five tests, three falsifications (`UNSPECIFIED`-as-present, blank-instead-of-`ABSENT`, and a
 D4-registration violation).
 
-**Recommended for revert** — D8. The index is now always present, so the field has nothing to say. The one
+**Reverted** — D8. `Environment.index` is `reserved 3` (reserved rather than reused: the field a host store
+would want is a *different* question, and giving an old number new semantics is how a stale decoder reads
+the wrong fact), `HasIndex()` and `BootOptions.Index` are gone, and `environment.go` carries a comment
+saying why there is no `HasIndex` rather than leaving the next reader to re-derive it. The index is now
+always present, so the field had nothing to say. The one
 finding worth carrying forward: `Boot` states availability in both directions so `UNSPECIFIED` can keep
 meaning "no manifest has arrived", and the *TS encoder* had to move with it, because the two host runtimes
 would otherwise have disagreed in bytes with no check in the repo able to see it — the parity vectors are
 hand-built requests, not host-generated ones. That asymmetry will recur for every manifest field.
 
-### Phase 2 — the seam and the file backend
+### Phase 2 — the seam and the file backend — **✅ DONE (2026-08-02)**
 
 | File | Change |
 | --- | --- |
 | `dlc-platform/index/store.go` | the `Store` seam (D2) + the file-backed implementation |
-| `dlc-platform/index/index.go` | `Put` / `Delete` / `Scan` / `Rebuild`, over a store |
+| `dlc-platform/index/index.go` | `Put` / `Delete` / `Entries` / `Rebuild`, over a store |
 | `dlc-platform/proto/devalbo/ilc/v1/platform.proto` | `RebuildIndex` claiming **id 200** (index block) |
 | `dlc-platform/commands.go` | `handleRebuildIndex`; `SetIndexRebuilder`, mirroring `SetVersion` |
-| `dlc-platform/fs.go` or `bft.go` | **D5** — the index path is excluded from `ReadTree` |
+| `dlc-platform/fs.go` | **D5** — `IndexDir`, excluded from `ReadTree` |
 | `dlc-platform/proto/method-ids.lock` | one new line, re-blessed deliberately |
-| `dlc-platform/index/*_test.go` | round-trip, rebuild equivalence, exclusion |
+| `dlc-platform/index_test.go`, `index/index_test.go` | round-trip, rebuild equivalence, exclusion, registration |
 
 `SetIndexRebuilder` is the same shape as `SetVersion`: the platform owns the *verb*, the app supplies the
 *knowledge*, because only the app knows its records live under `records/` and what is worth projecting.
 
-*Falsify:* drop a key from `Clear` → rebuild does not match a fresh build; include the index in `ReadTree`
-→ the bundle test goes red; have `Put` write without flushing → a reopened store loses the last write.
+*Falsified, all watched going red:* `Clear` as a no-op → `TestRebuildDropsStaleRows`; the exclusion disabled
+→ `TestIndexIsExcludedFromABundle`; `write` that never reaches the filesystem → four store tests including
+the reopen; `SetIndexRebuilder` not syncing → every registration and verb test; the index block shifted to
+201–299 → `TestBlocksCoverEveryHandler` names method 200 as unregisterable.
+
+**Registration turned out to be an APP fact, not a host fact.** D3 says there is no capability to branch on,
+and that is true of the *host* — but an app with no collection (dlc, tictactoe) must not be handed a verb
+that could only fail. So the condition is "did this app supply a rebuilder", `SetIndexRebuilder` performs
+the registration, and it works in either order relative to `RegisterAll` because init ordering is invisible
+and getting it wrong costs a silently missing command.
+
+**Five findings, three of them about the repo rather than the index:**
+
+1. **`dlc-platform`'s own tests had never run in CI.** It is a separate module, so `go test ./...` from the
+   root never reached it — six test files covering dispatch, path containment, BFT and the manifest, none of
+   them executed. Now `go test -C dlc-platform ./...` in both `ci.sh` and `test-b2.sh` (T-B2.0b). Same class
+   as the `hosts/` gap Phase 1 of the host-layer plan found: vetted but not tested.
+2. **One inherited verb costs a renderer in every host — seven edit sites.** dlc, notes and tictactoe ×
+   {native, web}, plus the template. That is the missing-renderer rule working as designed (a declared
+   command with no renderer is a startup error), but it means the cost of an inherited verb is *linear in
+   apps*, and it will only grow. Worth a decision before the next capability lands: a default renderer for
+   inherited verbs would make this one edit instead of seven.
+3. **`unavailable`'s wording assumes the cause is the host.** It says "this host does not provide the
+   capability X needs" — true for `export-fs` without a filesystem, wrong for `rebuild-index`, where the
+   app simply keeps no index. The mechanism is right (unregistered → marked); the sentence needs a second
+   case. Recorded for Phase 5 rather than fixed here, because it touches tested CLI behaviour.
+4. **One line was written, then deleted for being unfalsifiable.** `RegisterAll` called `syncIndexVerbs`;
+   removing it broke nothing, because `SetIndexRebuilder` already syncs in either order. A branch no test
+   can reach is what D6 of `ENVIRONMENT-PLAN.md` argues against, so it went rather than acquiring a
+   contrived test.
+5. **A CLI test asserted more than its name.** `TestAvailableCommandIsNotMarked` checked that the *whole
+   help text* contained no "unavailable" marker, so the first honestly-unavailable command broke it. Now
+   scoped to `export-fs`'s own line — the thing it was always about.
+
+**Deliberately not done here:** no parity vector for `rebuild-index`. dlc registers no index verb, so its
+command surface is unchanged and there is nothing new for the surface vectors to compare — the vectors
+arrive with notes in Phase 4, driven by an app that actually has one.
 
 ### Phase 3 — notes uses it, and its scan moves into rebuild
 
@@ -348,8 +387,16 @@ behind the same `Store` seam, and inherits D9's two constraints. **The app and i
 2. [x] The synchronous-answer question is settled in writing — Phase 0, and it now binds Phase 6.
 3. [ ] `list-records` answers from the index on every tier, with **no branch in app code**.
 4. [ ] The maintained index equals a rebuilt one, asserted after every mutation, **watched going red**.
-5. [ ] An exported bundle contains no index file, asserted natively and in the browser.
-6. [ ] `rebuild-index` reconstructs an index deleted out from under a running app.
-7. [ ] No handler renders a value out of the index (D6), by inspection.
-8. [ ] The `Store` seam has been read as if implementing it on littlefs, and nothing in it assumes a file.
+5. [ ] An exported bundle contains no index file, asserted natively and in the browser. — **half done:**
+   natively in `TestIndexIsExcludedFromABundle`, plus the two cases that path suggested (asking for the
+   index directory *itself*, and a user's own directory that happens to share the name). The browser half
+   is Phase 4, and is cheap now that the exclusion is engine-side rather than in the OPFS bridge.
+6. [x] `rebuild-index` reconstructs an index deleted out from under a running app — `Clear` is
+   unconditional and `Scan` of a missing store is empty rather than an error, so a deleted index rebuilds
+   from the files with no special case.
+7. [ ] No handler renders a value out of the index (D6), by inspection. — nothing renders from it yet;
+   re-inspect when notes queries it in Phase 3.
+8. [x] The `Store` seam has been read as if implementing it on littlefs, and nothing in it assumes a file —
+   checked by `memStore` in `index/index_test.go`, which has no filesystem anywhere in it and deliberately
+   scans in reverse insertion order to prove ordering lives above the seam.
 9. [ ] `AGENTS.md` carries D5, D6 and D7; the plan's §6.2/§6.6 record that SQL was reconsidered and why.

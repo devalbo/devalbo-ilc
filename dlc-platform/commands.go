@@ -25,7 +25,35 @@ func SetVersion(v string) { version = v }
 const (
 	blockCoreLo, blockCoreHi             uint32 = 1, 99
 	blockFilesystemLo, blockFilesystemHi uint32 = 100, 199
+	blockIndexLo, blockIndexHi           uint32 = 200, 299
 )
+
+// indexRebuilder is app-supplied, exactly like version: the platform owns the
+// `rebuild-index` VERB, the app owns the knowledge of what to scan and what is
+// worth projecting. Only the app knows its records live under `records/`.
+//
+// Nil is meaningful — it means this app keeps no index — and it is what decides
+// whether the index block is registered at all.
+var indexRebuilder func() (uint32, error)
+
+// SetIndexRebuilder supplies the scan that `rebuild-index` runs, and registers
+// the verb.
+//
+// REGISTRATION IS THE POINT, and it is why this is not a plain setter. An app
+// with no collection to project — dlc itself — must not offer a command that
+// could only ever fail; an app that keeps an index must offer it wherever its
+// index works. So "does this app have a rebuilder" is the condition, and it is
+// app-declared rather than host-declared: the index is a projection the engine
+// owns, present wherever a filesystem is, so there is no host capability to
+// branch on (INDEX-PLAN.md D3/D8).
+//
+// Callable before or after RegisterAll/RegisterDiscovered. Ordering bugs in
+// init are invisible and this one would cost a silently missing command, so
+// the sync happens here rather than being something a caller must sequence.
+func SetIndexRebuilder(fn func() (uint32, error)) {
+	indexRebuilder = fn
+	syncIndexVerbs()
+}
 
 // platformHandlers is the full generated dispatch map — every platform verb,
 // before anything decides which of them this host can support.
@@ -37,6 +65,7 @@ func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
 		handleExportFs,
 		handleImportFs,
 		handleResetFs,
+		handleRebuildIndex,
 	)
 }
 
@@ -49,7 +78,18 @@ func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
 // might not — a browser whose OPFS is denied — and the app would rather offer a
 // smaller command surface than a set of verbs that cannot work.
 func RegisterAll() {
-	RegisterRaw(platformHandlers())
+	// Block by block rather than RegisterRaw(everything), because "everything" is
+	// no longer the right set: the index block belongs to an app that supplied a
+	// rebuilder, and SetIndexRebuilder registers it when that happens — in either
+	// order, so there is deliberately no index sync here. A call was written and
+	// then removed for being unfalsifiable: nothing could make it matter, which
+	// is the definition of a branch no test can reach.
+	//
+	// TestBlocksCoverEveryHandler is what stops a future capability's verbs from
+	// being silently dropped by landing in a block nothing registers.
+	handlers := platformHandlers()
+	registerBlock(handlers, blockCoreLo, blockCoreHi)
+	registerBlock(handlers, blockFilesystemLo, blockFilesystemHi)
 }
 
 // RegisterCore registers only the core-lifecycle verbs: version and
@@ -88,6 +128,15 @@ var discovered map[uint32]func([]byte) ([]byte, error)
 // capability either way: a browser can lose its OPFS handle mid-session as
 // easily as it can fail to get one at startup.
 func syncCapabilityVerbs() {
+	syncFilesystemVerbs()
+	// Outside the discovery guard on purpose: the index is not a host capability
+	// and RegisterAll apps have one too. What it still depends on is the
+	// FILESYSTEM, since its floor is a file — so a manifest that takes the
+	// filesystem away has to take the index verb with it.
+	syncIndexVerbs()
+}
+
+func syncFilesystemVerbs() {
 	if discovered == nil {
 		return // RegisterAll: the app opted out of discovery
 	}
@@ -96,6 +145,28 @@ func syncCapabilityVerbs() {
 		return
 	}
 	unregisterBlock(blockFilesystemLo, blockFilesystemHi)
+}
+
+// syncIndexVerbs brings the index block in line with two facts: whether this APP
+// keeps an index, and whether this HOST has the filesystem the index is stored
+// on.
+//
+// Idempotent in both directions, like the filesystem block and for the same
+// reason — a browser can lose its OPFS handle mid-session and get one back.
+func syncIndexVerbs() {
+	if indexRebuilder == nil {
+		unregisterBlock(blockIndexLo, blockIndexHi)
+		return
+	}
+	// Only a discovering app can observe the filesystem going away; under
+	// RegisterAll the app has already declared it knows its hosts have one, and
+	// HasFilesystem would read UNSPECIFIED-as-absent before any manifest arrives
+	// and unregister a verb that is fine.
+	if discovered != nil && !HasFilesystem() {
+		unregisterBlock(blockIndexLo, blockIndexHi)
+		return
+	}
+	registerBlock(platformHandlers(), blockIndexLo, blockIndexHi)
 }
 
 // handleGetCommandSurface reports what is registered right now.
@@ -214,6 +285,34 @@ func handleResetFs(req *ilcv1.ResetFsRequest) (*ilcv1.ResetFsResponse, error) {
 	}
 	emitDataChanged(req.Prefix, MethodResetFs)
 	return &ilcv1.ResetFsResponse{Removed: removed}, nil
+}
+
+// handleRebuildIndex reconstructs the derived index from the files it projects.
+//
+// The platform contributes the verb, the id, and the envelope; every byte of the
+// actual work comes from the app's rebuilder. That split is what lets this be
+// ONE inherited command instead of a convention every app reimplements — and it
+// is why the response carries a count and nothing else: the platform genuinely
+// does not know what was indexed.
+//
+// The nil case should be unreachable, because the verb is only registered once a
+// rebuilder exists. It is still handled: registration and this check can drift
+// (an Unregister, a future partial sync), and "unreachable" is how a panic in
+// someone else's app gets written.
+func handleRebuildIndex(*ilcv1.RebuildIndexRequest) (*ilcv1.RebuildIndexResponse, error) {
+	if indexRebuilder == nil {
+		return nil, errors.New("rebuild-index: this app keeps no index")
+	}
+	entries, err := indexRebuilder()
+	if err != nil {
+		return nil, errors.New("rebuild-index: " + err.Error())
+	}
+	// No event. Nothing OBSERVABLE changed — the index is derived, so a rebuild
+	// that fires ilc.data-changed would make every subscriber re-read to find the
+	// same records it already had. The one case where a rebuild does change what
+	// a query returns is a rebuild that REPAIRED drift, and the honest report for
+	// that is the count in the response, to the caller who asked.
+	return &ilcv1.RebuildIndexResponse{Entries: entries}, nil
 }
 
 // removeTree empties dir without removing dir itself — the root is a host-bound
