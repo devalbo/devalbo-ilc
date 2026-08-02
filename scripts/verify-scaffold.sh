@@ -10,6 +10,13 @@
 # This is the §11 "Scaffolder" row: templates cannot silently rot, because a
 # template edit that breaks the build fails here instead of on someone's laptop.
 #
+# WHAT THIS CHECK DOES NOT COVER: it runs the scaffold's `make gen` with THIS
+# repo's toolchain on PATH, so a tool the template's devbox.json forgets to
+# declare is invisible here — ours is already installed. That is a real bug we
+# have shipped, and verify-scaffold-env.sh is the check that stands outside and
+# catches it. Keep the two separate: this one is fast and runs in B2, that one
+# resolves a fresh devbox environment and runs nightly.
+#
 # Run inside `devbox shell` (needs go, buf).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2

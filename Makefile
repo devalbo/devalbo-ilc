@@ -68,6 +68,10 @@ verify-scaffold-golden: ## §11: `dlc new` emits exactly the tree we meant
 verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs
 	@./scripts/verify-scaffold.sh
 
+.PHONY: verify-scaffold-env
+verify-scaffold-env: build-host ## the scaffold generates in ITS OWN devbox, not ours (slow; needs network)
+	@./scripts/verify-scaffold-env.sh
+
 .PHONY: verify-scaffold-web
 verify-scaffold-web: build-host ## a scaffolded app runs in a browser, via its own shipped test
 	@./scripts/verify-scaffold-web.sh

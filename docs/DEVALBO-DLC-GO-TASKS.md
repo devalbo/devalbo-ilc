@@ -270,19 +270,35 @@ what happens when the files are wrong?"
 - [ ] `example-apps/doneblock/FEEDBACK.md` — the friction log, written *while* building
 
 **Three framework bugs already found, before any app code existed** (plan §11) — all reproducible, none
-caught by any existing check:
+caught by any existing check *at the time*. All three are now closed; the third was the one that let the
+other two exist, so it is the only one that needed a new check rather than a fix:
 
-- [ ] **`dlc new --help` prints an invocation that fails.** Usage says `dlc new <name> --tiers <tiers>`, but
+- [x] **`dlc new --help` prints an invocation that fails.** Usage says `dlc new <name> --tiers <tiers>`, but
       the parser stops at the first non-flag argument, so `dlc new myapp --module x` dies with
       `unexpected argument "--module"`. Either accept flags after positionals or stop advertising that order
-- [ ] **A scaffolded project cannot run `make gen` in its own devbox environment.** The template's
+      — **fixed**: flags are accepted after positionals (`dlc-platform/cli/run.go`, locked by
+      `cli_test.go`'s `t go myapp --title x` case)
+- [x] **A scaffolded project cannot run `make gen` in its own devbox environment.** The template's
       `devbox.json` installs `protoc-gen-go-lite` but not `protoc-gen-es-lite`, which the generated
       `buf.gen.yaml` needs the moment a `web` tier exists. The first command `dlc new` tells you to run is
-      the one that fails
-- [ ] **Nothing verifies a scaffold in its own declared environment — which is why the above survives.**
+      the one that fails — **fixed** in `templates/component-model/devbox.json.tmpl`, with
+      `templates/templates_test.go` asserting the declaration
+- [x] **Nothing verifies a scaffold in its own declared environment — which is why the above survives.**
       `verify-scaffold.sh` runs the scaffold's `make gen` inside the REPO's devbox shell, where the missing
       plugin is already on PATH. Same class of blind spot as the two `verify-platform-gen.sh` exists for:
       only broken from outside, therefore invisible from inside
+      — ✅ **`scripts/verify-scaffold-env.sh`** (`make verify-scaffold-env`, nightly via `ci.sh all`).
+      Scaffolds, strips this repo off PATH, and runs `make gen` + `go build` through the **scaffold's own**
+      `devbox run`. Falsified: removing the `protoc-gen-es-lite` line from the template turns it red while
+      `verify-scaffold.sh` stays green — the blind spot, demonstrated rather than argued.
+      **Two findings worth keeping.** (1) `devbox run` REBUILDS PATH rather than inheriting it, so a scrub
+      performed outside does not survive into the run — the check does it inside, and prepends the `dlc`
+      binary there too (the first version failed with `dlc: No such file or directory` while claiming to
+      prove something about protoc plugins). (2) The nesting is the whole reason the leak is subtle: CI
+      reaches this script through the **repo's** `devbox run`, which re-adds the repo's nix profile *after*
+      the scaffold's own entries — so the scaffold's declared tools win and a tool it FORGOT is silently
+      found further down the list. Also: `devbox run -- sh -c '…'` is unusable, since devbox re-joins and
+      pre-expands its arguments (variables came out empty, newlines literal); the inner half must be a file
 
 ### Second app — notes/list (App #2, the breadth pilot) — §13
 - [x] Scaffold notes/list — `example-apps/notes/`, built on the platform via `dlc.toml` `[platform] path`. **Not** scaffolded by `dlc new` in the end; it predates the template being complete, and Phase 1 above brings its layout back in line

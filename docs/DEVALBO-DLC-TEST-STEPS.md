@@ -383,7 +383,7 @@ golden) land as those commands are built.
 ```bash
 ./scripts/ci.sh fast     # structure + unit + fmt/vet — no wasm, no browser
 ./scripts/ci.sh full     # + engine boundary (B2) + web tier (B3)   ← per push
-./scripts/ci.sh all      # + the B1 de-risking spikes               ← nightly
+./scripts/ci.sh all      # + the B1 spikes + the scaffold's own env ← nightly
 ```
 
 `make ci` / `make ci-fast` are aliases. Toolchain comes from devbox; the script wraps each step in
@@ -412,6 +412,14 @@ both are running the identical command in the identical toolchain.
 
 **Why nightly for B1:** the spikes are slow and rarely broken by day-to-day work, but the toolchain is
 pinned to `@latest`, so a nightly run is what catches upstream drift nobody in this repo caused.
+
+**Why nightly for `verify-scaffold-env.sh`:** it resolves a *fresh* devbox environment for a generated
+project — whose `@latest` packages are unlocked, since a scaffold ships no `devbox.lock` — so it needs the
+network and costs minutes. It is also the one check that can only fail from outside: it scrubs this repo
+off `PATH` and runs the scaffold's `make gen` through the scaffold's own `devbox run`, so a tool the
+template forgets to declare fails there instead of on a new user's first command. Falsify it by deleting
+the `protoc-gen-es-lite` line from `templates/component-model/devbox.json.tmpl` — `verify-scaffold.sh`
+stays green and this one goes red, which is exactly the gap it was built for.
 
 ---
 

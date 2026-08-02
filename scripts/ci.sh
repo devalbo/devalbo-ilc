@@ -102,6 +102,14 @@ if [ "$TIER" = "all" ]; then
 	# day-to-day work, so this belongs on a schedule rather than every push —
 	# which is also what DEVALBO-DLC-TEST-STEPS.md recommends.
 	step "de-risking spikes (B1)" run make test-b1
+	# Resolves a FRESH devbox environment for a scaffolded project (its @latest
+	# packages are unlocked), so it needs the network and costs minutes. It also
+	# fails for a reason nothing else can see: a tool the template forgets to
+	# declare, which this repo's own shell has been quietly supplying.
+	#
+	# `run` gives it OUR toolchain to build dlc with; the scrub-and-re-enter for
+	# the SCAFFOLD's devbox.json happens inside the script, after that.
+	step "scaffold's own environment" run ./scripts/verify-scaffold-env.sh
 fi
 
 echo

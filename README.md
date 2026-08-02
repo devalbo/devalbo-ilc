@@ -137,9 +137,11 @@ Every claim above has a target behind it. `make test` runs all of them.
 | `make test-b1` | the surviving de-risking spike (async); the rest retired once product code covered them — findings kept in `spikes/README.md` |
 | `make test-b2` | engine unit tests · native↔wasm parity · **the parity check can fail** · `dlc new` output builds and runs · the scaffold matches its golden snapshot · the example apps build and pass |
 | `make test-b3` | `dlc` in headless Chromium (scaffold → OPFS → survives reload) · BFT bundle crosses browser → terminal · a scaffolded app runs in a browser via its own test · **the example apps run in a browser** |
+| `make verify-scaffold-env` | a scaffolded project generates and builds in **its own** declared devbox — this repo's toolchain scrubbed off PATH, so a tool the template forgets to declare fails here instead of on a new user (nightly; needs the network) |
 | `make ci` | what CI runs, identically — `fast` / `full` / `all` tiers |
 
-✅ **CI runs them** — `./scripts/ci.sh full` on push, `all` (adding the B1 spikes) nightly. The script is
+✅ **CI runs them** — `./scripts/ci.sh full` on push, `all` (adding the B1 spikes and the scaffold's own
+environment) nightly. The script is
 provider-agnostic and is the same command locally; [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 is a ~20-line adapter, not the logic.
 
