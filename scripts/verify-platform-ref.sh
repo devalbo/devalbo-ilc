@@ -96,15 +96,41 @@ if grep -q '^replace github.com/devalbo/devalbo-ilc/dlc-platform' "$PROJ/go.mod"
 	fail "a replace directive would override the pinned version"
 fi
 
-step "go mod download (from the proxy, not this tree)"
-if ! ( cd "$PROJ" && GOFLAGS=-mod=mod go mod download github.com/devalbo/devalbo-ilc/dlc-platform ) \
+step "go mod download (through the proxy, as a stranger would)"
+if ( cd "$PROJ" && GOFLAGS=-mod=mod go mod download github.com/devalbo/devalbo-ilc/dlc-platform ) \
 	>"$WORK/godl.log" 2>&1; then
-	printf "  ${R}✗${Z} %s\n" "the pinned platform version does not resolve"
-	echo "      Most likely the version was bumped without pushing the tag:"
-	echo "          git tag dlc-platform/\$(…) && git push origin dlc-platform/\$(…)"
-	echo "      Go's subdirectory rule: the TAG carries the dlc-platform/ prefix,"
-	echo "      the version recorded in go.mod does not."
-	tail -15 "$WORK/godl.log" | sed 's/^/      /'
-	exit 1
+	printf "  ${G}✓${Z} go: %s resolves from its tag\n" "${goreq#require }"
+	exit 0
 fi
-printf "  ${G}✓${Z} go: %s resolves from its tag\n" "${goreq#require }"
+
+# TWO DIFFERENT FAILURES WEAR THE SAME ERROR, and telling them apart is the
+# reason this second attempt exists:
+#
+#   the tag was never pushed        — a real break; every user hits it, forever
+#   the proxy has not caught up     — transient; sum.golang.org caches the 404
+#                                     it got when someone asked BEFORE the tag
+#                                     existed, and self-heals in minutes
+#
+# Both print "unknown revision dlc-platform/vX.Y.Z", so a check that stopped at
+# the first attempt would either cry wolf on every release (you tag, then check
+# immediately) or teach everyone to ignore it. Going direct answers the only
+# question that matters: does the tag exist at the source?
+step "…the proxy said no; asking GitHub directly to find out why"
+if ( cd "$PROJ" && GOPROXY=direct GOSUMDB=off GOFLAGS=-mod=mod \
+	go mod download github.com/devalbo/devalbo-ilc/dlc-platform ) >"$WORK/godirect.log" 2>&1; then
+	printf "  ${G}✓${Z} go: %s exists at the source\n" "${goreq#require }"
+	printf "  ${R}!${Z} but the module proxy has not caught up yet — TRANSIENT\n"
+	echo "      sum.golang.org cached a 404 from before the tag was pushed. It expires"
+	echo "      on its own; nothing here is wrong. To confirm by hand right now:"
+	echo "          GOPROXY=direct GOSUMDB=off go mod download <module>"
+	exit 0
+fi
+
+printf "  ${R}✗${Z} %s\n" "the pinned platform version does not exist"
+echo "      Not proxy lag — GitHub does not have the tag either. Most likely the"
+echo "      version was bumped without pushing one:"
+echo "          git tag dlc-platform/<version> && git push origin dlc-platform/<version>"
+echo "      Go's subdirectory rule: the TAG carries the dlc-platform/ prefix,"
+echo "      the version recorded in go.mod does not."
+tail -15 "$WORK/godirect.log" | sed 's/^/      /'
+exit 1
