@@ -489,6 +489,49 @@ changes an allocation that is by construction the artifact's size. The badge's 8
 "where the heap should probably live" and becomes the thing without which nothing runs, which promotes it
 from step 2 of the firmware to step 1.
 
+#### 🟢 RESOLVED (2026-08-03) — and what `.cwasm` actually contains
+
+**A `.cwasm` records what the COMPILER BINARY WAS BUILT WITH, not what flags it was given.** `-W gc=n` and
+`-W component-model-async=n` change nothing, because the stock CLI *is* built with them — so a
+`default-features = false` runtime rejects its artifacts one feature at a time (CoW → signals → GC →
+collector → concurrency, five rounds, each adding weight to a microcontroller).
+
+`dlc-platform/embedded/precompile/` is the fix: **`cranelift` WITHOUT `runtime`**. That is also why the
+first attempt died at `Engine::new` — a *runtime* engine requires target == host; a compile-only one does
+not, so `pulley32` from a 64-bit machine is fine. With both sides built alike, both can be **lean**.
+
+Two settings must still agree explicitly, and do so in both files: `memory_init_cow(false)` and
+`signals_based_traps(false)` — a `no_std` target has neither virtual memory nor host signal handlers.
+
+**What the artifact is.** Not machine code: targeting `pulley32`, Cranelift emits **Pulley bytecode**, which
+the device interprets. AOT buys not speed but the absence of a compiler, which `no_std` cannot ship anyway.
+The container is an ELF (labelled `elf64-littleriscv` — Pulley is not a real ISA, so Wasmtime borrows
+RISC-V's machine number):
+
+| section | hello | what |
+| --- | --- | --- |
+| `.text` | 749 KB | the Pulley bytecode |
+| `.wasmtime.addrmap` | **679 KB** | wasm↔code offset map, for backtraces |
+| `.rodata.wasm` | 36 KB | data segments |
+| `.name.wasm` | 17 KB | debug names |
+| `.wasmtime.engine` | 823 B | the settings blob that caused all of the above |
+
+**44% of it was debug metadata**, and on a device where the whole artifact must be ONE contiguous
+allocation that is the cheapest RAM win available. `generate_address_map(false)`:
+
+```
+1,568,480 -> 890,048 bytes   (-43%)
+heap needed: 3 MB -> 1 MB
+```
+
+The cost is honest: a trap on the badge reports an address rather than a wasm location. Worth it while the
+question is still "does it load at all".
+
+**Still true, and still the gate: PSRAM is a prerequisite.** 890 KB will not fit in 520 KB of SRAM either.
+The margin just went from hopeless to close.
+
+<details><summary>the original blocker, kept for the reasoning</summary>
+
 **🟡 One thing still blocked, and it is not memory.** With a large enough heap the error becomes:
 
 ```
@@ -503,6 +546,8 @@ be produced by a compiler built like the runtime.
 `src/bin/precompile.rs` is the intended fix — AOT through the same crate, so the two cannot drift — but it
 fails at `Engine::new`, which refuses a target that is not the host. The CLI manages it, so there is an API
 for cross-compilation; finding it is the next step, and until then the badge cannot load a component.
+
+</details>
 
 **A process note worth keeping:** the first version of this firmware printed "deserialize FAILED (likely
 out of memory)" without the error text, to save code size. That guess cost three builds of heap tuning

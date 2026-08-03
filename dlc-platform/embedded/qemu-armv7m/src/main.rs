@@ -25,7 +25,7 @@ static HEAP: Heap = Heap::empty();
 /// RP2350 has 520 KB and its PSRAM is an 8 MB extension reached over QSPI — so
 /// pinning the heap here is how "does it fit in SRAM alone" gets asked honestly.
 /// Raise it to model PSRAM once the answer to the smaller question is known.
-const HEAP_BYTES: usize = 3072 * 1024;
+const HEAP_BYTES: usize = 2048 * 1024;
 static mut HEAP_MEM: [u8; HEAP_BYTES] = [0; HEAP_BYTES];
 
 #[entry]
@@ -45,6 +45,12 @@ fn main() -> ! {
         debug::exit(debug::EXIT_FAILURE);
     }
     config.wasm_component_model(true);
+    // A no_std build has no virtual memory, so the defaults that assume it must
+    // be turned off explicitly — otherwise `deserialize` refuses with
+    // "virtual memory disabled at compile time -- cannot enable CoW", which
+    // reads like an artifact problem and is actually a Config problem.
+    config.memory_init_cow(false);
+    config.signals_based_traps(false);
 
     match wasmtime::Engine::new(&config) {
         Ok(engine) => {
@@ -76,14 +82,14 @@ fn main() -> ! {
                     // Printing the error costs code size, and is worth it: "it
                     // failed" sent this investigation down a memory rabbit hole
                     // for three builds.
-                    let _ = writeln!(out, "component: deserialize FAILED: {e}");
+                    let _ = writeln!(out, "component: deserialize FAILED: {e:?}");
                     let _ = writeln!(out, "RESULT: FAIL");
                     debug::exit(debug::EXIT_FAILURE);
                 }
             }
         }
-        Err(_) => {
-            let _ = writeln!(out, "engine: creation FAILED");
+        Err(e) => {
+            let _ = writeln!(out, "engine: creation FAILED: {e:?}");
             debug::exit(debug::EXIT_FAILURE);
         }
     }

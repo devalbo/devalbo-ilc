@@ -1,0 +1,24 @@
+# The AOT compiler for embedded targets — built to MATCH the runtime.
+#
+# WHY A SEPARATE CRATE. A .cwasm records the feature set of the compiler that
+# produced it, not the flags it was given: `-W gc=n` and `-W
+# component-model-async=n` change nothing, because the stock `wasmtime` CLI is
+# BUILT with those features. So a `default-features = false` runtime rejects
+# stock-CLI artifacts, one feature at a time, forever.
+#
+# The other half of the trick: no `runtime` feature. An engine that can run code
+# requires target == host, which is why compiling for pulley32 from a 64-bit
+# machine failed inside the runtime crate. A compile-only engine has no such
+# constraint.
+[package]
+name = "dlc-precompile"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# cranelift WITHOUT runtime: this crate compiles, it never executes.
+wasmtime = { version = "=46.0.1", default-features = false, features = [
+    "cranelift",
+    "component-model",
+    "pulley",
+] }

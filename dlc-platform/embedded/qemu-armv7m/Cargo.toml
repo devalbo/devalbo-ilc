@@ -34,6 +34,10 @@ wasmtime = { version = "=46.0.1", default-features = false, features = [
     "runtime",
     "component-model",
     "pulley",
+    # NOTHING ELSE. Every extra here was added while chasing the stock wasmtime
+    # CLI's feature set (gc, gc-copying, async) and every one of them is code on
+    # a microcontroller. Since `dlc-precompile` now builds the artifact with a
+    # matching compiler, both sides can be lean instead of both being fat.
 ] }
 
 [profile.release]
