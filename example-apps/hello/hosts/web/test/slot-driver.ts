@@ -1,0 +1,48 @@
+// Drives the web slot with NO engine (Decision 34).
+//
+// Imported by URL from `page.evaluate`, which runs in the BROWSER — where a bare
+// specifier like `@devalbo/dlc-web/testing` cannot resolve. A module fetched
+// from the dev server can, because Vite transforms it on the way out.
+//
+// Nothing in the app imports this, so a production build never sees it.
+import { createFakePort, ok } from "@devalbo/dlc-web/testing";
+
+import { GreetResponse } from "@gen/hello/v1/commands.pb";
+import { MethodGreet } from "@gen/hello/v1/commands.registry.pb";
+
+import { appDom, mountApp } from "../src/view";
+import type { AppView } from "../src/view";
+
+let fake: ReturnType<typeof createFakePort>;
+let view: AppView;
+
+/** Mount the REAL markup with a FAKE engine. */
+export async function setup(): Promise<void> {
+  const html = await fetch("/index.html").then((r) => r.text());
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const harness = document.getElementById("harness")!;
+  harness.replaceChildren(...Array.from(parsed.body.children));
+
+  fake = createFakePort({
+    [MethodGreet]: ok(GreetResponse.toBinary({ text: "hello from the fake" })),
+  });
+  view = mountApp(fake.port, appDom(harness));
+}
+
+export async function greet(name: string): Promise<string | null> {
+  return view.greet(name);
+}
+
+export function projection(): string {
+  return view.projection();
+}
+
+/** Commands the slot ran, as method ids. */
+export function calls(): number[] {
+  return fake.calls.map((c) => c.method);
+}
+
+/** Make the next greet fail, as the engine's envelope reports it. */
+export function breakGreet(message: string): void {
+  fake.reply(MethodGreet, { success: false, output: new Uint8Array(), error: message });
+}

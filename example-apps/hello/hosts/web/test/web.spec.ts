@@ -1,0 +1,30 @@
+// hello in a browser — the same engine the CLI links, as a wasip2
+// component under jco.
+//
+// This test ships WITH your app on purpose. The cross-tier promise ("write it
+// once, run it everywhere") is only worth anything if something checks it, and
+// the check has to live where the code does. If this passes and
+// `./hello greet` passes, the two tiers genuinely agree.
+//
+// Run: make build-web && cd hosts/web && npm test
+import { expect, test } from "@playwright/test";
+
+test("greets from the browser, using the same engine as the CLI", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/");
+  await page.fill("#name", "browser");
+  await page.getByTestId("greet").click();
+
+  // The greeting text comes from engine/commands.go — not from any TypeScript.
+  // That is what makes it evidence rather than decoration.
+  await expect(page.getByTestId("out")).toContainText("hello, browser", {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId("out")).toContainText("hello");
+
+  expect(errors, "no uncaught errors while booting the engine").toEqual([]);
+});

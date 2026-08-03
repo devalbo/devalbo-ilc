@@ -249,6 +249,30 @@ native slot subscribes to nothing.
 **Generated apps are disposable for now** — re-scaffold rather than migrate, so template layout changes
 cost a re-bless (`make scaffold-golden`) and not a migration story.
 
+### The embedded tier — [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md) — 📋 PROPOSED
+
+The same component the browser runs, on a **Pimoroni Tufty 2350** badge, via **Wasmtime + Pulley** rather
+than WAMR — because Pulley supports `no_std` *with* `component-model`, and WAMR cannot run a component at
+all. That reverses Decision 18's runtime choice and `spikes/README.md`'s "one artifact was never
+achievable", which was true of WAMR and is not true of Pulley.
+
+**Measured before proposing:** tictactoe's component is 1.82 MB and `wasmtime compile --target pulley32`
+turns it into a 2.21 MB `.cwasm`, with the wasmtime already in devbox. The badge has 16 MB of flash.
+
+- [x] **`example-apps/hello`** ✅ — scaffolded with `dlc new`, so the badge runs what a user would actually produce. 1.48 MB component → 1.59 MB `pulley32`, and it runs under the hand-written host (`hello, world — from hello`). The rung between "the runtime works" and "the game works": if hello runs on hardware and tictactoe does not, the difference is size or the filesystem, not the runtime
+- [ ] **Phase 0 is the gate and everything depends on it:** does Wasmtime `no_std` + Pulley +
+      component-model fit in 520 KB of SRAM (plus 8 MB of slower PSRAM)? Flash is not the constraint; RAM
+      is, and nobody has measured it
+- [ ] Phases 1–6 in the plan doc. Fallbacks if Phase 0 fails, in order: trim the world; WAMR + wasip1 (the
+      1.77 MB module already compiles); or **native TinyGo — measured at a 263 KB `.uf2` for `pico2`**,
+      blocked only by a build-tag bug (`caps_wasip2.go` is `//go:build tinygo`, so a bare-metal ARM build
+      tries to link `wasmimport_Emit`; `tinygo && wasm` fixes it, verified)
+- [ ] **RISC-V is a REQUIREMENT** (D8): an embedded target must have an upstream Rust target, so **Xtensa
+      — and with it ESP32-S3, the chip Decision 18 named — is out of scope**. ESP32-P4 or C6 if ESP
+      matters. Worth knowing: the **RP2350 ships Hazard3 RISC-V cores alongside its Cortex-M33s**, so the
+      badge and the ESP targets could be one Rust target family (`riscv32imac`) rather than two — a Phase 0
+      measurement, not an argument to settle now
+
 ### App #4 — DoneBlock, a task DAG — [`DONEBLOCK-EXAMPLE-PLAN.md`](./DONEBLOCK-EXAMPLE-PLAN.md)
 
 A CLI version of doneblock.com: tasks are nodes, an edge means one task blocks another, and the question the

@@ -68,6 +68,44 @@ verify-scaffold-golden: ## §11: `dlc new` emits exactly the tree we meant
 verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs
 	@./scripts/verify-scaffold.sh
 
+.PHONY: qemu-payload
+qemu-payload: ## AOT-compile hello for the QEMU firmware to embed (gitignored; regenerate freely)
+	# The qemu crate does include_bytes! on this, so a fresh clone must run this
+	# target before `cargo build` there. Not committed: it is 1.6 MB, derived
+	# twice over, and version-locked to the exact Wasmtime that made it.
+	@test -f example-apps/hello/build/engine.component.wasm \
+		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
+	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
+		CWASM_OUT=dlc-platform/embedded/qemu-armv7m/hello.pulley32.cwasm
+
+.PHONY: badge-uf2
+badge-uf2: ## build the badge bring-up firmware and convert it to a flashable .uf2
+	# picotool, NOT elf2uf2-rs — because it tags the UF2 family and elf2uf2-rs got
+	# it wrong: it emitted family `rp2040` from RP2350 firmware, which would have
+	# been flashed at a Tufty 2350 with nothing in the build to explain the result.
+	cd dlc-platform/embedded/rp2350 && cargo build --release
+	@mkdir -p build
+	@cp dlc-platform/embedded/rp2350/target/thumbv8m.main-none-eabihf/release/dlc-rp2350-bringup build/badge-bringup.elf
+	picotool uf2 convert build/badge-bringup.elf build/badge-bringup.uf2
+	# THE GATE. A UF2 whose family is not rp2350 will not boot this board, and the
+	# only symptom is a badge that does nothing at all. Fail here instead — see
+	# dlc-platform/embedded/rp2350/memory.x for the open placement bug.
+	@picotool info build/badge-bringup.uf2 | grep -q rp2350 || { \
+		echo "  x wrong UF2 family — this will not boot; see rp2350/memory.x"; \
+		picotool info build/badge-bringup.uf2 | head -3; exit 1; }
+	@ls -l build/badge-bringup.uf2 | awk '{print "  flashable: "$$5" bytes"}'
+
+
+.PHONY: embedded-cwasm
+embedded-cwasm: ## AOT-compile a component for the badge (pulley32) — the artifact you flash
+	# The badge has no compiler: Wasmtime `no_std` ships no Cranelift, so the
+	# component is compiled AHEAD OF TIME here and the .cwasm is what gets
+	# flashed. pulley32 because the RP2350 is 32-bit — Pulley bytecode is
+	# pointer-width specific and a host runs only its own width.
+	@test -n "$(COMPONENT_IN)" || { echo "usage: make embedded-cwasm COMPONENT_IN=<file.wasm> [CWASM_OUT=<file.cwasm>]"; exit 2; }
+	wasmtime compile --target pulley32 -o $(or $(CWASM_OUT),build/engine.pulley32.cwasm) $(COMPONENT_IN)
+	@ls -l $(or $(CWASM_OUT),build/engine.pulley32.cwasm) | awk '{print "  pulley32 artifact: "$$5" bytes"}'
+
 .PHONY: verify-npm-package
 verify-npm-package: ## @devalbo/dlc-web ships what its `exports` advertise
 	@./scripts/verify-npm-package.sh

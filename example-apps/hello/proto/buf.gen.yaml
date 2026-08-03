@@ -1,0 +1,32 @@
+version: v2
+# Reflection-free codegen (TinyGo-safe) + the ILC command registry.
+plugins:
+  # TypeScript messages for the web tier (same schema, second projection).
+  - local: protoc-gen-es-lite
+    out: ../gen/ts
+    opt:
+      - target=ts
+  - local: protoc-gen-go-lite
+    out: ../gen/go
+    opt:
+      - paths=source_relative
+  # Emits method_id constants + the dispatch map from the service definitions
+  # (go-lite emits messages only, so the ids would otherwise reach Go nowhere),
+  # and locks the ids so a renumber cannot happen by accident.
+  # strategy: all — buf's default invokes a plugin once per DIRECTORY, which
+  # would make the lock see only part of the world.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: ../gen/go
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lock=method-ids.lock
+  # The same ids for the web tier. buf runs a plugin once per output directory,
+  # so this is a second invocation with lang=ts rather than one emitting both.
+  # No lock here — one writer is enough, and two would race on the same file.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: ../gen/ts
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lang=ts

@@ -1,0 +1,41 @@
+// hello's command inspector route.
+import { enginePort } from "@devalbo/dlc-web/port";
+import { setEnvironment, type CommandResult } from "@devalbo/dlc-web/api";
+import { inspectorStyles, mountInspector } from "@devalbo/dlc-web/inspector";
+
+import { AppServiceCLI } from "@gen/hello/v1/commands.cli.pb";
+import { PlatformServiceCLI } from "@gen/devalbo/ilc/v1/platform.cli.pb";
+
+import { appRenderers } from "./renderers";
+
+document.head.appendChild(document.createElement("style")).textContent =
+  inspectorStyles();
+
+const inspector = mountInspector(document.getElementById("commands")!, {
+  port: enginePort,
+  // This app's commands PLUS the inherited platform verbs — the same two lines
+  // hosts/native/main.go writes.
+  commands: [...AppServiceCLI, ...PlatformServiceCLI],
+  render: appRenderers,
+});
+
+inspector.select(AppServiceCLI[0].name);
+
+// `window.host` — the HOST's handle, next to window.app's engine one (§6.4a).
+//
+// window.app runs commands, which is the app's domain; this states what the
+// host can do, which is the host's. It is also the only way to drive the
+// volatile half of the environment manifest today: the browser gives no event
+// for a filesystem appearing or disappearing, so re-sending is manual.
+//
+//   await window.host.setEnvironment(false)   // pretend OPFS went away
+//
+// Watch the inspector strike through the commands that need one.
+declare global {
+  interface Window {
+    inspector: typeof inspector;
+    host: { setEnvironment(hasFilesystem: boolean): Promise<CommandResult> };
+  }
+}
+window.inspector = inspector;
+window.host = { setEnvironment };

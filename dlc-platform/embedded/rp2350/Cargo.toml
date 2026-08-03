@@ -1,0 +1,53 @@
+# STEP 1 BRING-UP FIRMWARE for the Pimoroni Tufty 2350 (RP2350B).
+#
+# One question at a time (docs/EMBEDDED-PLAN.md Phase 0):
+#
+#   step 1  does Wasmtime no_std + Pulley + component-model LINK, and does the
+#           board boot with a PSRAM-backed allocator and a working UART?
+#   step 2  can Pulley instantiate a TRIVIAL component here?
+#   step 3  can it run tictactoe's 2.21 MB .cwasm?
+#
+# Separate crate from `dlc-platform-embedded` because that one builds for the
+# HOST (std, Phase 1's harness) and this one is bare metal. Same source will be
+# shared once Phase 2 turns the host runtime no_std; today they are deliberately
+# apart so a mistake in one cannot break the other's build.
+[package]
+name = "dlc-rp2350-bringup"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# --- the board ---------------------------------------------------------------
+rp235x-hal = { version = "0.3", features = ["critical-section-impl", "rt"] }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+embedded-hal = "1"
+panic-halt = "1"
+
+# --- the heap ----------------------------------------------------------------
+# Wasmtime needs `alloc`, and 520 KB of SRAM will not hold a component's linear
+# memory — so the heap is the 8 MB of PSRAM. See src/main.rs.
+embedded-alloc = "0.6"
+
+# --- the runtime under test --------------------------------------------------
+# `default-features = false` is what makes this no_std at all. `pulley` is the
+# interpreter (no JIT on this chip); `component-model` is the whole reason this
+# tier can run the same artifact as the browser.
+wasmtime = { version = "=46.0.1", default-features = false, features = [
+    "runtime",
+    "component-model",
+    "pulley",
+] }
+
+# The wasi:io/{error,poll,streams} implementation, as TRAITS this crate impls —
+# so the badge does not hand-write 15 stream functions. `default-features =
+# false` is what makes it no_std; its default is std, like wasmtime's.
+wasmtime-wasi-io = { version = "=46.0.1", default-features = false }
+
+[profile.release]
+# `panic = abort` because unwinding needs machinery this target does not have.
+panic = "abort"
+# Wasmtime is large; optimise for size and let LTO drop what is unreachable.
+opt-level = "s"
+lto = true
+codegen-units = 1

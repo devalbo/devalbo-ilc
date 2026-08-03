@@ -68,3 +68,17 @@ hosts/desktop/build/
 
 # OS
 .DS_Store
+
+# Rust build output (dlc-platform/embedded) — large, and reproducible.
+target/
+
+# Build outputs. Every `build/` in this tree is generated — badge firmware
+# (.elf/.uf2) at the root, engine components in the example apps — and the cargo
+# ones are already covered by `target/` above.
+build/
+
+# AOT-compiled components for the embedded tier. Derived twice over (engine ->
+# component -> .cwasm), 1.6 MB each, and version-locked to the exact Wasmtime
+# that produced them — so committing one would be committing a stale artifact.
+# Regenerate with: make qemu-payload
+*.cwasm

@@ -1,0 +1,10 @@
+# ARM by default. The RP2350 also has Hazard3 RISC-V cores, and EMBEDDED-PLAN D8
+# notes that using them would make the badge and the ESP32 targets one Rust
+# target family — build with `--target riscv32imac-unknown-none-elf` to try it.
+# Both toolchains are installed (rust-toolchain.toml); this is the better-trodden
+# one today, not a permanent choice.
+[build]
+target = "thumbv8m.main-none-eabihf"
+
+[target.thumbv8m.main-none-eabihf]
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]

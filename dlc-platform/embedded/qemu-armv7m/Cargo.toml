@@ -1,0 +1,43 @@
+# The badge firmware, on an emulator — so the 32-bit claims can be tested
+# without waiting for hardware (docs/EMBEDDED-PLAN.md Phase 0).
+#
+# WHY THIS EXISTS. Two things were untestable on a 64-bit laptop: whether
+# `pulley32` actually executes our component (a host runs only its own pointer
+# width), and how much RAM it takes. QEMU's `mps2-an505` is a Cortex-M33 — the
+# RP2350's CPU class — so both become answerable.
+#
+# WHAT IT IS NOT: the badge. No RP2350 peripherals, no PSRAM, 4 MB of RAM where
+# the badge has 520 KB. The heap here is therefore pinned to the badge's size on
+# purpose, so "does it fit" means something.
+[package]
+name = "dlc-qemu-armv7m"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+# Semihosting instead of a UART: QEMU implements it, and it needs no peripheral
+# model. This is the one place the emulator and the badge legitimately differ.
+cortex-m-semihosting = "0.5"
+panic-semihosting = "0.6"
+embedded-alloc = "0.6"
+
+# EXACT VERSION, and it must equal the `wasmtime` in devbox.json.
+#
+# Wasmtime version-locks precompiled artifacts. `wasmtime compile` (CLI 46.0.1)
+# producing a .cwasm the firmware (crate 46.0.2) then loads fails with
+# "compilation settings are not compatible with the native host" — a message
+# that never mentions versions, and cost three builds of memory tuning before
+# the real cause showed up.
+wasmtime = { version = "=46.0.1", default-features = false, features = [
+    "runtime",
+    "component-model",
+    "pulley",
+] }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1

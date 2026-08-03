@@ -7,7 +7,10 @@
     "wasmtime@latest",
     "wasm-tools@latest",
     "buf@latest",
-    "nodejs@24"
+    "nodejs@24",
+    "rustup@latest",
+    "qemu@latest",
+    "picotool@2.2.0-a4"
   ],
   "shell": {
     "init_hook": [
@@ -18,7 +21,8 @@
       "command -v wit-bindgen-go   >/dev/null || go install go.bytecodealliance.org/cmd/wit-bindgen-go@latest",
       "go install github.com/aperturerobotics/protobuf-go-lite/cmd/protoc-gen-go-lite@v0.15.0",
       "command -v jco              >/dev/null || npm i -g @bytecodealliance/jco",
-      "command -v protoc-gen-es-lite >/dev/null || npm i -g @aptre/protobuf-es-lite"
+      "command -v protoc-gen-es-lite >/dev/null || npm i -g @aptre/protobuf-es-lite",
+      "rustup show >/dev/null 2>&1 || rustup toolchain install stable --profile minimal"
     ],
     "scripts": {
       "doctor": [

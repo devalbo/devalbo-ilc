@@ -1,0 +1,13 @@
+# Cortex-M3 rather than the badge's M33, deliberately.
+#
+# QEMU's mps2-an505 (a real M33) boots secure at an address cortex-m-rt's default
+# layout does not match, and debugging QEMU's secure-world memory map answers a
+# question nobody asked. `mps2-an385` is the documented-working Rust+QEMU combo,
+# and the claim under test — that `pulley32` executes on a 32-bit ARM core — does
+# not depend on ARMv8-M. What this therefore does NOT test is anything
+# M33-specific; that stays with the badge.
+[build]
+target = "thumbv7m-none-eabi"
+
+[target.thumbv7m-none-eabi]
+rustflags = ["-C", "link-arg=-Tlink.x"]

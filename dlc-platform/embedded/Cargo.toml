@@ -1,0 +1,46 @@
+# The INHERITED embedded runtime (docs/EMBEDDED-PLAN.md D3).
+#
+# What every embedded ILC app gets rather than writes: the Pulley runtime, the
+# WASI 0.2 host implementations, and the events import. An app's own
+# hosts/embedded/ holds only its slot — what to draw, and what a button means.
+#
+# `std` today (Phase 1: prove Pulley runs the component on a laptop, where there
+# is a debugger). Phase 2 turns this no_std for the badge; the point of doing it
+# in this order is that Phase 2 becomes a port rather than a rewrite.
+[package]
+name = "dlc-platform-embedded"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# `pulley` is the interpreter backend — the whole reason this tier can run a
+# COMPONENT at all, which WAMR cannot. `component-model` is what makes it an ILC
+# engine rather than a bare module.
+wasmtime = { version = "=46.0.1", default-features = false, features = [
+    "runtime",
+    "component-model",
+    "pulley",
+    "cranelift",
+] }
+wasmtime-wasi = "=46.0.1"
+# The wasi:io/{error,poll,streams} implementation as TRAITS, so the badge does
+# not hand-write 15 stream functions. no_std-capable — verified for thumbv8m.
+wasmtime-wasi-io = { version = "=46.0.1", default-features = false }
+bytes = { version = "1", default-features = false }
+async-trait = "0.1"
+
+[[bin]]
+name = "pulley-probe"
+path = "src/bin/pulley_probe.rs"
+
+[[bin]]
+name = "precompile"
+path = "src/bin/precompile.rs"
+
+[[bin]]
+name = "minimal-host"
+path = "src/bin/minimal_host.rs"
+
+[[bin]]
+name = "run-component"
+path = "src/bin/run_component.rs"

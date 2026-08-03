@@ -240,6 +240,169 @@
         }
       }
     },
+    "picotool@2.2.0-a4": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#picotool",
+      "source": "devbox-search",
+      "version": "2.2.0-a4",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/njljy1r544pjbx8nd1csykb4zsqay0q9-picotool-2.2.0-a4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/njljy1r544pjbx8nd1csykb4zsqay0q9-picotool-2.2.0-a4"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/qi58i89alb1z3skzqwwfam8d00b74wc0-picotool-2.2.0-a4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/qi58i89alb1z3skzqwwfam8d00b74wc0-picotool-2.2.0-a4"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/9m8wix0fcldcmdh5iiv3nd5hcyh8sq44-picotool-2.2.0-a4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/9m8wix0fcldcmdh5iiv3nd5hcyh8sq44-picotool-2.2.0-a4"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/nqq9c4w58fgai1j56h22k8jqn5818iyy-picotool-2.2.0-a4",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/nqq9c4w58fgai1j56h22k8jqn5818iyy-picotool-2.2.0-a4"
+        }
+      }
+    },
+    "qemu@latest": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#qemu",
+      "source": "devbox-search",
+      "version": "11.0.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8l7kazjx2430ij3j10wk9aqj78fg36gz-qemu-11.0.2",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/l4fhjp2cyl5v0s1vqfw8ics3hrfdw05k-qemu-11.0.2-doc"
+            }
+          ],
+          "store_path": "/nix/store/8l7kazjx2430ij3j10wk9aqj78fg36gz-qemu-11.0.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/7bnkhg14x73wz1dd5j2bdm2dhr00mmj0-qemu-11.0.2",
+              "default": true
+            },
+            {
+              "name": "ga",
+              "path": "/nix/store/v1xybmyphjc5x88iw0phs3njzrilablk-qemu-11.0.2-ga"
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/9qml6xdkilrnvmik0b48j7chl0v51sgh-qemu-11.0.2-debug"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/qlzifmdjw05c69rgc52z850pv88y5ljq-qemu-11.0.2-doc"
+            }
+          ],
+          "store_path": "/nix/store/7bnkhg14x73wz1dd5j2bdm2dhr00mmj0-qemu-11.0.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/xlrdx3z784984zc0nhb2k04242g9rpvg-qemu-11.0.2",
+              "default": true
+            },
+            {
+              "name": "ga",
+              "path": "/nix/store/lajcds0r3j72vlw2j8c6550i4hk32k11-qemu-11.0.2-ga"
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/rz7jb8aqdx5bap1i1xzk2vg3vg2k1wqd-qemu-11.0.2-debug"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/1acqyc5nb0d030f8yn4jcc5d1cl9a2lx-qemu-11.0.2-doc"
+            }
+          ],
+          "store_path": "/nix/store/xlrdx3z784984zc0nhb2k04242g9rpvg-qemu-11.0.2"
+        }
+      }
+    },
+    "rustup@latest": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "plugin_version": "0.0.1",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#rustup",
+      "source": "devbox-search",
+      "version": "1.29.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/4s2fyvlgfa38p51f0ns1rxw38s2nfblj-rustup-1.29.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/4s2fyvlgfa38p51f0ns1rxw38s2nfblj-rustup-1.29.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/p1lf5ndx1didl6g86scsqgfnj6dyqals-rustup-1.29.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/p1lf5ndx1didl6g86scsqgfnj6dyqals-rustup-1.29.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/lvm2155pfw1b3a9g8cij5g7vx2dk4v9f-rustup-1.29.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/lvm2155pfw1b3a9g8cij5g7vx2dk4v9f-rustup-1.29.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/0l25mxqzafyqkwh345fy4fj97ggr42fv-rustup-1.29.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/0l25mxqzafyqkwh345fy4fj97ggr42fv-rustup-1.29.0"
+        }
+      }
+    },
     "tinygo@latest": {
       "last_modified": "2026-07-13T16:51:43Z",
       "resolved": "github:NixOS/nixpkgs/8431ff8a526bba781b711db7ae58ad0e49c38e35#tinygo",

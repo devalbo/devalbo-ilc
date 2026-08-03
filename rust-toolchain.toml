@@ -1,0 +1,28 @@
+# The Rust toolchain, pinned HERE rather than in devbox.json — and that is a
+# deliberate exception to "devbox pins everything" (AGENTS.md §6 / prerequisites).
+#
+# WHY. nixpkgs ships `rustc` for the HOST only: it knows the badge's target
+# triple but has no `core` for it, so `cargo build --target thumbv8m…` fails with
+# "the target may not be installed". Cross-compiling to a microcontroller needs
+# per-target std/core, which rustup distributes and nix does not.
+#
+# So the pin moves here, where it is still a pin: this file is checked in, rustup
+# reads it automatically, and every contributor gets the same channel, the same
+# components, and the same targets. Reproducibility is preserved; only the
+# mechanism changed.
+[toolchain]
+channel = "stable"
+components = ["rust-src", "llvm-tools"]
+targets = [
+  # The badge: RP2350 in ARM mode (Cortex-M33, hard float).
+  "thumbv8m.main-none-eabihf",
+  # Soft-float variant, for QEMU's mps2-an505 Cortex-M33 (the emulator used to
+  # test 32-bit Pulley before hardware).
+  "thumbv8m.main-none-eabi",
+  # ARMv7-M, for QEMU's mps2-an385. Not the badge's core — used only to answer
+  # "does pulley32 execute on a 32-bit ARM", which is architecture-independent.
+  "thumbv7m-none-eabi",
+  # The badge in RISC-V mode (Hazard3) AND every RISC-V ESP32 — one triple for
+  # both, which is the simplification D8 is about.
+  "riscv32imac-unknown-none-elf",
+]

@@ -1,0 +1,80 @@
+// hello's web tier slot — the view (Decision 34).
+//
+// The form IS this tier's command parser (Decision 28): it collects fields,
+// encodes a typed request, and hands the bytes to the engine. What `greet` MEANS
+// lives in engine/ — shared with the CLI — which is why the browser and the
+// terminal cannot disagree.
+//
+// A SLOT RENDERS; IT NEVER DECIDES. Nothing here works anything out that the
+// engine could have. If you find yourself deciding something in this file, it
+// belongs in engine/, where every tier shares it.
+//
+// The engine arrives as an ARGUMENT (`EnginePort`), not as an import. That is
+// why this file is separate from main.ts: mount it against the real port and it
+// drives a wasm component in a worker; mount it against the fake in
+// `@devalbo/dlc-web/testing` and the same code renders with no engine at all.
+// A slot is the one part of an ILC app that parity cannot check — parity
+// compares command results, the written filesystem, and the event stream, all
+// engine-side — so it needs its own way to be wrong out loud.
+import type { EnginePort } from "@devalbo/dlc-web/port";
+
+// Two generated files, two generators: es-lite emits the MESSAGES, and
+// protoc-gen-dlc-registry emits the permanent method IDS. Neither is hand-written.
+import { GreetRequest, GreetResponse } from "@gen/hello/v1/commands.pb";
+import { MethodGreet } from "@gen/hello/v1/commands.registry.pb";
+
+export type AppView = {
+  /**
+   * Greet someone. Returns what the engine said, or null if it refused.
+   *
+   * Takes its argument rather than reading the form, so the SAME operation
+   * serves the button, a test, and the dev console. The form's job is to collect
+   * a string and call this.
+   */
+  greet(name: string): Promise<string | null>;
+  /**
+   * A normalized text projection of what is on screen right now.
+   *
+   * A slot SAYS what it is showing rather than having a test scrape its markup:
+   * a scrape couples the assertion to HTML, and a slot on another tier (a
+   * terminal, an embedded display) has no DOM to scrape at all.
+   */
+  projection(): string;
+};
+
+export type AppDom = { out: HTMLElement; name: HTMLInputElement; greet: HTMLElement };
+
+export function appDom(scope: ParentNode = document): AppDom {
+  const need = <T extends Element>(sel: string): T => {
+    const el = scope.querySelector<T>(sel);
+    if (!el) throw new Error(`view: no element matching ${sel}`);
+    return el;
+  };
+  return { out: need("#out"), name: need("#name"), greet: need("#greet") };
+}
+
+export function mountApp(port: EnginePort, dom: AppDom = appDom()): AppView {
+  const lines: string[] = [];
+
+  function say(line: string) {
+    lines.push(line);
+    dom.out.textContent += line + "\n";
+  }
+
+  async function greet(name: string): Promise<string | null> {
+    const r = await port.execute(MethodGreet, GreetRequest.toBinary({ name }));
+    if (!r.success) {
+      say(`greet failed: ${r.error ?? "(no message)"}`);
+      return null;
+    }
+    const text = GreetResponse.fromBinary(r.output).text ?? "";
+    say(text);
+    return text;
+  }
+
+  dom.greet.addEventListener("click", () => {
+    greet(dom.name.value).catch((e) => say(`ERROR: ${(e as Error).message}`));
+  });
+
+  return { greet, projection: () => lines.join("\n") };
+}

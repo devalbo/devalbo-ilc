@@ -1,0 +1,28 @@
+import { expect, test } from "@playwright/test";
+
+// The terminal route, against the real engine.
+//
+// Ships with the app because the claim it checks is the app's: the browser and
+// the terminal run the SAME command surface, generated from commands.proto, so a
+// command that works in one works in the other.
+test("runs a command typed at the prompt", async ({ page }) => {
+  await page.goto("/terminal.html");
+
+  await page.getByTestId("terminal-input").fill("greet --name ILC");
+  await page.getByTestId("terminal-input").press("Enter");
+
+  // Assert on something ONLY the engine's reply contains. The terminal echoes
+  // what you typed, so matching "ILC" here would pass on the echo alone —
+  // including when the command failed, which is exactly what it did once.
+  await expect(page.getByTestId("terminal-output")).toContainText(
+    "from hello",
+    { timeout: 30_000 },
+  );
+});
+
+test("help is generated from the schema", async ({ page }) => {
+  await page.goto("/terminal.html");
+  await page.getByTestId("terminal-input").fill("help");
+  await page.getByTestId("terminal-input").press("Enter");
+  await expect(page.getByTestId("terminal-output")).toContainText("greet");
+});

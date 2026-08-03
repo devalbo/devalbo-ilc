@@ -1,0 +1,40 @@
+// hello's terminal route — the app's command surface, in the browser.
+//
+// The same shape as `hosts/native/main.go`: choose an engine, hand over the
+// GENERATED command surface, and say how each response prints. Subcommands,
+// flags, required-ness and `-h` text all come from commands.proto (Decision 29),
+// so this page and the CLI cannot drift apart.
+//
+// A slot renders, it never decides (Decision 34) — the `render` map below is the
+// only per-command code here, and it only formats.
+import { enginePort } from "@devalbo/dlc-web/port";
+import { mountTerminal, terminalStyles } from "@devalbo/dlc-web/terminal-ui";
+
+import { AppServiceCLI } from "@gen/hello/v1/commands.cli.pb";
+import { PlatformServiceCLI } from "@gen/devalbo/ilc/v1/platform.cli.pb";
+
+import { appRenderers } from "./renderers";
+
+document.head.appendChild(document.createElement("style")).textContent =
+  terminalStyles();
+
+const term = mountTerminal(document.getElementById("terminal")!, {
+  port: enginePort,
+  // This app's commands PLUS the inherited platform verbs, exactly as
+  // hosts/native/main.go does it.
+  commands: [...AppServiceCLI, ...PlatformServiceCLI],
+  render: appRenderers,
+  banner: [
+    "hello — the same engine the CLI links, and the same commands.",
+    "`help` for commands, `<command> -h` for flags, Tab to complete.",
+    "",
+  ],
+});
+
+// A dev-console handle, going through the SAME path a typed command takes.
+declare global {
+  interface Window {
+    term: typeof term;
+  }
+}
+window.term = term;

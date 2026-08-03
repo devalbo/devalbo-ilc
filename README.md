@@ -91,10 +91,23 @@ make dev-web                               # ✅ dlc in the browser (React UI, O
 | **CLI** | engine linked in-process | Go | ✅ `dlc` runs; scaffolded apps build + run |
 | **Web** | jco | TypeScript | ✅ `dlc` runs in the browser (scaffold → OPFS → survives reload) **and so do scaffolded apps**, each with its own shipped browser test |
 | **Desktop** | — | Go (Wails) | 📋 |
-| **Embedded** (ESP32-S3 / RP2350 / RP2040) | WAMR / native TinyGo | C / Go | 📋 — WAMR spike deferred |
+| **Embedded** (RP2350 badge; ESP32 **RISC-V only**) | Wasmtime + **Pulley** (`no_std` interpreter) | Rust | 📋 [`EMBEDDED-PLAN.md`](docs/EMBEDDED-PLAN.md) — reverses the WAMR choice, because Pulley runs *components* and WAMR cannot |
 
 📋 A capability a tier lacks returns `unavailable` and the engine degrades gracefully. The graceful-
 degradation path is designed but unexercised: only Console + Filesystem exist, and both tiers have them.
+
+> **"The same wasm everywhere" means the browser and the badge — not the CLI, and not byte-identical.**
+> Worth stating plainly before the claim drifts:
+>
+> - **Browser and embedded** run the *same component*. The badge runs a `.cwasm` that
+>   `wasmtime compile --target pulley32` produces from it — one engine build, one component, mechanically
+>   retargeted. Strong unity, but **not the same bytes**, and the AOT step is real.
+> - **The CLI links the engine natively** (Decision 26) and does not run wasm at all. Re-probed against
+>   `wasmtime-go` v47 on 2026-08-02 (`spikes/wasmtime-go-cm/`): it can load and introspect a component but
+>   cannot define imports or call exports, so this is not a preference — it is the only option today.
+>
+> What makes the tiers agree is not one binary; it is **one engine source plus checks that diff the
+> results** — which is what `verify-parity` has always actually been.
 
 ### Windows: apps SHIP there; you BUILD them elsewhere
 
@@ -188,6 +201,7 @@ is a ~20-line adapter, not the logic.
 | [`docs/DEVALBO-DLC-GO-TASKS.md`](docs/DEVALBO-DLC-GO-TASKS.md) | Implementation tasks (bootstrap + backlog) |
 | [`docs/DEVALBO-DLC-PREREQUISITES.md`](docs/DEVALBO-DLC-PREREQUISITES.md) | Prerequisites & getting started |
 | [`docs/DEVALBO-DLC-TEST-STEPS.md`](docs/DEVALBO-DLC-TEST-STEPS.md) | Regression test steps |
+| [`docs/EMBEDDED-PLAN.md`](docs/EMBEDDED-PLAN.md) | 📋 the embedded tier — one component on a badge via Wasmtime + Pulley |
 | [`docs/WASI-UPGRADES.md`](docs/WASI-UPGRADES.md) | WASI / Component Model version gates per platform |
 | [`docs/archives/`](docs/archives/) | Superseded planning history (incl. the tri-language design) |
 

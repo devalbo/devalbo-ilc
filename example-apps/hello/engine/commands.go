@@ -1,0 +1,50 @@
+// Package engine holds hello's business logic — ALL of it, and nothing
+// else. This package is the one portable artifact: it is linked natively by the
+// CLI host and compiles to wasm for the browser, so anything platform-specific
+// here would break a tier.
+//
+// Rules that keep it portable:
+//   - Never call a platform API directly; use the injected capabilities.
+//   - Stay TinyGo-safe and reflection-free — no encoding/json, no text/template.
+//   - Touch the filesystem only through platform.SafeJoin / platform.WriteTree,
+//     so path containment is inherited rather than re-implemented.
+package engine
+
+import (
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+
+	"github.com/devalbo/devalbo-ilc/example-apps/hello/gen/go/dlcconfig"
+	hellov1 "github.com/devalbo/devalbo-ilc/example-apps/hello/gen/go/hello/v1"
+)
+
+// No version string here. It lives in dlc.toml and reaches this package as
+// GENERATED code — the same rule as method ids: one place to edit, and no
+// second copy that can disagree.
+
+// Method ids are GENERATED from commands.proto — you never write one down.
+// Yours live at 1000+; 1–999 belong to the platform.
+const MethodGreet = hellov1.MethodGreet
+
+// init wires the app up. This is the whole pattern:
+//
+//	inherit the platform's verbs → say who you are → register your own.
+//
+// The generated Handlers map carries the ids, so adding a command means adding
+// an rpc to commands.proto and a handler here — never an id in two places.
+func init() {
+	platform.RegisterAll()
+	platform.SetVersion(dlcconfig.Display())
+
+	platform.RegisterRaw(hellov1.AppServiceHandlers(handleGreet))
+}
+
+// handleGreet is a command: typed request in, typed response out. Failure is an
+// `error` — it rides the command-result envelope, which is why no response
+// message has an error field.
+func handleGreet(req *hellov1.GreetRequest) (*hellov1.GreetResponse, error) {
+	name := req.Name
+	if name == "" {
+		name = "world"
+	}
+	return &hellov1.GreetResponse{Text: "hello, " + name + " — from hello"}, nil
+}
