@@ -9,7 +9,8 @@ behind both. Small on purpose — the interest is not the game, it is that two f
 visually in common are driven by one piece of business logic that neither of them can second-guess.
 
 **§10 adds a third platform — a handheld badge with a TFT screen and five buttons — and it is IN SCOPE**, as
-**two tiers**: the engine linked natively, and the engine as core wasm under WAMR, on the same board. §§1–9
+**two tiers**: the engine linked natively, and the *same component every other tier runs* under Wasmtime's
+Pulley interpreter — on the same board. §§1–9
 stand alone and come first. Read §10 before starting, though: one small platform fix is a prerequisite
 (§10.1a), and knowing that up front is cheaper than meeting it as a build failure.
 
@@ -318,7 +319,7 @@ probe is not wired to anything.
 3. **Two human players only?** A computer opponent is a substantial addition — it is engine logic, so it
    would be shared by both tiers for free, but it is not in this plan.
 4. **Nothing about the badge is open.** It is in scope (§10) and it does not persist (§10.4). What remains
-   unknown is the *runtime* — WAMR or native TinyGo — and that is a measurement, not a decision: run B0.
+   unknown is whether the interpreter fits in RAM, and that is a measurement, not a decision: run P0.
 
 Anything requiring a **framework capability that does not exist**: stop and ask. Do not add a capability to
 the platform from inside an app.
@@ -357,9 +358,9 @@ Two boards, three tiers, one engine. §§1–9 come first and stand alone; nothi
 
 | Tier | Board | Engine | Host | Screen |
 | --- | --- | --- | --- | --- |
-| **`badge-native`** | Tufty (RP2350B) | TinyGo, linked directly | Go | 320×240 TFT |
-| **`badge-wamr`** | Tufty (RP2350B) | wasip1 core wasm under WAMR | C++ | 320×240 TFT |
-| **`keeb-native`** | KB2040 (RP2040) | TinyGo, linked directly — **no wasm possible** | Go | **none** |
+| **`rp2350-tinygo`** | Tufty (RP2350B) | TinyGo, linked directly | Go | 320×240 TFT |
+| **`rp2350`** | Tufty (RP2350B) | the shared **component**, AOT'd to Pulley bytecode | Rust `no_std` | 320×240 TFT |
+| **`rp2040-tinygo`** | KB2040 (RP2040) | TinyGo, linked directly — **no wasm possible** | Go | **none** |
 
 ### 10.0 The boards
 
@@ -396,36 +397,36 @@ presentation" was ever really true.
 source. If a rule needs restating for a tier, the architecture has failed and that is the finding — not a
 patch.
 
-### 10.1 The Tufty is TWO tiers, not a gate: `badge-native` and `badge-wamr`
+### 10.1 The Tufty is TWO tiers, not a gate: `rp2350-tinygo` and `rp2350`
 
-The earlier framing of this section was an either/or — WAMR or native TinyGo, decided by a spike. That was
-the wrong shape. **Decision 27 defines a tier as "the shared engine × a host/environment binding + ABI mode
+The earlier framing of this section was an either/or — a wasm runtime or native TinyGo, decided by a spike.
+That was the wrong shape. **Decision 27 defines a tier as "the shared engine × a host/environment binding + ABI mode
 + cap set — not a per-tier fork of the logic."** One board running two runtimes is two host bindings over
 one engine, which is exactly a tier apiece:
 
 | Tier | Engine | Host | ABI |
 | --- | --- | --- | --- |
-| **`badge-native`** | TinyGo compiled for RP2350, **linked directly** — no wasm | Go, with TinyGo display/GPIO drivers | direct Go calls |
-| **`badge-wamr`** | TinyGo → **wasip1 `engine.core.wasm`**, run under WAMR | C++, ESP-IDF-style, Pimoroni display libraries | portable byte ABI, caps as WAMR native functions |
+| **`rp2350-tinygo`** | TinyGo compiled for RP2350, **linked directly** — no wasm | Go, with TinyGo display/GPIO drivers | direct Go calls |
+| **`rp2350`** | the **same `engine.component.wasm` the browser runs**, AOT-compiled to a `pulley32` `.cwasm` | Rust `no_std`, Wasmtime + Pulley, `rp235x-hal` | WIT imports, satisfied by a hand-written host |
 
-**Build `badge-native` first.** It has exactly one unknown — does the pinned TinyGo target RP2350 — where
-`badge-wamr` has several, and §14 risk 2 of the main plan already calls RP2350-under-WAMR the least-proven
-combination in the project. Doing native first means the badge *works* while WAMR is still a question, and
-it gives the WAMR port a running reference to compare against instead of a blank screen.
+**Build `rp2350-tinygo` first.** It has exactly one unknown — does the pinned TinyGo target RP2350 — where
+`rp2350` has a measured blocker: the component AOTs to ~890 KB against 520 KB of SRAM, so the badge needs
+its PSRAM allocator first. Doing native first means the badge *works* while that is still open, and it
+gives the interpreted tier a running reference to compare against instead of a blank screen.
 
-**Why build the second one at all — the payoff is a check that does not exist today.** `verify-parity`
-compares native Go against a wasip2 component on a developer's machine. Two badge tiers compare **core wasm
-under WAMR against a natively linked engine, on the same hardware, from one source** — which is the first
-real test of the portable byte ABI (Decision 25) and of `emit` surviving to core wasm (§10.2). Neither has
-ever run anywhere.
+**Why build the second one at all — the payoff is a check that does not exist today, and it got stronger.**
+`verify-parity` compares native Go against a wasip2 component on a developer's machine. Two badge tiers
+compare **the shared component against a natively linked engine, on the same hardware**. Under the old WAMR
+plan the two tiers shared only *source*; now they share the **artifact**, so a disagreement can no longer be
+blamed on a second build.
 
-**The cost: the presentation is written twice**, in Go and in C++ — see §10.1e, which is the honest treatment
-of whether it has to be. Short version: with a C++ WAMR host, the two tiers share the engine and nothing
-else, so the TFT drawing and button reading exist in both languages. That is not waste under this
+**The cost: the presentation is written twice**, in Go and in Rust — see §10.1e, which is the honest treatment
+of whether it has to be. Short version: the two hosts share the engine and nothing else, so the TFT drawing
+and button reading exist in both languages. That is not waste under this
 architecture (two independent slots rendering the same engine answers is precisely what host parity checks)
 but it **is** two display drivers, and it is the main reason to sequence rather than attempt both at once.
 
-### 10.1a A platform gap that blocks `badge-native` — the caps seam has only two of its three files
+### 10.1a A platform gap that blocks `rp2350-tinygo` — the caps seam has only two of its three files
 
 **Found 2026-07-29 by reading the code**, and it would otherwise surface as a mystifying build failure at
 B1.
@@ -441,72 +442,66 @@ repeats it. Only **two** exist, and their build tags are:
 ```
 
 Those tags conflate **"TinyGo targeting wasm"** with **"TinyGo targeting a microcontroller"**. A
-`badge-native` build is TinyGo, so it would select `caps_wasip2.go` and try to import WIT event bindings
+`rp2350-tinygo` build is TinyGo, so it would select `caps_wasip2.go` and try to import WIT event bindings
 that have no meaning on bare metal.
 
 **What it needs:** a discriminator finer than `tinygo`. TinyGo sets a `baremetal` build tag for
 microcontroller targets, which is the obvious candidate — `tinygo && !baremetal` for the WIT path,
 `tinygo && baremetal` for direct calls — but **verify it against the pinned TinyGo rather than trusting this
-paragraph**, and check what a wasip1 target reports too, since `badge-wamr` needs a third answer
-(`//go:wasmimport`).
+paragraph**. Only two answers are needed — `rp2350` runs the wasip2 component unchanged, so there is no
+third `//go:wasmimport` shape to discriminate.
 
 **This is platform work, not app work** (`AGENTS.md` §3): fix it in `dlc-platform`, not from inside the app.
-It is small, it is a prerequisite for `badge-native`, and it is recorded in `DEVALBO-DLC-GO-TASKS.md`.
+It is small, it is a prerequisite for `rp2350-tinygo`, and it is recorded in `DEVALBO-DLC-GO-TASKS.md`.
 
-### 10.1b The ABI question, checked against the code rather than the decision record
+### 10.1b The ABI question, which answered itself
 
-Decision 25 says targeting WAMR fixes the capability-boundary ABI to the **portable byte** mode project-wide,
-and warns that retrofitting is invasive. For *this* app that warning does not bite, and it is worth knowing
-why rather than carrying a fear:
+This section used to weigh Decision 25's warning that targeting embedded fixes the capability ABI to a
+portable byte mode project-wide and that retrofitting is invasive. **Decision 25 no longer says that.**
+Pulley runs components, so there is one ABI, no toggle, and nothing to retrofit — the question is closed,
+not deferred.
 
-- **There is no ABI toggle to set.** No `--wamr`, no `abi` key, nothing in the scaffolder — it is backlog
-  (`DEVALBO-DLC-GO-TASKS.md`). So there is no setup-time choice to get wrong, because there is no choice to
-  make.
-- **The engine is already portable-shaped.** Tic-tac-toe's only import is
-  `emit(topic: string, payload: list<u8>)`, which Decision 33 deliberately built out of flat scalars and
-  bytes precisely so it would lower to core wasm. Nothing to convert.
-- **What is actually missing is the wasip1 core build**, which is `badge-wamr`'s business and no Makefile
-  target emits today.
+What replaces it is a build step rather than a build *target*: `rp2350` consumes the same
+`engine.component.wasm` and AOT-compiles it to Pulley bytecode. No second guest artifact exists.
 
 **Two more things the tooling cannot express yet, both discovered by reading the code:**
 
 - **`dlc new` can now scaffold any tier the template has a slot for.** Changed 2026-07-29: the offered tiers
   are **derived from the template tree**, and `[tiers.*]` defaults to `root = "hosts/<tier>"` for anything
-  that is not web. So `--tiers badge-native` works the moment
-  `templates/component-model/hosts/badge-native/` exists — no Go change.
-- **The slot contents are what is missing**, and deliberately: `templates/wamr/` is backlog so nobody
-  scaffolds an unverifiable stub. Two tiers means eventually two skeletons; add each one once its tier is
-  proven, not before.
+  that is not web. So `--tiers rp2350-tinygo` works the moment
+  `templates/component-model/hosts/rp2350-tinygo/` exists — no Go change.
+- **The slot contents are what is missing**, and deliberately: an embedded host slot is backlog so nobody
+  scaffolds an unverifiable stub. Two tiers here means two *slots* over one skeleton, not two skeletons —
+  add each once its tier is proven, not before.
 
-### 10.1e Can `badge-wamr` share code with `badge-native`?
+### 10.1e Can `rp2350` share code with `rp2350-tinygo`?
 
 Worth asking properly, because the two tiers drive **the same screen and the same five buttons** — which is
 the one case in this project where two tiers have everything visually in common. Three answers, in
 increasing order of how much they change:
 
-**First, what is NOT the constraint: WAMR exposing libraries.** Registering native functions for the guest to
-import is WAMR's core mechanism — `wasm_runtime_register_natives` — and §5.3 already specifies it as how
-embedded capabilities arrive: "capabilities bind as WAMR native functions". A C++ host can link Pimoroni's
-display library and hand it to the guest. Nothing about this tier is blocked by what WAMR can expose.
+**First, what is NOT the constraint: the runtime exposing libraries.** Satisfying the guest's WIT imports
+from host code is Wasmtime's core mechanism, and the embedded host already implements every WASI import the
+component asks for by hand ([`EMBEDDED-PLAN.md`](../EMBEDDED-PLAN.md)). A Rust host can drive the TFT and
+hand it to the guest. Nothing about this tier is blocked by what the runtime can expose.
 
 The constraint is narrower and only about **host-side code**: the two hosts are written in different
 languages, so code *neither* of them exposes to the guest — the glue that talks to the screen and the
 buttons — exists twice.
 
-**1. With a C++ WAMR host: no shared host code, only the shared engine.** WAMR is C, the Pimoroni libraries
-are C++, and `badge-native` links Go. Nothing crosses.
+**1. With a Rust host: no shared host code, only the shared engine.** The runtime is Rust `no_std` and
+`rp2350-tinygo` links Go. Nothing crosses.
 
 **And "written twice" overstates it, which is worth correcting:** neither host writes a display *driver*.
-Both bind an existing one — Pimoroni's C++ library on the WAMR side, `tinygo.org/x/drivers` on the native
-side. What is duplicated is a thin glue layer plus a nine-cell renderer, which is much less than two drivers
+Both bind an existing one — an `embedded-graphics` driver on the Rust side, `tinygo.org/x/drivers` on the
+native side. What is duplicated is a thin glue layer plus a nine-cell renderer, which is much less than two drivers
 and is the reason this stays the default answer.
 
-**2. A Go host embedding WAMR via cgo would allow sharing — and is a research project.** TinyGo supports
-cgo, so in principle a Go host could embed WAMR and keep the display and input code shared with
-`badge-native`. In practice WAMR is a large CMake-built C codebase, and compiling or linking it from a
-TinyGo baremetal build is unproven here and not something to assume. **Do not attempt this as part of the
-app.** If it is ever tried, it is its own spike with its own README, and a red result costs nothing because
-Track N already works.
+**2. A Go host embedding the runtime via cgo would allow sharing — and is not worth it.** In principle a
+TinyGo host could embed a C wasm runtime and keep the display and input code shared with `rp2350-tinygo`.
+Wasmtime `no_std` is Rust, so this would mean adopting a *different, weaker* runtime purely to share a
+nine-cell renderer — trading the Component Model for glue reuse, which is the trade this whole tier exists
+to refuse. **Do not attempt this as part of the app.**
 
 **3. Sharing presentation is possible, and mostly should not be wanted — because RENDER DECISIONS BELONG TO
 THE TIER.**
@@ -522,7 +517,7 @@ the host-layer rule so far (maintainer, 2026-07-29):
 
 §6.4 argues for the semantic path from **dissimilarity of output** ("DOM, a TFT grid and terminal ASCII share
 no structure"). The timing-and-constraints argument is stronger, and it survives the case where the other one
-fails: two messages ago this plan claimed the reasoning *inverts* for `badge-native` vs `badge-wamr`, since
+fails: this plan once claimed the reasoning *inverts* for the two badge tiers, since
 they drive the same pixels. Under the constraints argument it does not invert — **one of those hosts is running
 an interpreter and the other is not**, so their performance envelopes differ even though their screens are
 identical, and each is still the better judge of how to paint.
@@ -553,12 +548,12 @@ app's engine code and its tier slots; the framework does not enforce it, and no 
 a rasterizer honours them. Host parity compares renderings, not intentions — which is why "the author
 coordinates the tier and the engine" is a real responsibility rather than a formality.
 
-### 10.1c `keeb-native` — the tier with no screen, and the smallest one
+### 10.1c `rp2040-tinygo` — the tier with no screen, and the smallest one
 
 **RP2040, 264 KB SRAM, no display, two system buttons.** This is Decision 18's floor: §5.1 says 264 KB "is
 too tight for a comfortable WASM runtime, so the *same Go engine source* is compiled **natively**". So unlike
-the Tufty there is **no runtime choice here** — native TinyGo or nothing, and `badge-wamr`'s whole track is
-inapplicable.
+the Tufty there is **no runtime choice here** — native TinyGo or nothing, and the interpreted track is
+inapplicable: 2 MB of flash cannot hold a runtime plus a ~890 KB payload either.
 
 **Where does a game with no screen render?** Over USB serial, into whatever terminal is attached — the
 "serial REPL" the main plan describes for MCUs (§4.1, Decision 14). The board's screen is *someone else's
@@ -586,7 +581,7 @@ precisely because it is not a rendering of the board — it is a host deciding h
 - **It is $8.95**, so the demo is reproducible by anyone. That is not an engineering property, but it is why
   this tier is worth having.
 
-**Track K — `keeb-native`.** Same shape as Track N, minus the display:
+**Track K — `rp2040-tinygo`.** Same shape as Track N, minus the display:
 
 | Phase | Work | Falsification |
 | --- | --- | --- |
@@ -682,37 +677,38 @@ tier rather than the capability.
 
 Say these out loud rather than working around them:
 
-- **The caps seam is missing its third file** — §10.1a. Blocks `badge-native` and `keeb-native`. Platform work.
+- **The caps seam is missing its third file** — §10.1a. Blocks `rp2350-tinygo` and `rp2040-tinygo`. Platform work.
 - **`Boot` cannot report an absent filesystem** — §10.1d. Blocks §10.4 and all of Track K. Platform work,
   and the more surprising of the two: the capability exists in TypeScript and is unreachable from Go.
-- **No wasip1 core build target exists.** `make build-wasm` produces the wasip2 component; a core module for
-  WAMR is new. Blocks `badge-wamr`.
-- **No embedded skeleton.** `templates/wamr/` is backlog until a WAMR spike can `verify` — and there are now
-  **three** shapes to eventually template: a Go host with a screen, a Go host without one, and a C++ host
-  embedding WAMR. **The hand-written build/flash target for each tier is
+- **The badge cannot instantiate the component yet.** The AOT step works and the runtime boots, but ~890 KB
+  of Pulley bytecode does not fit 520 KB of SRAM: **the PSRAM allocator is the blocker**, and it is measured,
+  not suspected. Blocks `rp2350`.
+- **No embedded skeleton.** An embedded slot is backlog until one can `verify` — and there are
+  **three** shapes to eventually template: a Go host with a screen, a Go host without one, and a Rust
+  `no_std` host running the component. **The hand-written build/flash target for each tier is
   the best input that template will ever get**; write it as though it were going to be scaffolded, because
   it will be.
-- **`dlc build <tier>` does not know these tiers.** Declaring `[tiers.badge-native]` by hand works — arbitrary
+- **`dlc build <tier>` does not know these tiers.** Declaring `[tiers.rp2350-tinygo]` by hand works — arbitrary
   tier names are accepted, and the slot gate requires the directory to exist first — but toolchain
-  orchestration for a PlatformIO or TinyGo-flash target is Decision 27 work that does not exist. It is a
-  hand-written `make` target for now.
+  orchestration (TinyGo flash; or component → AOT → `cargo` → `.uf2`) is Decision 27 work in progress. It is
+  a hand-written `make` target for now.
 - **Parity cannot reach either tier.** `verify-parity` compares native Go against the wasip2 component;
-  neither a bare-metal binary nor a wasip1 core module on hardware is in its world. Two things partly cover
+  neither a bare-metal binary nor a `.cwasm` on hardware is in its world. Two things partly cover
   it: **host parity** (Phase 5) can take each badge renderer as another slot driven by synthetic states, with
   no device in the loop; and the two badge tiers can be compared against **each other** on hardware
   (§10.1), which is the closest thing to embedded parity this project will have.
 
 ### 10.6 Build order
 
-Three tracks — **N** (badge native), **W** (badge WAMR), **K** (keeb native, §10.1c). **The native tracks
+Three tracks — **N** (badge native), **P** (badge Pulley), **K** (keeb native, §10.1c). **The native tracks
 first**, and each phase leaves the tree green. Phases assume §§1–9 are done:
 **the engine already exists and is already correct** — none of this touches it.
 
-**Track N — `badge-native` (TinyGo linked directly, Go host)**
+**Track N — `rp2350-tinygo` (TinyGo linked directly, Go host)**
 
 | Phase | Work | Falsification |
 | --- | --- | --- |
-| **N0** | does the pinned TinyGo target RP2350 at all? Write the answer in `spikes/`. **The one hard dependency** — if no, the native track stops and `badge-wamr` becomes the only route | a stated version and target name, not a recollection |
+| **N0** | does the pinned TinyGo target RP2350 at all? Write the answer in `spikes/`. **The one hard dependency** — if no, the native track stops and `rp2350` becomes the only route | a stated version and target name, not a recollection |
 | **N1** | **platform:** split the caps seam (§10.1a) **and** give `Boot` a way to declare no filesystem (§10.1d) — both shared with Track K | build for the board with the old tags and watch it fail on the WIT import; and watch `Boot` refuse a host that has no filesystem to grant |
 | **N2** | the engine runs on the board and answers one command over USB serial | flash a build with `platform.RegisterAll()` removed → `unknown method_id` at run time, on hardware |
 | **N3** | display: draw the board, the turn, and the winning line **the engine named** | send a state whose `winning_line` is empty while three marks align → nothing is highlighted (the §4 rule, on glass) |
@@ -720,15 +716,19 @@ first**, and each phase leaves the tree green. Phases assume §§1–9 are done:
 | **N5** | no persistence (§10.4) | power-cycle → a fresh game, nothing written. Then run the **native desktop** tier with a no-filesystem manifest and confirm the game still plays — proving the branch reads the capability, not the tier |
 | **N6** | the badge renderer joins **host parity** as a third slot | make it disagree with the others about one state → parity goes red |
 
-**Track W — `badge-wamr` (wasip1 core module, C++ host)** — only after Track N is running.
+**Track P — `rp2350` (the shared component under Pulley, Rust `no_std` host)** — only after Track N is running.
+Phases P0–P2 are **already done** outside this app ([`EMBEDDED-PLAN.md`](../EMBEDDED-PLAN.md)); they are listed
+so the sequence reads honestly.
 
 | Phase | Work | Falsification |
 | --- | --- | --- |
-| **W0** | emit a wasip1 `engine.core.wasm`; confirm `emit` lowers to a `//go:wasmimport` (§10.2) | strip the import and watch the link fail loudly rather than silently succeed |
-| **W1** | WAMR builds and runs on RP2350 under PlatformIO/arduino-pico | a written answer either way. **A red here is a result, not a failure** — the badge already works via Track N |
-| **W2** | capabilities as WAMR native functions; the same commands answer | host-side bounds-checking of guest pointers, proven by handing it a bad one |
-| **W3** | the C++ display and input slot | the same two probes as N3/N4, in the other language |
-| **W4** | **the payoff: compare the two tiers on the board** — same engine source, same commands, one as core wasm and one native | make the two disagree on one state and watch the comparison catch it |
+| **P0** | ✅ AOT the shared component to `pulley32` with a compiler built like the runtime | load a `.cwasm` from the stock `wasmtime` CLI and watch it be rejected — the artifact records the compiler's feature set, not its flags |
+| **P1** | ✅ the runtime boots on the board; `picotool info` confirms the UF2 family and boot block | flash a UF2 built by a tool that guesses the family and watch `picotool` name it `rp2040` |
+| **P2** | ✅ a hand-written `no_std` host satisfying every WASI import the component asks for | remove one import definition and watch instantiation fail by name, before any command runs |
+| **P3** | **the blocker: PSRAM allocator** — ~890 KB of bytecode will not fit 520 KB of SRAM | instantiate without it and watch the allocation fail; that is the measurement, not a guess |
+| **P4** | the engine answers one command over UART | flash a build with `platform.RegisterAll()` removed → `unknown method_id`, on hardware |
+| **P5** | the Rust display and input slot | the same two probes as N3/N4, in the other language |
+| **P6** | **the payoff: compare the two tiers on the board** — one running the shared artifact, one natively linked | make the two disagree on one state and watch the comparison catch it |
 
 ### 10.7 The sibling board
 
@@ -740,4 +740,4 @@ not worth a fourth tier.
 **The rule for adding boards:** a new board is a new **tier** only when it changes the engine binding, the
 ABI, or the capability set (Decision 27). A different screen or more buttons is a different *slot* on an
 existing tier, and a slot is cheap. Three tiers here is already the interesting maximum — RP2350 native,
-RP2350 under WAMR, RP2040 native — because those are three genuinely different bindings.
+RP2350 interpreted, RP2040 native — because those are three genuinely different bindings.

@@ -144,8 +144,9 @@ make dev-web                 # run dlc in the browser (React UI)
 Additional prerequisites appear only when you target these — kept out of the bootstrap path:
 
 - **Desktop (Wails):** a C toolchain + platform webview (WebKit / WebView2).
-- **Embedded (ESP32-S3 / RP2350 / RP2040):** **PlatformIO** (owns ESP-IDF / arduino-pico toolchains, WAMR,
-  flashing, `pio device monitor`) + a board + USB serial. PlatformIO installs via Devbox's `platformio`
+- **Embedded (RP2350 / ESP32-P4 / RP2040):** **`rustup`** (the cross targets come from
+  `rust-toolchain.toml`; nixpkgs' `rustc` ships only the host's std) + **`picotool`** for flashing and for
+  checking the UF2 family and boot block + a board + USB serial. Both install via Devbox's `rustup`
   CLI; the board SDKs are managed by PlatformIO, not Nix (§4.1 of the plan).
 - **SQLite tier:** `modernc.org/sqlite` (Go dep, no system install) / `@sqlite.org/sqlite-wasm` (npm).
 

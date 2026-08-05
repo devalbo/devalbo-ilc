@@ -38,7 +38,7 @@ convention), and collapses most of the old cross-language tooling: `wit-bindgen-
 | Bit | What | Language | Portability |
 | --- | --- | --- | --- |
 | **Engine** | All business logic; imports the ILC capability world; exports handlers | **Go** (→ TinyGo wasm) | **environment-independent**, one shared `engine.wasm` |
-| **Host / Environment** | Injects the capabilities the engine imports; owns platform specifics | **Go** (native/desktop/CLI/RP2040) · **C** (ESP32-S3, ESP-IDF/WAMR) · **TypeScript** (web glue+UI) | **per-platform** (a Component-Model host is *supposed* to be) |
+| **Host / Environment** | Injects the capabilities the engine imports; owns platform specifics | **Go** (native/desktop/CLI) · **Rust `no_std`** (embedded, Wasmtime/Pulley) · **TypeScript** (web glue+UI) | **per-platform** (a Component-Model host is *supposed* to be) |
 
 The engine **core module** is byte-identical across every WASM tier (the wasip2 component is derived from it
 via the adapter; RP2040 links it natively); the host is whatever each platform needs.
@@ -54,7 +54,7 @@ contract are the platform; the engine is the app.
 | Platform (written once, reused) | App (swapped per instance) |
 | --- | --- |
 | Capability WIT world + `caps_*.go` build seam (§6, §5.3) | Engine handlers — the business logic (§13 is one example) |
-| Host adapters: native / web / desktop / WAMR (§10) | The app's `.proto` messages (§7.2) |
+| Host adapters: native / web / desktop / embedded (§10) | The app's `.proto` messages (§7.2) |
 | Build pipeline: core-module + adapter + native (§5.3) | **Which capabilities** it uses — opt-in |
 | Toolchain / Devbox / buf (§4) | **Which tiers** it targets — opt-in (§10) |
 | Verification harness, per tier (§11) | Its UI (React / TFT / none) |
@@ -73,9 +73,9 @@ set, or fewer tiers. The rest are platform invariants.
 
 | # | Decision | Choice |
 | --- | --- | --- |
-| 1 | Implementation language | **Go** for all business logic (the engine); host glue may be **TS** (web) or **C** (ESP32-S3) — neither carries business logic |
-| 2 | Runtime substrate | **Component Model** on web (jco) and as the parity/portability artifact; **CLI/desktop link the engine natively in-process** for bootstrap (Decision 26, not CM-under-wasmtime); **core WASM + WASI Preview 1 + native host functions** on WAMR embedded — WAMR has **no** CM / WASI-0.2 yet (tracked divergence, §5.3) |
-| 3 | Artifact model | **Component tiers (web/desktop/CLI): TinyGo `-target=wasip2` → a WASM component directly** — one shared `engine.component.wasm` (validated by Spike 1; the `wasip1`+adapter path is abandoned — §5.3). **Embedded/WAMR** runs core WASM, not a component — its build is revisited when embedded lands; RP2040 links native. Per-platform host (the "two bits"). |
+| 1 | Implementation language | **Go** for all business logic (the engine); host glue may be **TS** (web) or **Rust** (embedded) — neither carries business logic |
+| 2 | Runtime substrate | **Component Model** on web (jco) and as the parity/portability artifact; **CLI/desktop link the engine natively in-process** for bootstrap (Decision 26, not CM-under-wasmtime); and **on embedded**, where Wasmtime's `no_std` **Pulley** interpreter runs that same component ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)) |
+| 3 | Artifact model | **Component tiers (web/desktop/CLI): TinyGo `-target=wasip2` → a WASM component directly** — one shared `engine.component.wasm` (validated by Spike 1; the `wasip1`+adapter path is abandoned — §5.3). **Embedded runs the same component**, AOT-compiled to Pulley bytecode; the `.cwasm` is a build product of the same artifact, not a second one. Per-platform host (the "two bits"). |
 | 4 | Capability boundary | **Neutral WIT world** — polyglot-capable; Rust/C-via-WASI can interop |
 | 5 | Embedded floor | **Go/WASM is the floor** (no Rust `no_std` tier); Rust-via-WASI still welcome |
 | 6 | FileSystem | **WASI standard** via Go `os`; host `setPreopens` the root — *not* a custom capability |
@@ -83,31 +83,31 @@ set, or fewer tiers. The rest are platform invariants.
 | 8 | On-disk format | **Proto-schema'd canonical JSON** (protobuf governs shape/evolution; binary proto on the wire) |
 | 9 | Sync | **Plain file LWW** (sync JSON docs, rebuild index locally); no CRDT |
 | 10 | Dispatch | **Local-only in V1** (no envelope/routing yet) |
-| 11 | Async bridge (Rich/CM vs WAMR split) | **Rich/CM:** Spike 5 ✅ — stock jco **JSPI** (Node ≥24 + `--experimental-wasm-jspi` + async import/export) awaits Promise host imports; sync transpile cannot (negative control). **No ILC shims.** **Portable/WAMR:** Spike 5 ✅ — TinyGo wasip1 + blocking `wasmimport` host (WAMR native-fn shape). See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
+| 11 | Async bridge | Spike 5 ✅ — stock jco **JSPI** (Node ≥24 + `--experimental-wasm-jspi` + async import/export) awaits Promise host imports; sync transpile cannot (negative control). **No ILC shims.** See [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). |
 | 12 | Capability set | WASI FS · Events · Display · **Console** (WASI stdio, not a custom interface — §6.5). **No index capability:** the index is engine-owned, so there is nothing for a host to provide or an app to branch on (§6.2) |
 | 13 | Display | **Discovery (`describe`) + draw-command list + retained widget tree**; output-only |
 | 14 | Input *(entry renamed by Decision 28)* | **One universal entry**; host maps native input → command (serial REPL / input-map on MCUs). Originally `execute-cli(argv)`; now `execute(method, request)` — the principle (one entry, host-built input) is unchanged. |
 | 15 | Reactivity | Engine emits **events**; host subscribes; UI invalidates + re-fetches |
 | 16 | Pilot | **Shared notes/list** local-first app |
-| 17 | Tiers | **All six supported in V1** (Web · Desktop · CLI · ESP32-S3 · RP2350 · RP2040); an *app* picks a subset (§16.1) |
-| 18 | Embedded exec | **Mixed by capacity:** ESP32-S3 / RP2350 → WAMR+wasm; RP2040 → native TinyGo |
+| 17 | Tiers | A **tier is a host slot, a target is an artifact**, and they are not the same axis — see `engine/tiers.go` and [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md) D2b. Tiers grow per chip; targets are `native` / `wasip2` / `pulley32` / `pulley64` and stop there. An *app* picks a subset (§16.1) |
+| 18 | Embedded exec | **Wasmtime + Pulley**, the `no_std` portable interpreter, running the SAME component every other tier runs (AOT-compiled, [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md) D2). *Amended 2026-08 — this row used to send ESP32-S3/RP2350 to WAMR.* **WAMR was dropped because it cannot run a component**, only core wasm + WASI p1, which would have made embedded the one tier running a different artifact and put every WASI 0.2 capability behind an embedded-only exception. The cost of the reversal is **RISC-V or Arm only**: Xtensa (ESP32-S3/S2) has no Rust target, so it is out of scope (D8). RP2040 and a Pulley-less RP2350 stay on native TinyGo as the fallback if the interpreter will not fit. |
 | 19 | Compiler | **Retire** the custom Rust WIT→3-lang compiler; use `wit-bindgen-go` + `buf` |
 | 20 | WASI standards reuse | Console → **WASI stdio** (drop custom `console-io`); CLI entry → **`wasi:cli/command`** + a custom persistent `execute-cli` export *(renamed `execute` by Decision 28)*; test host → **WASI Virt**; the index's storage seam / `event-host` / `display-host` mirror **wasi:keyvalue** / **wasi:messaging** / **wasi-gfx** shapes (§6.6) |
 | 21 | Filesystem export/import | **First-class platform primitive** (§7.3): app state = a portable FS bundle (`--format=bft\|zip\|proto`) for test setup/teardown, golden snapshots, backup/restore, bug repro, cross-tier migration, node bootstrap, and **BFT interchange when 2 apps/versions share a store**. Engine-side, tier-agnostic (uses only the filesystem cap). `dlc new` = importing a template bundle. |
 | 22 | ~~CLI interpreter — in-engine~~ **⚠ SUPERSEDED by Decision 28** | *Retained for history.* Originally: the CLI parser lived **inside the engine** (host forwards argv to `execute-cli`), TinyGo-safe, ffcli default (Spike 4). **Reversed by Decision 28** — parsing is a host-side front-end; the engine takes a structured request. Spike 4's bake-off is re-scoped to the *host* parser (ffcli still the reference); its findings (kong panics, cobra `-name`, hand-rolled the leanest) stand as data. |
 | 23 | Two-phase launch | Starting an app = **(1) launch the Environment** (host wires caps + mounts the FS root, optionally `import-fs`-seeded) then **(2) run the engine** (one-shot `execute-cli`→exit *(now `execute`, Decision 28)*, or persistent → many invocations). One command does both; splittable for test / persistent / dev (§5.5). |
 | 24 | Project metadata | An **`dlc.toml`** (or proto-schema'd `dlc.json`) manifest is the app's config source of truth — capabilities, tiers, storage, UI, launch mode/seed, and the pinned `platform` version (§16.8). `dlc` commands read/write it; it drives scaffold / build / verify / host-add / launch and enables regenerate/upgrade. |
-| 25 | ABI mode (WAMR toggle) | Targeting **WAMR/embedded** is a **setup-time** choice (`dlc new` / manifest `tiers`) that fixes the capability-boundary ABI: **on → portable byte ABI** (protobuf over `(ptr,len)`; also builds the wasip1 core; port-ready rules — §5.6); **off → rich Component-Model ABI** (rich WIT types, wasip2 only). Disk/wire stays protobuf either way. |
+| 25 | **One ABI. There is no mode toggle.** | *Rewritten 2026-08; this row used to make "portable byte ABI vs rich Component-Model ABI" a setup-time choice, because the embedded tier was going to be WAMR and WAMR has no Component Model.* Decision 18 removed that constraint: Pulley runs components, so **every tier speaks the Component Model** and no project ever has to choose. What survives is the *shape* of the command boundary — flat scalars + proto bytes (Decision 31) — which keeps its own justification (one entry point, rename-safe ids, `buf breaking` versioning) and no longer needs a portability one. Disk/wire is protobuf, as always. The second skeleton family this row implied (`templates/wamr/`) is not coming; there is one skeleton. |
 | 26 | Native host runs the engine in-process (Go); wasm is the parity contract | The CLI/desktop host **links the engine as a native Go package** and calls `execute-cli` *(now `execute`, Decision 28)* **in-process** — no wasm runtime in the run path, which sidesteps the `wasmtime-go` Component-Model gap and gives full-Go dev speed. **Re-tested 2026-08-02 against wasmtime-go v47** (`spikes/wasmtime-go-cm/`): the decision holds, but the phrase "lacks a CM API" is now misleading — v47 HAS one. It can load, introspect and serialize a component; it cannot **define imports or call exports** (`ComponentLinker` offers only `DefineUnknownImportsAsTraps`, and there is no `ComponentFunc`), and has no WASI 0.2. That is the durable statement, and the thing to re-check. This is a **build seam, not a fork** (§5.3/§5.4): one engine codebase behind the WIT-shaped interface, two host bindings — native in-process caps (`caps_native.go`) · wasm-component caps. The **wasm component stays the source of truth**: web requires it (B3) and it anchors the cross-tier identity guarantee, which moves from runtime to **CI / `dlc verify`** — run the CLI against the *wasm* engine and diff golden `command-result` vectors vs the native run. Scope: `dlc`-the-tool + non-embedded hosts; the capability-sandbox promise still binds the **apps `dlc` scaffolds** (web/embedded are wasm-mandatory). |
 | 27 | Build/run units are **tiers** (`dlc build/run/verify <tier>`) | A project holds **one app** (its engine) built for a set of **tiers** (native/web/desktop/embedded/…). A tier is a **composition recipe** — the *shared* engine × a host/environment binding + ABI mode (Decision 25) + cap set — **not** a per-tier fork of the logic, preserving the two-bit invariant + Decision 26 parity. `dlc build <tier>` (orchestrates the toolchain), `dlc run <tier>` (two-phase launch, Decision 23), and `dlc verify <tier>` (§11 matrix; `--parity` = the Decision 26 native↔wasm check) are **host-side** — tier selection never enters engine logic (§5.4). Registry = `dlc.toml [tiers]` (§16.8); built-ins `native` + `web`. `dlc`-as-orchestrator is Backlog (§16.7): `make` bootstraps the first `dlc`, then these supersede it for scaffolded apps. Since one project = one app, no `(app × tier)` noun is needed — the tier *is* the unit. |
 | 28 | CLI/argv parsing is a platform front-end; the engine takes a structured request (**supersedes Decision 22**) | The CLI is a *mechanism for constructing a request* for the shared business logic — so **parsing lives in the host, not the engine**. Each tier builds the request its own way (native: cobra/ffcli + `huh` menus; web: React form; embedded: REPL/input-map), and the engine exports **operations over a structured request** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` selects the handler, proto-bytes payload; input now symmetric with the already-protobuf output; §8/Decision 10, promoted from backlog to the primary boundary). **Wins:** native front-end off the TinyGo leash (cobra/kong/`huh` all fine, Decision 26); menus/prompts fall out naturally; the boundary is typed + `buf breaking`-evolvable, not stringly-typed argv. **Cost:** each host builds the request (embedded reparses in its host lang, or calls an *optional* in-engine `parse(line)→request` helper) — drift bounded by the **shared proto schema**, not argv. Spike 4 **re-scoped** (informs the *host* parser; ffcli the reference; TinyGo-safety pressure relaxes). Bootstrap keeps `execute-cli(argv)` as a transitional shim until the envelope lands. |
 | 29 | Self-describing command registry — service + `method_id`, direct request/response messages | The **app registers each command once** as a proto **`service` rpc** — `rpc New(NewRequest) returns (NewResponse) { option (method_id) = N; }` — plus a handler `func(*NewRequest) *NewResponse`. **Dispatch keys on the permanent `method_id`** (`map[u32]handler`; rename-safe — the *name* is cosmetic / the CLI verb; `buf breaking` + the plugin's id-lock guard the number). The wire passes the **request/response messages directly** (single-encode, flat — Spike 2-proven); no oneof or envelope for the command surface (the discriminator is a scalar param, Decision 31). **Introspection is host-side, standard protobuf:** the host embeds the `buf build` **FileDescriptorSet** and walks it with **protoreflect** (native Go) / `@bufbuild/protobuf` (web) to discover methods + `method_id` + request fields — field name→flag, type→flag type, **proto `enum`→menu choices**, with help/required/default from custom field options. The engine (TinyGo, no reflection) keeps **only** the `method_id→handler` map; a `describe()` export is **optional** — only for a *generic* host that doesn't embed the schema. **`protoc-gen-dlc-registry`** emits the engine registration + enforces `method_id` stability — reading the **`buf build` image**, since go-lite emits *no service stubs* (spike `options/`). (oneof retained for *response variants*, not command dispatch.) **Spike-confirmed (`spikes/options/`, all criteria green):** go-lite accepts `descriptor.proto` + `extend MethodOptions` and keeps `google.golang.org/protobuf` out of the guest graph; hosts read the options as **unknown fields** via `dynamicpb.NewExtensionType` + `Range` (not `HasExtension`). Options live in `proto/devalbo/options/v1/options.proto` (`method_id` = 50000; `help`/`required`/`default`/`short` = 50001-4). **Layout caveat:** *field* options must sit at the field's definition site, so a file holding request messages always imports the options package — the host-only/engine-only split can isolate the `service`, never the field metadata. |
 | 30 | Command surface splits two ways — in-engine vs host-side | A `dlc` command is an **in-engine `execute` handler** if it only touches the **filesystem / app-data** (portable — runs in terminal *and* browser): `new`, `export-fs`, `import-fs`, app-domain commands. It's **host-side orchestration** if it must **spawn the dev toolchain or inspect the machine** (native-only, can't run in wasm/browser): `build`, `run`, `verify`, `doctor`, `gen`, `host add`, `proto`. The native `dlc` host **routes**: a toolchain verb → handle in-host; anything else → build the request and forward to the engine's `execute` (Decisions 28/29). Not a violation of the old 'host forwards argv' — host verbs are *dlc-the-tool's*, not the *app's* surface. Governs where each handler lives + how the native `main()` dispatches. |
-| 31 | Single proto-bytes command boundary; `supported-abis()` negotiation; rich WIT reserved for CM-only caps | The guest exposes **one command boundary** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` + proto-bytes payload; Decisions 28/29) — universal across wasip2 **and** WAMR (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings/resources need the Component Model WAMR lacks — Decision 25). **Rich typed DX is host-side:** the host's generated binding (es-lite/go-lite) presents typed calls and serializes to the one byte boundary — no second guest ABI. A tiny **`supported-abis() -> list<u8>`** export (byte-ABI, readable even on WAMR) lets the guest advertise its boundaries + versions so a host picks the richest it supports. A **second, rich WIT guest boundary is reserved for Component-Model-only capabilities** (streams, `resource` handles, `wasi:http`, CM async) with no byte equivalent — added *per-capability*, negotiated, degrading to byte/absent on WAMR — never for the general command surface. When both exist they're two bindings over one shared registry (the caps-seam pattern), not duplicated logic. |
-| 32 | Capability introspection: **manifest for static facts, events for changes** — carried as data on the one command boundary. *BUILT — [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md); see §6.4a for how the shipped design differs.* | An app asks "what can this host do?" (display resolution, colour format, which render paths, is there an index) **without a new WIT surface**. The host pushes a protobuf **environment manifest** at launch — phase 1 of the two-phase launch (§5.5) — via a platform command in the core-lifecycle block (`SetEnvironment`, id reserved in 1–99), and **re-sends it whenever a fact changes** (window resize, rotation, a display hot-plugged). Static facts are therefore cheap and always present; volatile facts arrive as an update rather than a poll, and the engine may fan that out to the UI through Events (§6.3). **Why data, not new imports:** we just consolidated to a single `execute(method, request)` boundary (Decision 31), and a per-capability `describe()` import would reopen a second one — one that WAMR-portable tiers would have to mirror. A manifest is bytes on the boundary already proven to cross every tier, versioned by `buf breaking` like everything else. **Absence becomes a data question, not a linking one:** WIT has no optional imports, so a component cannot link against a display the host lacks; the world still declares the capability and a tier without a screen supplies a stub, but the engine never calls it because the manifest already said `display: none`. That keeps ONE artifact across tiers (which the Decision 26 parity check depends on) instead of forking the world per tier. **Cost:** the manifest is a second schema to evolve alongside the command surface, and a host that forgets to re-send after a resize leaves the engine on stale facts — so re-sending is the host contract, and `describe()`-style live queries stay available as a per-capability escape hatch for anything genuinely too volatile to push (none identified yet). |
-| 33 | Events is an IMPORT, and absence is a no-op — capabilities declare **reach**, not **announcement** | The engine's first custom **import** (`devalbo:ilc/events`, `emit(topic: string, payload: list<u8>)`), and the template every later capability inherits. **Flat scalars + bytes, mirroring `execute`** — a rich WIT record would require the Component Model and strand the WAMR/embedded tier (Decision 31); `string + list<u8>` lowers to pointer/length pairs a `//go:wasmimport` can express. **This does not reopen Decision 31:** that governs what the engine *exports* (one command entry, no second way in); imports are the other direction and are how capabilities were always meant to arrive (§5.1). **No return value:** a return would invite hosts to answer, and an answer would make the engine wait on a host — on the web tier, blocking the worker inside a synchronous component call. **Fire-and-forget, and absence is a no-op, never an error:** an app must never be able to tell whether anyone is listening, because on some tier nobody is, and code that branches on it would behave differently per tier — the divergence this architecture exists to prevent. So there is no strict/lenient switch here; the knob only has teeth for a capability that can genuinely be *missing at runtime*, host-side, never observable by app code. **That knob is now unowned:** it was parked on the index, and the index turned out never to be absent (§6.2), so the next capability that can genuinely go missing at runtime inherits the question — with a real consumer, which is the only way to answer it. **Topics are namespaced strings** (`ilc.data-changed`, `notes.record-changed`), payloads are proto messages (§7.2) — an app inventing a topic needs no registry allocation, unlike a `method_id`; the cost is that a typo'd topic silently matches nothing. **Payloads are deliberately not diffs:** the files are the truth (§7.1), and a precise change list would be a second source a subscriber could act on without re-reading. **Capabilities in `dlc.toml` declare what an app can REACH, not what it can ANNOUNCE** — console/filesystem/display/network are privileges a host could refuse; emitting carries nothing back and cannot be refused, so events is **not** declared. A manifest entry that gates nothing and can be denied by no one is a comment, not a permission. **Events join parity** (a third dimension, interleaved into the result stream) because an emission is an observable effect of a command: if native emits and wasm does not, the tiers have diverged where a user would notice. **Host-side ordering guarantee:** the web host holds a command's events until its OPFS flush completes, so an event never arrives before the change it announces is durable. **Re-entrancy is the standing hazard** — a host must not call `execute` from a sink; the web host is safe by construction (message boundary), a native host must defer. |
+| 31 | Single proto-bytes command boundary; `supported-abis()` negotiation; rich WIT reserved for CM-only caps | The guest exposes **one command boundary** — `execute(method: u32, request: list<u8>) -> command-result` (scalar `method_id` + proto-bytes payload; Decisions 28/29) — the same on every tier. **Rich typed DX is host-side:** the host's generated binding (es-lite/go-lite) presents typed calls and serializes to the one byte boundary — no second guest ABI. A tiny **`supported-abis() -> list<u8>`** export lets the guest advertise its boundaries + versions so a host picks the richest it supports. A **second, rich WIT guest boundary is reserved for Component-Model-only capabilities** (streams, `resource` handles, `wasi:http`, CM async) with no byte equivalent — added *per-capability* and negotiated, never for the general command surface. When both exist they're two bindings over one shared registry (the caps-seam pattern), not duplicated logic. |
+| 32 | Capability introspection: **manifest for static facts, events for changes** — carried as data on the one command boundary. *BUILT — [`ENVIRONMENT-PLAN.md`](./ENVIRONMENT-PLAN.md); see §6.4a for how the shipped design differs.* | An app asks "what can this host do?" (display resolution, colour format, which render paths, is there an index) **without a new WIT surface**. The host pushes a protobuf **environment manifest** at launch — phase 1 of the two-phase launch (§5.5) — via a platform command in the core-lifecycle block (`SetEnvironment`, id reserved in 1–99), and **re-sends it whenever a fact changes** (window resize, rotation, a display hot-plugged). Static facts are therefore cheap and always present; volatile facts arrive as an update rather than a poll, and the engine may fan that out to the UI through Events (§6.3). **Why data, not new imports:** we just consolidated to a single `execute(method, request)` boundary (Decision 31), and a per-capability `describe()` import would reopen a second one — one that every tier would have to mirror. A manifest is bytes on the boundary already proven to cross every tier, versioned by `buf breaking` like everything else. **Absence becomes a data question, not a linking one:** WIT has no optional imports, so a component cannot link against a display the host lacks; the world still declares the capability and a tier without a screen supplies a stub, but the engine never calls it because the manifest already said `display: none`. That keeps ONE artifact across tiers (which the Decision 26 parity check depends on) instead of forking the world per tier. **Cost:** the manifest is a second schema to evolve alongside the command surface, and a host that forgets to re-send after a resize leaves the engine on stale facts — so re-sending is the host contract, and `describe()`-style live queries stay available as a per-capability escape hatch for anything genuinely too volatile to push (none identified yet). |
+| 33 | Events is an IMPORT, and absence is a no-op — capabilities declare **reach**, not **announcement** | The engine's first custom **import** (`devalbo:ilc/events`, `emit(topic: string, payload: list<u8>)`), and the template every later capability inherits. **Flat scalars + bytes, mirroring `execute`** — a rich WIT record would be a second, differently-shaped way in (Decision 31); `string + list<u8>` lowers to pointer/length pairs a `//go:wasmimport` can express. **This does not reopen Decision 31:** that governs what the engine *exports* (one command entry, no second way in); imports are the other direction and are how capabilities were always meant to arrive (§5.1). **No return value:** a return would invite hosts to answer, and an answer would make the engine wait on a host — on the web tier, blocking the worker inside a synchronous component call. **Fire-and-forget, and absence is a no-op, never an error:** an app must never be able to tell whether anyone is listening, because on some tier nobody is, and code that branches on it would behave differently per tier — the divergence this architecture exists to prevent. So there is no strict/lenient switch here; the knob only has teeth for a capability that can genuinely be *missing at runtime*, host-side, never observable by app code. **That knob is now unowned:** it was parked on the index, and the index turned out never to be absent (§6.2), so the next capability that can genuinely go missing at runtime inherits the question — with a real consumer, which is the only way to answer it. **Topics are namespaced strings** (`ilc.data-changed`, `notes.record-changed`), payloads are proto messages (§7.2) — an app inventing a topic needs no registry allocation, unlike a `method_id`; the cost is that a typo'd topic silently matches nothing. **Payloads are deliberately not diffs:** the files are the truth (§7.1), and a precise change list would be a second source a subscriber could act on without re-reading. **Capabilities in `dlc.toml` declare what an app can REACH, not what it can ANNOUNCE** — console/filesystem/display/network are privileges a host could refuse; emitting carries nothing back and cannot be refused, so events is **not** declared. A manifest entry that gates nothing and can be denied by no one is a comment, not a permission. **Events join parity** (a third dimension, interleaved into the result stream) because an emission is an observable effect of a command: if native emits and wasm does not, the tiers have diverged where a user would notice. **Host-side ordering guarantee:** the web host holds a command's events until its OPFS flush completes, so an event never arrives before the change it announces is durable. **Re-entrancy is the standing hazard** — a host must not call `execute` from a sink; the web host is safe by construction (message boundary), a native host must defer. |
 | 34 | The **host layer**: per-app, per-tier code is a named slot with a contract — and Display becomes **optional** *(the optional-vs-required axis is superseded by Decision 35 — it is push-vs-pull)* | *Planned — [`HOST-LAYER-PLAN.md`](./HOST-LAYER-PLAN.md).* `engine/` vs `engine/platform/` drew a line between an app's own code and what every app inherits; **`hosts/` never got the same line**, and it shows: `hosts/web/` is pure runtime, `hosts/native/` mixes runtime with `dlc`'s own commands, and `notes` ships the same layer twice under two names (`hosts/native/` and `frontend/`). So: **host runtime** (inherited, identical for every app) vs **tier slot** (`hosts/<tier>/`, this app's presentation and input on that tier), one per tier declared in `dlc.toml`. **The app's `.proto` is the interface between an engine and its hosts** — commands in, events out, nothing else crosses. That reframes the schema as the app's published API to multiple independent host implementations, which is why **Decision 33's "topics are not a wire contract" reverses**: once a host *renders* from a payload, changing that payload breaks hosts, so event schemas get declared and **locked** like `method_id`. **The rule that carries the whole layer: host code renders, it never decides.** Parity compares command results, the written filesystem, and the event stream — all engine-side — so a tier slot is invisible to it *by construction*. Two hosts that each compute whether a board is won will eventually disagree on one tier only, with every existing check green. The engine decides `winner`; a host may highlight the winning line the engine named, and may not find one. Mechanically enforced by **host parity** (two slots, one synthetic event stream, compare normalized renderings), which is the only automatable check this layer will ever have. **This adds a THIRD render path to §6.4** — semantic events the host interprets — and it is *additive and already optional by Decision 33's D4*: a host that does not recognize a topic ignores it and the app cannot tell, so an app emits semantic events unconditionally and works with a dumb host (re-read the files, render app-side) and a smart host (draw natively) with no app-side branching. **Display therefore drops to optional and becomes the app author's call**, because the semantic path costs one small slot per tier and no new capability, no new schema, no new WIT — where draw-list + widget tree cost a whole capability and are only better when an app wants to write presentation *once*. **Consequence for Decision 32:** the manifest's headline justification was so a handler could branch on display facts, and a host-rendered app never learns there is a screen; what stays load-bearing is the non-display half (is there an index, what kind of FS root). **Cold start is a command, not an event** — events are ephemeral by design, so a slot that renders only from the stream is blank on reload; prime with a query, take events as deltas. **And an event payload may be rendered but never written back from**, which keeps §7.1 intact: a render is not a mutation and a stale one self-corrects on the next event, whereas a write-back makes the event a second source of truth. |
-| 35 | Render decisions belong to the **tier**; a shared render is **pulled**, never pushed | *Direction — nothing built. See §6.4 and [`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1e.* **A tier knows its timing and its constraints better than the engine can** — refresh rate, whether partial updates are cheap, how much RAM a framebuffer may take, whether it is on battery, what is already on screen. An engine emitting draw commands knows none of that, and telling it would take a manifest field per constraint: a list with no end. **So the split is three-way.** **Timing** is the tier's — when to repaint. **Whether to use a shared render at all** is the tier's — a constrained tier may decline the draw list and render from semantic state instead (Decision 34's third path). **Content, when asked, is the engine's** — so two tiers that *do* use it cannot disagree about what is true, which is the Decision 34 rule this preserves. **Mechanically that makes Display an EXPORT, not an import:** `render(state) -> draw-list` as the app's own command in its own `method_id` band, pulled over the `execute(method, request)` boundary Decision 31 already insists is the only way in — **no new WIT, no new import, and no stub obliged on a screenless tier** (`keeb-native` has no display at all). **Which makes "is Display optional?" the wrong question.** Decision 34 asked optional-vs-required; the axis is **push-vs-pull**, and a *required* pulled render is harmless because nothing must call it. **It also strengthens §6.4's justification.** That section argues for the semantic path from *dissimilarity of output* — DOM, a TFT grid and terminal ASCII share no structure. This argument survives a case that one does not: two tiers on ONE screen (`badge-native` / `badge-wamr`) look like the case where a shared draw list should win, until you notice **one runs an interpreter and the other does not**, so their envelopes differ though their pixels are identical. It is not the pair that decides, it is who knows the cost. **Decision 32 is untouched, and it is worth saying so.** Its argument — WIT has no optional imports, so absence cannot be expressed by omitting one, so express it as data — is general to *any* import; Display was the illustration, not the basis. The filesystem is an import too (`wasi:filesystem`, via `include wasi:cli/imports`), so a tier without one still links it and the host supplies something that fails. That is the manifest's load-bearing case today, and pulling a render changes nothing about it. **What pull removes is the LINKING obligation, not the INFORMATION need**, and conflating those is easy: no import means no stub owed by a screenless tier, but an app that draws its own presentation still has to know the canvas. So resolution and colour format enter the manifest **when the first app uses an app-side render path** and not before (§6.4a, which records why they are absent today). **And when a host-provided key-value store eventually lands, the honest fact is "does this host provide a key-value store", not "is there an index"** — `INDEX-PLAN.md` D8, after `Environment.index` was added and reverted the same day for exactly that reason. **Cost:** an import can draw *mid-handler* and a pulled command cannot, so the engine can never paint during a command. For state-driven UIs — every app here — the host repainting after a change is sufficient and arguably better, since the host chooses the moment. **And the draw vocabulary is the app author's to keep straight** between the engine and each slot: nothing enforces it, and **host parity compares renderings, not intentions**, so a rasterizer that quietly reinterprets a command is invisible to every check that exists. That is the same exposure the semantic path already has, and the reason "the author coordinates the tier and the engine" is a responsibility rather than a formality. |
+| 35 | Render decisions belong to the **tier**; a shared render is **pulled**, never pushed | *Direction — nothing built. See §6.4 and [`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1e.* **A tier knows its timing and its constraints better than the engine can** — refresh rate, whether partial updates are cheap, how much RAM a framebuffer may take, whether it is on battery, what is already on screen. An engine emitting draw commands knows none of that, and telling it would take a manifest field per constraint: a list with no end. **So the split is three-way.** **Timing** is the tier's — when to repaint. **Whether to use a shared render at all** is the tier's — a constrained tier may decline the draw list and render from semantic state instead (Decision 34's third path). **Content, when asked, is the engine's** — so two tiers that *do* use it cannot disagree about what is true, which is the Decision 34 rule this preserves. **Mechanically that makes Display an EXPORT, not an import:** `render(state) -> draw-list` as the app's own command in its own `method_id` band, pulled over the `execute(method, request)` boundary Decision 31 already insists is the only way in — **no new WIT, no new import, and no stub obliged on a screenless tier** (`rp2040-tinygo` has no display at all). **Which makes "is Display optional?" the wrong question.** Decision 34 asked optional-vs-required; the axis is **push-vs-pull**, and a *required* pulled render is harmless because nothing must call it. **It also strengthens §6.4's justification.** That section argues for the semantic path from *dissimilarity of output* — DOM, a TFT grid and terminal ASCII share no structure. This argument survives a case that one does not: two tiers on ONE screen (`rp2350` / `rp2350-tinygo`) look like the case where a shared draw list should win, until you notice **one runs an interpreter and the other does not**, so their envelopes differ though their pixels are identical. It is not the pair that decides, it is who knows the cost. **Decision 32 is untouched, and it is worth saying so.** Its argument — WIT has no optional imports, so absence cannot be expressed by omitting one, so express it as data — is general to *any* import; Display was the illustration, not the basis. The filesystem is an import too (`wasi:filesystem`, via `include wasi:cli/imports`), so a tier without one still links it and the host supplies something that fails. That is the manifest's load-bearing case today, and pulling a render changes nothing about it. **What pull removes is the LINKING obligation, not the INFORMATION need**, and conflating those is easy: no import means no stub owed by a screenless tier, but an app that draws its own presentation still has to know the canvas. So resolution and colour format enter the manifest **when the first app uses an app-side render path** and not before (§6.4a, which records why they are absent today). **And when a host-provided key-value store eventually lands, the honest fact is "does this host provide a key-value store", not "is there an index"** — `INDEX-PLAN.md` D8, after `Environment.index` was added and reverted the same day for exactly that reason. **Cost:** an import can draw *mid-handler* and a pulled command cannot, so the engine can never paint during a command. For state-driven UIs — every app here — the host repainting after a change is sufficient and arguably better, since the host chooses the moment. **And the draw vocabulary is the app author's to keep straight** between the engine and each slot: nothing enforces it, and **host parity compares renderings, not intentions**, so a rasterizer that quietly reinterprets a command is invisible to every check that exists. That is the same exposure the semantic path already has, and the reason "the author coordinates the tier and the engine" is a responsibility rather than a formality. |
 
 ---
 
@@ -188,8 +188,8 @@ hosts/desktop/build/    # wails output
 │   ├── native/                     # Go host: engine in-process (Decision 26) + os FS (desktop/CLI)
 │   ├── desktop/                    # Wails wrapper over hosts/native + webview
 │   ├── web/                        # TypeScript host: worker.ts (jco + OPFS), api.ts, hooks/
-│   └── embedded/                   # ESP32-S3/RP2350: C host (ESP-IDF/arduino-pico) embedding WAMR + platformio.ini;
-│                                    #   RP2040: native TinyGo (Go) linking the engine
+│   └── embedded/                   # RP2350/ESP32-P4: Rust `no_std` host embedding Wasmtime+Pulley
+│                                    #   (dlc-platform/embedded/; RP2040 links the engine natively via TinyGo)
 ├── frontend/                       # React + Vite UI (web + desktop webview)
 ├── verify/parity/                  # golden argv- + method-vectors + the jco harness (Decision 26)
 └── Makefile                        # build + verify targets per environment (§11)
@@ -212,9 +212,9 @@ hosts/desktop/build/    # wails output
 | Engine → wasm | **TinyGo `-target=wasip2`** → a WASM component in one shot (validated — Spike 1; TinyGo supplies `cabi_realloc` + wires `_initialize`). World `include`s `wasi:cli/imports`; WASI WIT deps vendored under `wit/deps/`. The `wasip1`+`wasm-tools` **adapter path is abandoned** (fragile — §5.3). |
 | Web instantiation | **`@bytecodealliance/jco`** transpile + `preview2-shim` (WASI/OPFS) |
 | Native/desktop/CLI runtime | **engine linked in-process** (native Go, Decision 26) + **Wails v2**; wasmtime kept for the wasm parity build |
-| Embedded runtime | **WAMR** on ESP32-S3 / RP2350 (official Espressif WAMR ESP-IDF component); **TinyGo native** (RP2040) |
-| Embedded build/flash/monitor | **PlatformIO** — host firmware (ESP-IDF / arduino-pico), flashing, `pio device monitor` (the serial REPL); TFT libs (TFT_eSPI/LovyanGFX) for the Display host. TinyGo flash for RP2040. |
-| Async | Spike 5: Rich/CM ✅ (jco JSPI on Node ≥24); Portable/WAMR-shaped ✅ (wasip1 + blocking host). No ILC shims. |
+| Embedded runtime | **Wasmtime + Pulley** (`no_std` interpreter, Rust) on RP2350 / ESP32-P4; **TinyGo native** on RP2040 |
+| Embedded build/flash/monitor | **`cargo` + `rustup`** (cross targets come from `rust-toolchain.toml`), **`picotool`** to flash and to verify the UF2 family and boot block, QEMU `mps2-an385` for host-side Pulley runs. TinyGo flash for RP2040. |
+| Async | Spike 5 ✅ (jco JSPI on Node ≥24). No ILC shims. |
 | Test host (wasip2) | **WASI Virt** — compose a virtual FS + captured stdio onto the component (standardized test injection) |
 | CLI parser (host-side, Decision 28) | Parses argv **in the host** into a structured request; native is off the TinyGo leash (cobra/ffcli/`huh`). The engine takes a proto `Command`, not argv. ffcli = reference; Spike 4 informs the host choice. Supersedes in-engine parsing (Decision 22). |
 | Reproducible dev env | **`devbox`** (Jetify) — Nix-backed, pins the whole toolchain via `devbox.json`; PlatformIO owns the board toolchains (§4.1); the Docker alternative |
@@ -233,13 +233,13 @@ go-lite emits **no service stubs** — registry codegen reads the descriptor set
 ever shows up in size budgets.
 
 **Remaining maturity risk (tracked):** the *component-model* toolchain — TinyGo component output +
-`wit-bindgen-go` + jco + WAMR's component support — is still young (see §14). The protobuf half is now a
+`wit-bindgen-go` + jco + Wasmtime's `no_std` component support — is still young (see §14). The protobuf half is now a
 narrow validate-not-invent spike (§11 Phase 0, spike 2).
 
 ### 4.1 Dev environment — Devbox (Nix-backed), not Docker
 
 This toolchain is wide (TinyGo, `wit-bindgen-go`, `wasm-tools`, `buf` + two lite plugins, Node for jco,
-`wasmtime`, `modernc`, Wails, WAMR, and per-board embedded flashers). Pin it with **Devbox** (Jetify) —
+`wasmtime`, `modernc`, Wails, a Rust cross-toolchain, and per-board embedded flashers). Pin it with **Devbox** (Jetify) —
 Nix + nixpkgs underneath, so you get exact-version reproducibility, but the config is a simple
 `devbox.json` (list packages by name, lockfile-pinned) instead of hand-written Nix. Docker ships an opaque
 image; Devbox ships a reproducible recipe that also runs **natively** on the dev's host.
@@ -247,21 +247,19 @@ image; Devbox ships a reproducible recipe that also runs **natively** on the dev
 - **Core devshell — `devbox.json`:** the non-embedded toolchain (Go, TinyGo, buf + `protoc-gen-go-lite` /
   `protoc-gen-es-lite`, `wit-bindgen-go`, `wasm-tools`, `nodejs` for jco, `wasmtime`, Wails deps). Scripts
   wrap the `make` targets; `devbox shell` / `direnv` auto-loads it; CI runs `devbox run verify-all`.
-- **Embedded toolchain — delegated to PlatformIO (not fought in nixpkgs).** The old rough edge was
-  packaging `esp-idf` / Pico SDK / WAMR in nixpkgs. Instead, Devbox installs just the **`platformio` CLI**,
-  and **PlatformIO owns the board toolchains** (ESP-IDF for ESP32-S3, `arduino-pico` for RP2350),
-  flashing, and `pio device monitor` (the serial REPL). WAMR arrives as the **official Espressif ESP-IDF
-  component** (`espressif/wasm-micro-runtime`) or the `mlaass/wamr-esp32-arduino` PlatformIO lib; TFT
-  display drivers (TFT_eSPI/LovyanGFX) come from PIO's registry for the Display host. Keep the embedded
-  project self-contained under `hosts/embedded/` with its own `platformio.ini` so the core
-  web/desktop/CLI loop never touches it.
-- **Two-layer reproducibility (accepted tradeoff):** Nix/Devbox pins the *host* tools; PlatformIO pins the
-  *board* packages via `platformio.ini` version pins + a committed lockfile. Not all-Nix-pure, but the
-  pragmatic embedded answer — both layers are declarative and pinned.
-- **RP2040** stays outside PlatformIO — it's a **native TinyGo** build (`tinygo flash -target=pico`), whose
-  toolchain Devbox already pins. **RP2350-under-WAMR is the least-proven combo** (official WAMR is
-  ESP-centric); if porting WAMR onto arduino-pico is too costly it falls back to native TinyGo like RP2040
-  (see §14 risk 2).
+- **Embedded toolchain — `rustup`, deliberately, not nixpkgs `rustc`.** The embedded host is Rust
+  `no_std`, and it cross-compiles to `thumbv8m.main-none-eabihf` and RISC-V. nixpkgs' `rustc` ships only
+  the host's std, and a cross build fails with "the target may not be installed" — so `devbox.json` carries
+  **`rustup`** and a `rust-toolchain.toml` names the targets, which is the same declarative pinning by a
+  different mechanism. `picotool` comes from nixpkgs (pinned `2.2.0-a4`; the default fails to build under
+  CMake 4) and is how a `.uf2` gets flashed *and* checked — it caught both an `elf2uf2-rs` that stamped
+  RP2350 firmware with the RP2040 family id and a boot block at the wrong offset, either of which would
+  have bricked the first flash silently.
+- **The embedded tree is self-contained** under `dlc-platform/embedded/` — chip-agnostic runtime in `src/`,
+  per-chip firmware in `rp2350/`, a compile-only `precompile/` crate — so the web/desktop/CLI loop never
+  touches it. See [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md).
+- **RP2040** is a **native TinyGo** build (`tinygo flash -target=pico`), whose toolchain Devbox already
+  pins: 2 MB of flash cannot hold an interpreter plus a ~1 MB payload, so it never runs wasm.
 - **Docker** stays only as a last-resort CI fallback for a board toolchain that resists both — not the
   default.
 
@@ -276,19 +274,20 @@ image; Devbox ships a reproducible recipe that also runs **natively** on the dev
                     │  imports: wasi:filesystem, wasi:cli(stdio), event-host, display-host                 │
                     │  exports: execute(method: u32, request: list<u8>) -> command-result                    │
                     └───────────────────────────────────────────────────────────────────────────────────────┘
-   web        desktop         cli            esp32-s3         rp2350           rp2040
-   jco        native          native         WAMR             WAMR             (native TinyGo — same Go source,
-   + TS host  + Go host       + Go host      + C host         + C/Go host       no wasm; engine linked in)
-              (engine linked  (engine linked
+   web        desktop         cli            rp2350           esp32-p4         rp2040
+   jco        native          native         Pulley           Pulley           (native TinyGo — same Go source,
+   + TS host  + Go host       + Go host      + Rust no_std    + Rust no_std     no wasm; engine linked in)
+              (engine linked  (engine linked   host             host
                in-process)     in-process)   ← Decision 26; wasm still built for web + parity
+                                             ← ONE pulley32 .cwasm serves both boards (EMBEDDED-PLAN D2b)
 ```
 
 - **The engine imports only the ILC world + standard WASI, and builds to a WASM component directly with
   TinyGo `-target=wasip2`** (validated — Spike 1). **Web** runs that `engine.component.wasm` under jco;
   **desktop/CLI link the same engine natively in-process** (Decision 26), keeping the wasm as the
-  parity/portability artifact. **WAMR** (ESP32-S3 / RP2350) can't run a component — it runs core WASM, so
-  capabilities bind as WAMR native functions and its build is revisited when embedded lands. What we build
-  per tier and where interfaces differ is tracked in **§5.3**.
+  parity/portability artifact. **Embedded** (RP2350 / ESP32-P4) runs *that same component* under Wasmtime's `no_std`
+  Pulley interpreter — AOT-compiled to a `.cwasm`, which is a build product of the artifact rather than a
+  second artifact. What we build per tier and where interfaces differ is tracked in **§5.3**.
 - **RP2040 is the one exception (Decision 18):** 264 KB RAM is too tight for a comfortable WASM runtime,
   so the *same Go engine source* is compiled **natively** with TinyGo and linked directly against a native
   host. One source, per-tier build — L3 everywhere it fits, native fallback where it doesn't.
@@ -303,7 +302,7 @@ WASI calls. Each host binds the WASI root:
 | --- | --- |
 | Web | **OPFS** (`navigator.storage.getDirectory()`) **or** an **FSA-granted directory** (`showDirectoryPicker`, Chromium). Current `@bytecodealliance/preview2-shim` browser FS is an **in-memory FileData tree** (`_setFileData` / `_setPreopens({"/": tree})`), **not** a raw `FileSystemDirectoryHandle` — hydrate/flush OPFS ↔ FileData in the host (Spike 3, `spikes/opfs/opfs-bridge.js`). Patch or replace upstream browser `write`/`read` bigint handling before relying on stock shim. |
 | Desktop / CLI | native user-data dir (`~/.config/<app>`) via the host's `os` FS (native seam, Decision 26) |
-| ESP32-S3 / RP2350 | on-chip flash / littlefs, preopened by the WAMR host |
+| RP2350 / ESP32-P4 | on-chip flash, preopened by the Rust host (`wasi:filesystem` currently stubbed — see [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)) |
 | RP2040 (native) | littlefs mounted directly; `os` shim maps to it |
 
 **WASI preopens replace the old ILC mount-table / `VirtualPath` scheme entirely** — the runtime already
@@ -316,38 +315,31 @@ build with TinyGo **`-target=wasip2` directly** — TinyGo emits the component i
 `cabi_realloc`, wiring `_initialize`). The originally-planned `wasip1` core module + `wasm-tools`
 **preview1 adapter** path is **abandoned**: it's fragile with current TinyGo/wasm-tools (missing
 `cabi_realloc`, a `cm` module-path bug, an init-ordering crash — all documented in the spike README).
-**WAMR reality:** WAMR supports **core WASM + WASI Preview 1 only** (no Component Model), so embedded can't
-run the component — it needs a *separate* core-wasm build, and the "one artifact across *every* tier"
-question is **deferred to when embedded lands**. For the bootstrap the shared unit is the **engine
-codebase**: **web** loads it as the wasip2 `engine.component.wasm`; **CLI/desktop** link it natively
-in-process, with that same wasm built for the parity check (Decision 26).
+**One artifact, every tier that runs wasm.** Web, desktop/CLI-parity and embedded all consume the *same*
+`engine.component.wasm`. Embedded adds an AOT step (`.cwasm`, Pulley bytecode) but no rebuild of the guest,
+which is what makes "one artifact across every tier" a fact rather than an aspiration. For the bootstrap the
+shared unit is also the **engine codebase**: **web** loads the component under jco; **CLI/desktop** link it
+natively in-process, with the same wasm built for the parity check (Decision 26).
 
 | Tier | Artifact built | Build pipeline | Capability binding | Divergence from the wasip2 baseline |
 | --- | --- | --- | --- | --- |
 | **Web** | `engine.component.wasm` | TinyGo **`-target=wasip2`** → **jco** | WIT imports (Component Model) | baseline |
 | **Desktop** | native binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity/web reuse) | **direct Go linkage** (`caps_native`); wasm build uses WIT imports | engine runs **in-process** (Decision 26); wasm anchors identity |
 | **CLI** | native `dlc` binary; also `engine.component.wasm` | `go build` links engine + TinyGo **`-target=wasip2`** (parity) | **direct Go linkage** (`caps_native`); wasm may expose `wasi:cli/command` `run()` | engine runs **in-process** (Decision 26); wasm = CI parity |
-| **ESP32-S3** | `engine.core.wasm` | TinyGo→wasip1 → **WAMR** (no adapter) | **WAMR native-function registration** (C) | **no CM / WASI-0.2**; console = WASI-p1 fds → UART; the index is engine-owned, so it needs no capability; caps are C native fns |
-| **RP2350** | `engine.core.wasm` *or* native | TinyGo→wasip1 → WAMR **if** it ports, else native TinyGo | WAMR native fns, or direct Go linkage | as ESP32-S3, or as RP2040 |
+| **RP2350** | the same `engine.component.wasm`, AOT'd to `engine.pulley32.cwasm` | TinyGo `-target=wasip2` → **`dlc-precompile`** → Pulley | WIT imports, satisfied by a hand-written Rust `no_std` host | **none in the guest** — the divergence is entirely host-side: `wasi:filesystem` returns `access` until flash storage lands |
+| **ESP32-P4** | the identical `.cwasm` as RP2350 | *(no build of its own — Pulley bytecode is ISA-independent)* | as RP2350, different HAL | as RP2350 |
 | **RP2040** | native firmware | TinyGo→`pico` (**no wasm**) | **direct Go linkage** (no imports, no WASI) | no wasm, no WASI; caps are direct Go calls |
 
-**The one build seam in the engine.** Capability *imports* are declared behind a build tag —
-WIT-generated bindings on `wasip2`, `//go:wasmimport` on `wasip1`/WAMR, direct Go calls on native
-(RP2040). The **business logic above the seam is identical**; only the binding layer + build target
-change. Keep it in `engine/caps_wasip2.go` / `caps_wasip1.go` / `caps_native.go`. On WAMR the capability
-*shapes* are the same — they're just bound as native functions instead of Component-Model imports, and
-`wasi:filesystem` / stdio degrade to their WASI-p1 equivalents. **No handler code changes across tiers.**
+**The one build seam in the engine.** Capability *imports* are declared behind a build tag — WIT-generated
+bindings on `wasip2`, direct Go calls on native (CLI/desktop/RP2040). **Two bindings, not three:** every
+wasm tier is now wasip2, so there is no third core-wasm shape to maintain. The **business logic above the
+seam is identical**; only the binding layer + build target change (`engine/caps_wasip2.go` /
+`caps_native.go`). **No handler code changes across tiers.**
 
-**Core-wasm capability ABI (why micro is not lossy).** The Component Model only supplies the *typed*
-wiring (Canonical ABI); it is **not** the source of capabilities, so its absence on WAMR loses none. On
-WAMR the same caps are injected via **WASI Preview 1** (filesystem → littlefs, stdio → UART) plus **WAMR
-native-function registration** for the custom ones (`event-host` / `display-host`), which
-the engine imports as `//go:wasmimport`. What core-wasm can't do is marshal rich types automatically — so
-the custom caps exchange **protobuf bytes over `(ptr, len)`** in guest linear memory (the *same* `list<u8>`
-payloads used on the Component-Model boundary). The micro boundary is therefore **defined and
-capability-complete, just hand-marshaled**. The only caps that degrade on micro do so for **hardware**
-reasons, not the ABI — full networking — both
-surfacing as the `unavailable` variant the engine already handles.
+**Capabilities degrade for HARDWARE reasons, never for ABI ones** — a distinction that used to be muddied
+by the embedded tier speaking a different ABI, and is now clean. An MCU has no networking and may have no
+RTC, so those surface as the `unavailable` variant the engine already handles. Nothing is lost to the
+boundary itself.
 
 ### 5.4 Host selection & launch model
 
@@ -364,7 +356,7 @@ are built.
 | **native** (in-process Go engine) | `main()` — argv → host parser → `(method_id, request)` → native Environment → `execute` in-process → exit code | shipping the CLI binary |
 | **desktop** (Wails) | Wails startup hook → native Environment + webview | building the desktop app |
 | **web** (jco) | `worker.ts` boot → jco instantiate + browser Environment | serving the web app |
-| **embedded** (WAMR / native) | firmware boot → board Environment (peripherals) | flashing the firmware |
+| **embedded** (Pulley / native) | firmware boot → board Environment (peripherals) | flashing the firmware |
 
 **Native links the engine directly; wasm is the parity contract (Decision 26).** The CLI/`dlc` native
 binary **imports the engine as a Go package** and calls `execute` **in-process** — no wasm runtime in
@@ -399,7 +391,7 @@ Starting an ILC app is two phases — conceptually always, operationally *usuall
    (§7.3), which is exactly test/dev setup.
    Phase 1 ends by telling the engine what it just built: the **environment manifest** (§6.4a,
    Decision 32) — resolution, colour format, which capabilities exist — pushed as a platform command.
-2. **Launch the app.** Instantiate the engine (component on wasip2, core module on WAMR, native link on
+2. **Launch the app.** Instantiate the engine (component on wasip2 and on Pulley, native link on
    RP2040) and run it against the environment — either **one-shot** (`execute` once → exit code) or
    **persistent** (the environment stays up; `execute` is invoked many times — the reactive UI /
    server model).
@@ -419,48 +411,38 @@ The boundary is the two-bit split at runtime: **phase 1 = construct the Environm
 
 ---
 
-### 5.6 WAMR / embedded porting practices (and the ABI-mode toggle)
+### 5.6 Embedded porting practices
 
-Whether an app targets **WAMR/embedded is a setup-time choice** (`dlc new` / the manifest's `tiers`),
-because it fixes the **capability-boundary ABI** for the whole project:
+*This section used to open with an ABI-mode toggle — portable byte ABI if you targeted embedded, rich
+Component-Model ABI if you did not. Decision 25 records why that is gone: Pulley runs components, so there
+is one ABI and nothing to choose.* What remains is resource discipline, and it is mostly the engine rules
+we already have — embedded is their stress test, not a different rulebook.
 
-| Mode | Chosen when | In-process capability boundary | Builds | Constraints |
-| --- | --- | --- | --- | --- |
-| **Portable (byte ABI)** | an **embedded/WAMR** tier is targeted | **protobuf bytes over `(ptr,len)`** — lowers to core wasm | wasip2 component **+ wasip1 core** | the full porting rules below |
-| **Rich (Component-Model ABI)** | **no embedded** tier | rich WIT types (`string`/`list`/`record`/`result`), Canonical-ABI-marshaled | wasip2 only | relaxed — leverage the CM ABI directly |
-
-Disk/wire serialization stays **protobuf either way** (§7.2); the toggle only affects the *in-process
-capability boundary* and which targets build. **Choose portable mode if embedded is even plausible** —
-retrofitting the byte boundary later is invasive; starting rich and staying rich is fine if you never need
-WAMR.
-
-Porting down to WAMR crosses three gaps at once — **ABI** (no Component Model), **resources** (an MCU),
-**execution** (no OS/scheduler). Most of the discipline is the engine rules we *already* have; embedded is
-their stress test.
+Porting down crosses two gaps, not three: **resources** (an MCU) and **execution** (no OS, no scheduler).
+The ABI gap closed.
 
 **Adopt:**
 - **Capability-mediated I/O only** — no direct platform / OS / syscall / cgo calls (the ILC thesis; the
   thing that makes porting possible at all).
-- **Byte boundary (protobuf over `(ptr,len)`)** in portable mode — identical on the Component Model and
-  core wasm; custom caps bind as **WAMR native functions**, and the host **bounds-checks** guest pointers.
 - **Reflection-free / TinyGo-safe** — protobuf-go-lite, no `encoding/json`; the engine's *handlers* stay reflection-free. The CLI **parser is host-side** (Decision 28), so on native it may use any lib (cobra/kong/`huh`); TinyGo-safety applies to handlers, not the parser.
 - **Handle `unavailable` for every capability** — network/RTC maybe-absent; degrade,
   never hard-fail.
 - **Short, run-to-completion, non-blocking handlers** — no long-lived goroutines / busy-waits (watchdog +
   power budget).
 - **Minimize allocations + module size**; assume **bounded data** (small files/datasets, no reliable RTC);
-  **batch flash writes** (endurance). Consider WAMR **AOT** for speed + lower RAM.
-- **CI-build every target (wasip2 + wasip1 core) and test on real hardware early** — the embedded build
-  rots silently, and emulation hides RAM / flash / timing.
-- **Thin build-tagged capability seam** — `caps_wasip1.go` (`//go:wasmimport`) vs `caps_wasip2.go` (WIT);
-  identical handler logic above it (§5.3).
+  **batch flash writes** (endurance). **AOT-compile to Pulley** — the interpreter never sees a `.wasm` on
+  device, only the `.cwasm`, which is where the RAM and startup savings come from.
+- **Watch the artifact, in CI.** ~890 KB of `.cwasm` against 4 MB of flash and 520 KB of SRAM is the whole
+  budget; the guest grows silently and the failure mode is a board that will not boot.
+- **CI-build the embedded target and test on real hardware early** — the embedded build rots silently, and
+  emulation hides RAM / flash / timing (QEMU proved the Pulley path; `picotool` caught what QEMU could not).
 
 **Avoid:**
-- Rich-typed host boundaries in portable mode (can't lower to core wasm); **reflection / `encoding/json` /
-  `net/http` / large stdlib** (breaks or bloats TinyGo); **assuming a capability exists** (network
-  / RTC / a big POSIX FS); **long-running goroutines / busy-waits / preemptive-scheduling assumptions**;
-  allocation-heavy hot paths / deep recursion / large stack frames; **high-frequency small flash writes**;
-  any direct hardware poke "just for embedded" (kills portability the instant it lands).
+- **Reflection / `encoding/json` / `net/http` / large stdlib** (breaks or bloats TinyGo); **assuming a
+  capability exists** (network / RTC / a big POSIX FS); **long-running goroutines / busy-waits /
+  preemptive-scheduling assumptions**; allocation-heavy hot paths / deep recursion / large stack frames;
+  **high-frequency small flash writes**; any direct hardware poke "just for embedded" (kills portability the
+  instant it lands).
 
 ---
 
@@ -472,7 +454,7 @@ their stress test.
 package devalbo:ilc;
 
 // Console I/O is NOT a custom interface — it uses standard WASI stdio
-// (wasi:cli/stdout|stderr|stdin on wasip2; fd_write/fd_read on WAMR's WASI-p1).
+// (wasi:cli/stdout|stderr|stdin — every tier that runs wasm is wasip2).
 
 interface event-host {
   // shape mirrors wasi:messaging (producer) — lands the deferred MQTT/sync story on the standard
@@ -511,8 +493,7 @@ world engine {
   // `execute` is the custom PERSISTENT entry (callable many times on a live instance, for reactive
   // UI). A one-shot CLI can additionally use the standard wasi:cli/command `run` + get-arguments.
   // `method` is the permanent method_id from the app's command service; `request` is the flat
-  // proto-encoded request message (Decisions 28/31). Scalars + byte buffers both cross the byte ABI,
-  // so this shape survives on WAMR.
+  // proto-encoded request message (Decisions 28/31).
   export execute: func(method: u32, request: list<u8>) -> command-result;
   // Bootstrap shim, retired by host-side parsing: export execute-cli: func(args: list<string>) -> command-result;
 }
@@ -624,8 +605,7 @@ How a handler learns what the host can do, **without a second boundary**.
 
 The manifest is a protobuf message delivered as a **platform command** (`SetEnvironment`, core-lifecycle
 block, id reserved in 1–99) — not a new WIT export or import. It rides the same
-`execute(method, request)` boundary as everything else, so it works unchanged on WAMR, needs no
-Component-Model features, and is versioned by `buf breaking` like the rest of the schema.
+`execute(method, request)` boundary as everything else, so it works unchanged on every tier and is versioned by `buf breaking` like the rest of the schema.
 
 **Absence is data, not linking.** WIT has no optional imports, so a component cannot simply omit a
 capability the host lacks. The world keeps declaring it and a screenless tier supplies a stub — but the
@@ -639,7 +619,7 @@ stale facts, which is the one failure mode this design has and worth stating pla
 ### 6.5 Console — standard WASI stdio (not a custom interface)
 
 `info`→stdout, `error`→stderr, `readLine`→stdin, provided by the engine over **WASI stdio**
-(`wasi:cli/stdout|stderr|stdin` on wasip2; `fd_write`/`fd_read` on WAMR's WASI-p1). Hosts wire the streams
+(`wasi:cli/stdout|stderr|stdin`). Hosts wire the streams
 to their sink: native stdio; `console.*` / `prompt()` on web; UART/RTT on embedded; `readLine`→`none`
 where there is no console.
 
@@ -760,9 +740,9 @@ Every tier feeds the same `execute` entry, so **there is one dispatch path** —
 
 **The command registry ties it together (Decision 29).** The app registers each command once — a proto `service` rpc (`rpc New(NewRequest) returns (NewResponse)`, permanent `method_id`) + a handler. The engine **routes on `method_id`** (`map[u32]handler`); request/response messages cross **directly** (flat, single-encode). Hosts don't ask the engine what commands exist — they **embed the `buf build` FileDescriptorSet and introspect it with protoreflect** (native) / `@bufbuild/protobuf` (web): field→flag, `enum`→menu, `method_id` for the wire. So host and engine can't drift (one schema), the parser stays host-side, and a `describe()` export is optional (only for a generic host without the embedded schema).
 
-**One byte boundary, negotiated (Decision 31).** The guest exposes a *single* command entry — `execute(method: u32, request: list<u8>) -> command-result` (scalar id + proto-bytes payload) — WAMR-portable (scalars **and** byte buffers both cross the byte ABI; only rich WIT records/variants/strings need the Component Model WAMR lacks). Rich typed DX is a **host-side** generated wrapper over the same proto, not a second guest ABI; a small `supported-abis()` export lets the guest advertise its boundaries, and a rich WIT boundary is reserved *per-capability* for CM-only features (streams / resources / `wasi:http`).
+**One byte boundary, negotiated (Decision 31).** The guest exposes a *single* command entry — `execute(method: u32, request: list<u8>) -> command-result` (scalar id + proto-bytes payload). Rich typed DX is a **host-side** generated wrapper over the same proto, not a second guest ABI; a small `supported-abis()` export lets the guest advertise its boundaries, and a rich WIT boundary is reserved *per-capability* for CM-only features (streams / resources / `wasi:http`).
 
-**Framing — service + `method_id`, messages passed directly.** Commands are authored as proto `service` rpcs with permanent `method_id`s; request/response messages cross the wire **directly** — no oneof or envelope for the command surface (the discriminator is a scalar `method: u32` param, WAMR-fine per Decision 31). RPC-idiomatic (explicit req→resp pairing) with a rename-safe numeric key. `protoc-gen-dlc-registry` emits the engine's `method_id→handler` registration **from the buf image** (go-lite generates no service stubs, so the descriptors are the only source); host introspection uses the standard descriptor set (above). The oneof stays for *response variants*, not command dispatch. The concrete surface is split by **who owns the verb**: `proto/devalbo/ilc/v1/platform.proto` (`PlatformService` — `Version`, `ExportFs`, `ImportFs`, `ResetFs`: what every app *inherits*) and `proto/devalbo/dlc/v1/commands.proto` (`DlcService` — `New`, `Echo`: `dlc`'s *own* verbs). Both sit over the shared options package `proto/devalbo/options/v1/options.proto`. In-engine verbs only — toolchain verbs stay host-side per Decision 30. Failure rides the `command-result` envelope, so responses carry no error field.
+**Framing — service + `method_id`, messages passed directly.** Commands are authored as proto `service` rpcs with permanent `method_id`s; request/response messages cross the wire **directly** — no oneof or envelope for the command surface (the discriminator is a scalar `method: u32` param, Decision 31). RPC-idiomatic (explicit req→resp pairing) with a rename-safe numeric key. `protoc-gen-dlc-registry` emits the engine's `method_id→handler` registration **from the buf image** (go-lite generates no service stubs, so the descriptors are the only source); host introspection uses the standard descriptor set (above). The oneof stays for *response variants*, not command dispatch. The concrete surface is split by **who owns the verb**: `proto/devalbo/ilc/v1/platform.proto` (`PlatformService` — `Version`, `ExportFs`, `ImportFs`, `ResetFs`: what every app *inherits*) and `proto/devalbo/dlc/v1/commands.proto` (`DlcService` — `New`, `Echo`: `dlc`'s *own* verbs). Both sit over the shared options package `proto/devalbo/options/v1/options.proto`. In-engine verbs only — toolchain verbs stay host-side per Decision 30. Failure rides the `command-result` envelope, so responses carry no error field.
 
 **`method_id` bands (permanent).** One flat `map[u32]handler` serves everything, so the boundary is what keeps an app from colliding with a capability ILC adds later:
 
@@ -814,8 +794,8 @@ documented upgrade path if concurrent-edit loss becomes real — out of V1 scope
 | **Web** | TinyGo→wasm, **jco** | TypeScript | **OPFS** / **FSA-granted dir** | React (canvas / widget-tree) | `console.*` / React events |
 | **Desktop** | **native in-process** (wasm for parity) | Go (Wails) | `~/.config/<app>` | Wails webview React | stdio / Wails IPC |
 | **CLI** | **native in-process** (wasm for parity) | Go | cwd / config dir | none (Console) | argv / stdin |
-| **ESP32-S3** | wasm, **WAMR** | **C** (ESP-IDF) | flash / littlefs | TFT (draw-list) | UART REPL / touch input-map |
-| **RP2350** | wasm, **WAMR** | **C** (arduino-pico) / Go | flash / littlefs | TFT (draw-list) | UART REPL / buttons |
+| **RP2350** | wasm component, **Wasmtime + Pulley** | **Rust `no_std`** (`rp235x-hal`) | on-chip flash | TFT (draw-list) | UART REPL / buttons |
+| **ESP32-P4** | the same `.cwasm`, same runtime | **Rust `no_std`** (RISC-V) | flash + PSRAM | TFT (draw-list) | UART REPL / buttons |
 | **RP2040** | **native TinyGo** (no wasm) | **Go** | littlefs | TFT (draw-list, optional) | UART REPL / buttons |
 
 Absent capabilities never crash — they return `unavailable` and the engine degrades (the ILC invariant).
@@ -830,12 +810,12 @@ matrix + the cross-tier identity check.
 
 | Tier | Build | Load | Run | Observe (pass criteria) |
 | --- | --- | --- | --- | --- |
-| **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) builds byte-identical** (sha256); web runs it, CLI/desktop link the engine natively in-process (Decision 26). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes across the native runs and the wasm parity run. (Embedded's core-wasm build + its identity check are deferred with the tier.) |
+| **Cross-tier** | `make build-engine` | — | — | **`engine.component.wasm` (wasip2) builds byte-identical** (sha256); web runs it, CLI/desktop link the engine natively in-process (Decision 26). A shared **golden vector** (create→list→rebuild-index) produces identical `command-result` bytes across the native runs and the wasm parity run. (Embedded consumes the *same* `engine.component.wasm` via an AOT step, so its identity check is the sha256 above plus a deterministic `.cwasm`.) |
 | **CLI** | `go build` (engine linked) + `tinygo`→wasm for parity | engine in-process (wasm loaded only for the parity check) | `app create-record …` / `list-records` / `rebuild-index` | JSON file written + `.lock` gone; index row present; `list` returns it; delete index file + `rebuild-index` reproduces it; native and wasm-parity outputs match |
 | **Desktop** | `wails build` (engine linked in-process) | Wails boots the linked engine + webview | create/list/delete in UI | record renders; persisted under `~/.config/<app>`; `data-changed` event repaints; relaunch shows data |
 | **Web** | `make build-wasm` (TinyGo→jco) | `worker.ts` sets OPFS preopen, boots jco, injects caps | create/list in browser | record persists in OPFS (survives reload); the index file sits beside it in OPFS; event repaints; DevTools shows no host-cap errors |
-| **ESP32-S3** | `tinygo` builds `engine.core.wasm`; **`pio run -t upload`** flashes the WAMR host firmware (wasm embedded) | WAMR instantiates on boot | **`pio device monitor`**: `create-record …`; touch a row | JSON on littlefs; TFT renders the list via `draw`; `describe()` reports 320×240/rgb565; `execute-query`→`unavailable` path exercised (file-scan fallback) |
-| **RP2350** | as ESP32-S3 via PlatformIO (`board=rpipico2`) **if** WAMR ports; else native TinyGo fallback | WAMR (or native) on boot | `pio device monitor` / buttons | same behavior from the *same* `engine.core.wasm` (WAMR) or same source (native); confirms the second embedded target |
+| **RP2350** | `dlc build rp2350` — the shared component, AOT'd to `engine.pulley32.cwasm`, linked into the Rust firmware, `.uf2` verified with `picotool info` | Pulley instantiates the component on boot | serial: `create-record …`; buttons | JSON on flash; TFT renders the list via `draw`; `execute-query`→`unavailable` path exercised (file-scan fallback) |
+| **ESP32-P4** | `dlc build esp32p4` — **no guest rebuild**, the identical `.cwasm` with a different HAL | Pulley on boot | serial / buttons | same behavior from a **byte-identical** `.cwasm` — the strongest form of the cross-tier identity claim |
 | **RP2040** | `tinygo build` **native** (engine linked) + flash | firmware boot | serial REPL / buttons | same behavior from the **native** build — proves one-source parity where wasm doesn't fit |
 | **Scaffolder** | `dlc new tmp --caps=… --tiers=…` | — | `devbox run verify` on the *generated* project | the scaffold **builds + passes its verify matrix** — templates can't silently rot (§16.6) |
 
@@ -843,10 +823,10 @@ matrix + the cross-tier identity check.
 of a trivial `execute-cli` (`spikes/component/`); this **reshaped the plan to wasip2-direct** (the
 wasip1+adapter path was abandoned). (2) ✅ **DONE (2026-07-25)** — `protobuf-go-lite` binary **and**
 canonical-JSON round-trip under `tinygo build -target=wasip2` (+ `protobuf-es-lite` decodes the same bytes
-in the web host) (`spikes/proto/`); (3) **deferred with the embedded tier** — WAMR
-running a TinyGo core module on ESP32-S3 with one host import; (4) ✅ **DONE (2026-07-25)** — OPFS preopen
+in the web host) (`spikes/proto/`); (3) ✅ **DONE (2026-08)** — Pulley running the shared
+*component* under QEMU, then on the badge ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)); (4) ✅ **DONE (2026-07-25)** — OPFS preopen
 letting `os.WriteFile` persist across reload (`spikes/opfs/`); (5) ✅ **DONE** — `devbox` builds the core
-(non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 → re-scoped by 28 + 25, §8); (7) ✅ **DONE (2026-07-25)** — Spike 5 Rich ✅ / Portable ✅ (`spikes/async/`); jco JSPI (Node ≥24) vs wasip1 blocking host ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
+(non-embedded) toolchain reproducibly; (6) ✅ **DONE (2026-07-25)** — in-engine CLI bake-off (`spikes/cli/`); **default ffcli** (Decision 22 → re-scoped by 28 + 25, §8); (7) ✅ **DONE (2026-07-25)** — Spike 5 (`spikes/async/`); jco JSPI (Node ≥24) ([`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). **Each spike
 records its findings in `spikes/<name>/README.md`; any finding that contradicts the plan updates the plan**
 (as Spike 1 did). Any red spike reshapes the plan before the pilot.
 
@@ -860,8 +840,8 @@ records its findings in `spikes/<name>/README.md`; any finding that contradicts 
 | **0b — Spikes** | The five §11 spikes | All green (or plan adjusted to the reality) |
 | **1 — `dlc` app on CLI (App #1)** | Build **App #1 = `dlc`** (self-hosting scaffolder, §16.4): `wit/ilc.wit`, `proto/*`, `wit-bindgen-go` + `buf` wired; engine uses **console (WASI stdio) + WASI FS** only; **CLI host** (native, engine in-process — Decision 26); `dlc new` emits a minimal self-shaped skeleton; `dlc doctor` (readiness as a command, §16.7); `export-fs`/`import-fs` (§7.3) | `dlc new myapp` scaffolds + runs a working CLI project; `dlc doctor` reports readiness; golden **FS snapshot** defined |
 | **2 — Web/Desktop hosts + notes (App #2)** | **`dlc` gains the web tier** (jco, OPFS/FSA — runs in the browser); begin **App #2 = notes/list**: the derived index (both tiers, one code path), Events, the file→index→event write order, `rebuild-index`; **Web + Desktop hosts** | `dlc new` runs in the browser; notes create/list/delete round-trips on web + desktop; `data-changed` repaints; `rebuild-index` reproduces the index; per-host behavior tests |
-| **3 — the host layer, then embedded** | **Host layer first** (Decision 34, `HOST-LAYER-PLAN.md`): tier slots, locked event schemas, host parity, tic-tac-toe as App #3. Then **ESP32-S3 WAMR host**; RP2350 + RP2040(native). The **Display capability** (draw-list + widget tree) is optional and follows only if an app wants app-side rendering across tiers | one engine renders as DOM and as ASCII from semantic events, and host parity has been watched to fail on a slot that decided something; then the same engine on an ESP32-S3 TFT; `unavailable` file-scan fallback verified; RP2040 native parity |
-| **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **core module** across the five wasm tiers; golden parity on all six; verification matrix green |
+| **3 — the host layer, then embedded** | **Host layer first** (Decision 34, `HOST-LAYER-PLAN.md`): tier slots, locked event schemas, host parity, tic-tac-toe as App #3. Then the **RP2350 Pulley host**; ESP32-P4 + RP2040(native). The **Display capability** (draw-list + widget tree) is optional and follows only if an app wants app-side rendering across tiers | one engine renders as DOM and as ASCII from semantic events, and host parity has been watched to fail on a slot that decided something; then the same engine on the badge's TFT; `unavailable` file-scan fallback verified; RP2040 native parity |
+| **4 — Pilot hardening** | Shared notes/list end-to-end on all six tiers; `make verify-all` | byte-identical engine **component** across the wasm tiers; golden parity on all six; verification matrix green |
 | **5 — (deferred)** | File LWW sync; protobuf envelope + multi-handler routing; Input capability; Automerge upgrade path | — |
 
 ---
@@ -886,14 +866,16 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
    are a *different* category and are fine (`spikes/options/` ✅). Watch item: option-bearing message
    packages blank-import go-lite's own `descriptorpb` (~500 KiB of Go source); no `google.golang.org/protobuf`
    in the guest graph, but measure the wasm-size effect if it bites. No longer the highest risk.
-2. **WAMR on RP2350 — footprint *and* port maturity.** 520 KB is comfortable-ish but TinyGo-runtime-in-wasm
-   + WAMR + linear memory needs measuring; separately, **official WAMR is ESP-centric**, so RP2350 needs
-   WAMR ported onto `arduino-pico`/Pico SDK (unproven). If either is too costly, RP2350 falls back to a
-   native TinyGo build like RP2040. ESP32-S3 (official WAMR ESP-IDF component + PlatformIO) is the reference
-   embedded tier; RP2350 is the stretch.
+2. **Pulley on RP2350 — footprint, and it is the live risk.** *Was "WAMR footprint + port maturity"; the
+   port-maturity half is gone with WAMR, and Rust `no_std` Wasmtime builds for the board today.* What is
+   left is size, and it is not comfortable: the shared component AOTs to **~890 KB of Pulley bytecode**
+   against 520 KB of SRAM, so the badge needs its **PSRAM allocator** before it can instantiate — the
+   measured, blocking prerequisite. If PSRAM does not carry it, RP2350 falls back to a native TinyGo build
+   (measured at a 263 KB `.uf2`) like RP2040. New cost of this route: **RISC-V or Arm only** — Xtensa parts
+   (ESP32-S3/S2) have no Rust target and are out of scope.
 3. **"All six tiers in V1" is aggressive.** The phase order builds a reference tier first (CLI → web/desktop
    → embedded) so slippage degrades to "fewer tiers shipped," not "nothing works." Consider gating V1 on
-   Phase 4 for CLI+web+desktop+ESP32-S3, with RP2350/RP2040 as fast-follows.
+   Phase 4 for CLI+web+desktop+RP2350, with ESP32-P4/RP2040 as fast-follows.
 4. **Desktop/CLI: wasm-under-wasmtime vs native link — RESOLVED (Decision 26).** `wasmtime-go` lacks
    Component Model bindings (Spike 5 review), so rather than take on the C API for bootstrap, the CLI/desktop
    host **links the engine as a native Go package and runs it in-process** (like RP2040). The wasip2 wasm
@@ -903,12 +885,14 @@ the Display draw-list. Input: React events / Wails IPC / serial REPL / touch inp
 5. **Display input on embedded** beyond the input-map (Decision 14) — a symmetric **Input capability** is
    the Phase-5 portable answer if host-side input proves limiting.
 6. **Component Model async maturity** — Spike 5 greens Rich async via **jco JSPI** on Node ≥24 (no ILC shim). WASI 0.3 remains the longer-term native CM async destination; gates in [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). Browser JSPI re-check is a follow-up.
-7. **Two build targets (component vs core-wasm); the adapter path is abandoned.** Component tiers build
-   `-target=wasip2` directly (Spike 1). **WAMR** has no Component Model, so embedded needs a *separate*
-   core-wasm build — a build seam behind build tags (§5.3), reconciled when embedded lands. The originally
-   planned `wasip1`+`wasm-tools` **adapter** bridge is **abandoned** (fragile; see
-   `spikes/README.md`). Risk: drift between the component and (future) core-wasm binding layers;
-   mitigated by identical capability *shapes* + §11 behavior tests.
+7. **One build target; both the adapter path and the second core-wasm build are gone.** Component tiers
+   build `-target=wasip2` directly (Spike 1), and embedded consumes that same component through an AOT
+   step. *This risk used to read "two build targets" because WAMR needed its own core-wasm build with its
+   own binding layer — the drift it warned about no longer has two things to drift between.* The originally
+   planned `wasip1`+`wasm-tools` **adapter** bridge stays abandoned (fragile; see `spikes/README.md`). The
+   residual risk moved to the AOT step: a `.cwasm` records the feature set of the compiler that produced
+   it, so the precompiler must be built like the runtime — hence the compile-only `precompile/` crate
+   rather than the stock `wasmtime` CLI.
 
 ---
 
@@ -937,9 +921,8 @@ in §0.1.
   filesystem + network + display. Unused caps are simply not imported; a tier that lacks a *used* cap
   returns `unavailable` and the engine degrades (§6.2).
 - **Tiers targeted (opt-in).** CLI-only, CLI+web, CLI+embedded, or all six (§10). Each tier is a host you
-  enable in the build/verify matrix; the engine source is unchanged. **Including an embedded/WAMR tier
-  flips the project to the *portable byte ABI* (§5.6, Decision 25); a CLI+web+desktop-only app can leverage
-  the richer Component-Model ABI.**
+  enable in the build/verify matrix; the engine source is unchanged — **including an embedded tier, which
+  changes nothing about the guest** (Decision 25: one ABI, no toggle).
 
 ### 16.2 The progression (CLI-first, then add tiers)
 
@@ -948,7 +931,7 @@ in §0.1.
 | 0 — scaffold | `dlc new myapp` → engine skeleton + CLI host + Devbox + wit/proto | working CLI (host parser → `execute`) | — |
 | 1 — logic | write handlers over the capabilities you need | CLI does real work | write |
 | 2 — + UI | enable the web/desktop host; add a UI that builds requests and calls `execute` | same app in browser/window | **none** |
-| 3 — + embedded | enable the WAMR host + native cap bindings; flash | same app on device | **none** (rebuilt to core-wasm) |
+| 3 — + embedded | `dlc build rp2350`; flash | same app on device | **none** (the same component, AOT'd) |
 
 The engine is stable from Stage 1; later stages add **hosts**, not logic. Graceful `unavailable`
 degradation means a cap added for one tier (e.g. Display) never breaks the tiers without it.
@@ -1007,7 +990,6 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 ├── platform/     # the ILC framework (hosts, wit, caps seam, build pipeline, verify harness) → `dlc-platform` (§16.4)
 ├── templates/    # skeletons (+ later: per-skeleton git submodules) + local fragment overlays
 │   ├── component-model/  # full dlc-shaped CM skeleton (CLI + browser); bootstrap — in-tree first
-│   ├── wamr/             # WAMR skeleton; after embedded verify exists
 │   └── fragments/        # in-tree overlay packs (--caps / --tiers / …); not whole-project submodules
 └── apps/
     ├── dlc/      # App #1 — the scaffolder; go:embed's resolved /templates at build
@@ -1028,26 +1010,19 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 - **Depends-on, never inlines (destination).** After submodule + `dlc-platform` extract, a template’s
   `go.mod` depends on `dlc-platform` as a **versioned module** + a thin `main`; it never copies framework
   internals. Bootstrap may ship a fuller in-tree tree until that extract lands (see sequencing #2).
-- **Two skeleton families by ABI mode (Decision 25).** Rich/CM vs Portable/WAMR are different *project*
-  shapes (guest target, host stub, capability ABI, build). Each is its **own skeleton directory** (and
-  later its own submodule), not a fragment toggle:
-
-  | Skeleton | Track | Emits | When |
-  | --- | --- | --- | --- |
-  | `templates/component-model/` | Rich / Component Model | wasip2 component; native in-process (CLI, Decision 26) + jco (browser); rich WIT | **Bootstrap first** — full terminal + browser `dlc` shape |
-  | `templates/wamr/` | Portable / WAMR | wasip1 core; native-fn caps; byte ABI | **After** embedded/WAMR can `verify` — do not ship an unverifiable stub |
-
-  Directory names follow the **substrate** (`component-model`, `wamr`); track prose stays Rich/CM vs
-  Portable/WAMR (Decision 25, [`WASI-UPGRADES.md`](./WASI-UPGRADES.md)). `dlc new` / manifest `tiers`
-  selects the family. Shared bits may later move into `templates/fragments/` once both skeletons exist.
+- **ONE skeleton family.** *This rule used to mandate two — Rich/CM and Portable/WAMR — because the ABI
+  was a project-shaping choice. Decision 25 removed the choice, so `templates/wamr/` is not coming and
+  `templates/component-model/` is not one of two.* Every project is a wasip2 component: native in-process
+  on CLI (Decision 26), jco in the browser, Pulley on embedded. Adding an embedded tier adds a **host**,
+  never a second guest shape, so it is a fragment overlay like any other tier — not a separate skeleton.
 - **Submodules are a graduation step, not day-one.** Target: one git submodule per project skeleton under
   `templates/<name>/` for independent build/verify/PRs. **Bootstrap authors in-tree**; lift when ready.
   Only add / graduate a skeleton when CI can validate it.
-- **Bootstrap starts with `component-model/`.** Phase B2/B3 ship that skeleton only — one engine for
-  terminal and browser (Decision 3). `wamr/` is Backlog until the WAMR track is real.
+- **Bootstrap starts with `component-model/`.** Phase B2/B3 ship that skeleton — one engine for
+  terminal and browser (Decision 3).
 - **Fragments stay local (not submodules).** `--caps` / `--tiers` / `--ui` / `--storage` overlays are
   small packs under `templates/fragments/` (or equivalent), composed onto a skeleton via `import-fs`
-  (§7.3). ABI-mode is **not** a fragment — it picks the skeleton.
+  (§7.3).
 - **Anti-drift by validation, not derivation.** Drift is caught by CI — the §11 **Scaffolder** row
   (`dlc new … → devbox run verify`) must pass.
 - **Embedded, not cloned at runtime.** At `dlc` build time the resolved `templates/` tree is
@@ -1057,8 +1032,7 @@ Templates are a **distinct top-level concern**, reasoned about separately from h
 - **Composition + parameterization.** `dlc new` selects a **skeleton tree + fragment overlays**; a token
   pass substitutes `{{.Module}}` / `{{.ProjectName}}` / selected capability imports. Bundles are BFT/zip so
   they stay diffable.
-- **ABI-mode-aware defaults.** Skeleton choice follows ABI mode (Decision 25). **CLI scaffolder default is
-  ffcli** in both families; Spike 4 measured hand-rolled (~497 KiB wasip1) / go-arg as fall-backs if we
+- **CLI scaffolder default is ffcli.** Spike 4 measured hand-rolled (~497 KiB wasip1) / go-arg as fall-backs if we
   split later.
 
 **Prior art — Qroma** (`qromatech/qroma-project-generator`, `qroma.dev`). The author's earlier
@@ -1078,7 +1052,7 @@ Concern-scoped subcommands (Qroma-style `qroma new/build/pb/firmware/site`), par
 | --- | --- |
 | `dlc new <app> --caps=… --tiers=… --ui=… --storage=…` | scaffold (import base + fragments, §16.6); `--build --git --run` for one-step setup |
 | `dlc doctor` | assess readiness — system prereqs + per-tier toolchain/host; the **command form** of `scripts/preflight.sh` (Layer 1; the pure-bash script stays as the pre-toolchain Layer 0 gate — see prereqs doc) |
-| `dlc build <tier>` / `dlc run <tier>` | build a tier (native `go build` · web tinygo→jco · embedded WAMR/PlatformIO) / launch it (two-phase, Decision 23). Tiers are composition recipes (Decision 27), not per-tier forks; `--all` builds the matrix |
+| `dlc build <tier>` / `dlc run <tier>` | build a tier (native `go build` · web tinygo→jco · embedded tinygo→AOT→`cargo`+`.uf2`) / launch it (two-phase, Decision 23). Tiers are composition recipes (Decision 27), not per-tier forks; `--all` builds the matrix |
 | `dlc verify [<tier>]` | run the §11 per-tier build→load→run matrix; `dlc verify --parity` = the Decision 26 native↔wasm golden-vector check (`scripts/verify-parity.sh`) |
 | `dlc gen` | run `buf generate` over the app's `commands.proto` → go-lite (engine) + es-lite (web) + **`protoc-gen-dlc-registry`** (dispatch map + `describe()` metadata, Decision 29). Host-side; supersedes `make gen` for scaffolded apps |
 | `dlc proto …` | edit the app's `.proto` (add a command/field); `dlc gen` regenerates |
@@ -1101,7 +1075,7 @@ module   = "github.com/me/notes"
 platform = "dlc-platform@0.3.1"        # the versioned framework dependency (§16.6)
 
 capabilities = ["console", "filesystem", "events", "display"]   # the index is not one — it is engine-owned (§6.2)
-tiers        = ["cli", "web", "desktop", "esp32-s3"]   # an embedded tier ⇒ portable byte ABI (§5.6)
+tiers        = ["cli", "web", "desktop", "rp2350"]     # a tier is a host slot; the guest is the same everywhere
 storage      = "split"                 # or "none" (§7.1)
 ui           = "react"                 # or "tft" / "none"
 
@@ -1115,10 +1089,9 @@ seed         = "fixtures/demo.bft"     # optional phase-1 import-fs (§7.3)
   appends to `tiers`; `dlc run` reads `[launch]` for the phase-1 setup + mode (§5.5).
 - **The two knobs, made durable.** §16.1's *capabilities* + *tiers* opt-ins live here as one declarative
   record — edited as the app evolves — instead of scattered across build tags / Makefile.
-- **ABI mode follows the tiers.** Any **embedded/WAMR** tier ⇒ **portable byte ABI** (protobuf over
-  `(ptr,len)`, wasip1 core built, port-ready rules); otherwise the **rich Component-Model ABI** (wasip2
-  only). `dlc new --wamr` forces portable mode even without an embedded tier (future-proofing). See §5.6 /
-  Decision 25.
+- **Tiers select hosts and build targets, nothing about the guest** (Decision 25). An embedded tier adds
+  an AOT profile — which pointer width, which `no_std` compiler settings — that `dlc build <tier>` reads
+  from here rather than taking on the command line. See §5.6.
 - **Regenerate / upgrade.** Because it pins `platform` + records the config, `dlc` can re-apply templates
   against a newer platform version (a scaffold *upgrade*), not just first-time generation.
 - **Dogfood option:** define the manifest as a proto `Project` message → canonical-JSON `dlc.json`

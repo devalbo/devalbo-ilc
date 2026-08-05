@@ -14,7 +14,7 @@ edition = "2021"
 
 [dependencies]
 # `pulley` is the interpreter backend — the whole reason this tier can run a
-# COMPONENT at all, which WAMR cannot. `component-model` is what makes it an ILC
+# COMPONENT at all rather than a bare core module. `component-model` is what makes it an ILC
 # engine rather than a bare module.
 wasmtime = { version = "=46.0.1", default-features = false, features = [
     "runtime",

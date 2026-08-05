@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/devalbo/devalbo-ilc/dlc-platform/wit"
+	"github.com/devalbo/devalbo-ilc/engine"
 )
 
 // runBuild implements `dlc build <tier> [--out dir] [--web-out dir] [--entry pkg]`.
@@ -72,10 +73,24 @@ func runBuild(request []byte) error {
 	out := firstNonEmpty(outFlag, declared.Component, "build/engine.component.wasm")
 	webOut := firstNonEmpty(webOutFlag, declared.Assets, filepath.Join(declared.Root, "src", "wasm"))
 
-	switch tier {
-	case "web":
+	// ROUTE ON THE TARGET, NOT THE TIER NAME. A tier is a host slot and there
+	// will be one per chip; a target is an artifact and there are four. Switching
+	// on the name would mean editing this function for every board, and the
+	// second board would produce the same bytes as the first.
+	target, known := engine.TierTarget(tier)
+	if !known {
+		// Declared in dlc.toml but not in the engine's landscape. The manifest is
+		// the project's, the landscape is the platform's, and a name in one and
+		// not the other is worth saying out loud rather than defaulting.
+		return fmt.Errorf("build: tier %q is in %s but not in the platform's tier landscape", tier, manifestFile)
+	}
+
+	switch target {
+	case engine.TargetWasip2:
 		return buildWeb(out, webOut, entry)
-	case "native":
+	case engine.TargetPulley32, engine.TargetPulley64:
+		return buildEmbedded(out, firstNonEmpty(declared.Cwasm, defaultCwasm(target)), entry, target)
+	case engine.TargetNative:
 		// Deliberately not implemented: a native build is `go build`, and
 		// wrapping it would add a layer that hides a perfectly good error
 		// message. Named here so the refusal is specific.
@@ -83,6 +98,75 @@ func runBuild(request []byte) error {
 	default:
 		return fmt.Errorf("build: tier %q is declared but dlc cannot build it yet", tier)
 	}
+}
+
+func defaultCwasm(target string) string {
+	return filepath.Join("build", "engine."+target+".cwasm")
+}
+
+// buildEmbedded: the component FIRST, then AOT. Two steps, one verb.
+//
+// THE COMPONENT IS NOT REBUILT PER BOARD. This calls exactly the same TinyGo
+// invocation the web tier uses and then compiles that artifact ahead of time —
+// which is what makes "the badge runs the same component the browser runs" a
+// property of the build rather than a claim in a document. If this function ever
+// grows a second `tinygo build`, the embedded plan has failed its own constraint.
+func buildEmbedded(component, cwasm, entry, target string) error {
+	if err := buildComponent(component, entry); err != nil {
+		return err
+	}
+
+	// `dlc-precompile`, NOT `wasmtime compile`. A .cwasm records the FEATURE SET
+	// OF THE COMPILER THAT PRODUCED IT — not the flags it was given — so a stock
+	// wasmtime CLI emits artifacts the no_std runtime rejects with "compilation
+	// settings are not compatible". The precompile crate is built with the same
+	// feature set as the firmware, which makes that mismatch impossible rather
+	// than merely fixed.
+	crate, err := precompileCrate()
+	if err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		return fmt.Errorf("build %s: cargo not found on PATH — run inside `devbox shell`", target)
+	}
+	if err := os.MkdirAll(filepath.Dir(cwasm), 0o755); err != nil {
+		return err
+	}
+	abs := func(p string) string {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			return p
+		}
+		return a
+	}
+
+	fmt.Fprintln(os.Stderr, "build "+target+": precompile -> "+cwasm)
+	if err := run("cargo", "run", "--quiet",
+		"--manifest-path", filepath.Join(crate, "Cargo.toml"),
+		"--", abs(component), abs(cwasm), target); err != nil {
+		return fmt.Errorf("build %s: precompile: %w", target, err)
+	}
+	fmt.Fprintln(os.Stderr, "build "+target+": ok")
+	return nil
+}
+
+// precompileCrate locates the AOT compiler, which is Rust and therefore cannot
+// be embedded in this binary the way the WIT world is.
+//
+// A SCAFFOLDED PROJECT DOES NOT HAVE IT, and that is the honest state today: the
+// crate lives in this repository, so `dlc build <embedded tier>` works here and
+// needs an explicit path elsewhere. Saying so beats a "no such file" naming a
+// path the user never chose.
+func precompileCrate() (string, error) {
+	if env := os.Getenv("DLC_PRECOMPILE"); env != "" {
+		return env, nil
+	}
+	const inRepo = "dlc-platform/embedded/precompile"
+	if _, err := os.Stat(filepath.Join(inRepo, "Cargo.toml")); err == nil {
+		return inRepo, nil
+	}
+	return "", fmt.Errorf("build: the AOT compiler is not here — set DLC_PRECOMPILE to a checkout of %s.\n"+
+		"It is a Rust crate, so unlike the WIT world it cannot ship inside this binary", inRepo)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -112,27 +196,11 @@ func tierNames(m *Manifest) []string {
 // produced `build/engine.component.wasm/engine.component.wasm`, which is the
 // kind of thing that looks fine in a log until someone reads it.
 func buildWeb(component, webOut, entry string) error {
-	for _, tool := range []string{"tinygo", "jco"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			return fmt.Errorf("build web: %s not found on PATH — run inside `devbox shell`", tool)
-		}
+	if _, err := exec.LookPath("jco"); err != nil {
+		return fmt.Errorf("build web: jco not found on PATH — run inside `devbox shell`")
 	}
-
-	witDir, err := materializeWIT()
-	if err != nil {
+	if err := buildComponent(component, entry); err != nil {
 		return err
-	}
-	defer os.RemoveAll(witDir)
-
-	if err := os.MkdirAll(filepath.Dir(component), 0o755); err != nil {
-		return err
-	}
-
-	fmt.Fprintln(os.Stderr, "build web: tinygo -> "+component)
-	if err := run("tinygo", "build", "-target=wasip2",
-		"--wit-package", witDir, "--wit-world", "engine",
-		"-o", component, entry); err != nil {
-		return fmt.Errorf("build web: tinygo: %w", err)
 	}
 
 	// Transpile straight into the web root — no post-build copy step, and no
@@ -157,6 +225,33 @@ func buildWeb(component, webOut, entry string) error {
 		return fmt.Errorf("build web: jco: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "build web: ok")
+	return nil
+}
+
+// buildComponent produces `engine.component.wasm` — THE artifact, shared by
+// every tier that runs wasm. Factored out of buildWeb when the embedded tier
+// landed, because both need it and neither may have its own copy: two call sites
+// with two TinyGo invocations is exactly how "one artifact everywhere" would
+// quietly stop being true.
+func buildComponent(component, entry string) error {
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		return fmt.Errorf("build: tinygo not found on PATH — run inside `devbox shell`")
+	}
+	witDir, err := materializeWIT()
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(witDir)
+
+	if err := os.MkdirAll(filepath.Dir(component), 0o755); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "build: tinygo -> "+component)
+	if err := run("tinygo", "build", "-target=wasip2",
+		"--wit-package", witDir, "--wit-world", "engine",
+		"-o", component, entry); err != nil {
+		return fmt.Errorf("build: tinygo: %w", err)
+	}
 	return nil
 }
 

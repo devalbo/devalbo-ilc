@@ -63,8 +63,8 @@ world engine {
 }
 ```
 
-**Flat scalars + bytes, mirroring `execute`.** A rich WIT record or variant would require the Component
-Model and strand the embedded tier, where WAMR speaks core wasm + WASI p1 only (§5.3). `string + list<u8>`
+**Flat scalars + bytes, mirroring `execute`.** A rich WIT record or variant would be a second,
+differently-shaped boundary, and Decision 31 says there is one. `string + list<u8>`
 lowers to pointer/length pairs, which `//go:wasmimport` can express. Same reasoning that shaped `execute`;
 the same reasoning should shape everything that follows it.
 
@@ -355,7 +355,6 @@ host-set debug switch that panics on an emit with no sink.
 | **Re-entrancy** — host calls `execute` from a callback | engine re-entered mid-command: corrupt state or deadlock | rule in `AGENTS.md`; web host safe by construction (message boundary); consider a debug-build guard |
 | **`emit` made async** | jco then needs `--async-imports`, which we refuse | keep the WIT return empty; note in README; failure is a confusing jco type error |
 | **Event storms** | per-record emission turns a 1000-record import into 1000 messages | emit per *command*, not per record — `import-fs` emits once |
-| **wasip1 / WAMR** | `//go:wasmimport` cannot take Go strings/slices directly | the flat pointer+len shape is compatible, but there is no embedded tier to run it — record as **unverified**, do not claim portability |
 | **Ordering across tiers** | async delivery or map iteration could reorder | emit synchronously in handler order; parity compares the stream in order, so a reorder fails |
 | **Parity flake** | payloads carrying timestamps or ids would never match | parity vectors must emit deterministic payloads — the host supplies clocks, as `notes` already does for `created_at` |
 

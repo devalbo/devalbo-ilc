@@ -61,13 +61,18 @@ Key pieces:
 We never concluded wasip2 *couldn't* work on web/desktop/CLI — we **deprioritized** it. Three threads
 tangled together:
 
-1. **Chasing one artifact across *every* tier, including embedded.** WAMR (embedded) runs only core WASM +
-   WASI Preview 1, not the Component Model — so a wasip2 *component* can't run on an MCU. To share one
-   byte-identical artifact across web/desktop/CLI **and** embedded, we reasoned the shared unit had to be
-   the lowest common denominator WAMR could run — a **wasip1 core module** — adapted "up" to a component
-   for the rich tiers. **The flaw:** embedded needs its own core-wasm build *regardless*, so that unity was
-   never achievable — we paid for adapter fragility to buy nothing. Relaxing the goal (embedded = a
-   separate, deferred build) makes wasip2-direct the obvious choice.
+1. **Chasing one artifact across *every* tier, including embedded.** The embedded runtime was going to be
+   WAMR, which runs only core WASM + WASI Preview 1 — so a wasip2 *component* could not run on an MCU. To
+   share one byte-identical artifact everywhere, we reasoned the shared unit had to be the lowest common
+   denominator that runtime could load — a **wasip1 core module** — adapted "up" to a component for the
+   rich tiers. **The flaw:** embedded needed its own core-wasm build *regardless*, so that unity was never
+   achievable, and we paid for adapter fragility to buy nothing. wasip2-direct followed from relaxing the
+   goal.
+
+   **Postscript (2026-08): the goal was right and the runtime was wrong.** Wasmtime's `no_std` Pulley
+   interpreter runs components on the MCU, so one artifact across every tier is achievable after all —
+   just not by dragging the rich tiers *down* to wasip1. The mistake was never the ambition; it was
+   accepting one runtime's limitation as WebAssembly's. See [`EMBEDDED-PLAN.md`](../docs/EMBEDDED-PLAN.md).
 2. **A Rust mental model.** "wasip1 core + the standard preview1 adapter" *is* the canonical, rock-solid
    path — **in Rust**. TinyGo is the opposite: its adapter story is weak (no `cabi_realloc`; the
    workarounds hit real bugs) while its **direct `-target=wasip2`** is the mature path. We assumed Go
@@ -294,9 +299,9 @@ bake off candidates; pick a **default per ABI mode** (Decision 22 + 25).
 ### Bake-off (TinyGo → harness, 17-case matrix)
 
 Matrix run is wasip2 → jco → Node. `make spike-cli` also builds each variant as a **wasip1 core module**
-(same `spikes/cli` package, `-target=wasip1`, no WIT flags) and records its size — the Portable/WAMR-shaped
-number below. That tier is deferred, so wasip1 is a **size probe, not a gate**; the ffcli decision rests on
-the wasip2 column alone.
+(same `spikes/cli` package, `-target=wasip1`, no WIT flags) and records its size. **That column is now
+history:** it existed to size the portable/WAMR track, and no tier builds wasip1 any more. The ffcli
+decision always rested on the wasip2 column alone.
 
 Sizes are a representative `make spike-cli` run (2026-07-25); TinyGo output varies a few hundred bytes.
 
@@ -312,15 +317,10 @@ Sizes are a representative `make spike-cli` run (2026-07-25); TinyGo output vari
 
 ### Decision 22 / 25 picks
 
-**Scaffolder default: `ff/v3/ffcli`** — matrix-green, real subcommand tree, stdlib `flag` syntax; one
-library until an ABI-mode split is forced.
-
-Measured per-ABI winners (Decision 25; use if we split later):
-
-| ABI mode | Measured winner | Why |
-| --- | --- | --- |
-| **Portable / WAMR** | hand-rolled (`clihand`) | Leanest green — **~497 KiB** wasip1 (~735 KiB smaller than ffcli). |
-| **Rich / non-WAMR** | go-arg (`cligoarg`) | Struct-tag ergonomics, matrix-green under TinyGo. |
+**Scaffolder default: `ff/v3/ffcli`** — matrix-green, real subcommand tree, stdlib `flag` syntax. There is
+one library and no ABI-mode split to force a second (Decision 25). If size ever bites, the measured
+alternatives were hand-rolled (`clihand`, ~735 KiB smaller) and go-arg (`cligoarg`, struct-tag
+ergonomics, matrix-green under TinyGo).
 
 ### What we thought — and measured
 
@@ -357,19 +357,17 @@ cobra is green on 16/17 cases. It fails `greet -name world` because **pflag** tr
 
 ### What works
 
-- **Rich / JSPI (R2.\*):** jco `--async-mode jspi` with `--async-imports 'devalbo:ilc/host-delay#delay'` **and** `--async-exports 'execute-cli'` → guest blocking `delay(50)` awaits a real `setTimeout` Promise; event loop keeps ticking.
-- **Portable (P1.\*):** TinyGo wasip1 + wazero `env.host_delay` = `Sleep` (WAMR native-fn shape).
+- **JSPI (R2.\*):** jco `--async-mode jspi` with `--async-imports 'devalbo:ilc/host-delay#delay'` **and** `--async-exports 'execute-cli'` → guest blocking `delay(50)` awaits a real `setTimeout` Promise; event loop keeps ticking.
 
 ### Negative control + off-matrix checks (expected / measured)
 
-- **Rich / sync transpile (R1.\*):** Promise host under sync jco → `expected a string, received [object]`.
+- **Sync transpile (R1.\*):** Promise host under sync jco → `expected a string, received [object]`.
 - **Sync-host control:** same guest + host returning a plain string (no Promise) → **GREEN** under sync jco — gap is Promise-as-sync-result, not WIT wiring.
-- **wasmtime (CLI/desktop shape):** same guest + blocking Rust wasmtime `host-delay` → **GREEN** (wall ≥ 50ms). Rich/CM async pain is **web/jco**, not “all CM hosts.” `wasmtime-go` still lacks a Component Model API for B2.
+- **wasmtime (CLI/desktop shape):** same guest + blocking Rust wasmtime `host-delay` → **GREEN** (wall ≥ 50ms). CM async pain is **web/jco**, not “all CM hosts.” `wasmtime-go` still lacks a Component Model API for B2.
 
 ### Implications → [`docs/WASI-UPGRADES.md`](../docs/WASI-UPGRADES.md)
 
-- Rich/web async custom caps: use **stock jco JSPI** (Node ≥24 + `--experimental-wasm-jspi`; async import **and** export). No ILC shims. WASI 0.3 remains the longer-term native CM async destination.
-- Portable: blocking native-import path is good for TinyGo wasip1 / future WAMR (re-host under `iwasm` when embedded lands).
+- Web async custom caps: use **stock jco JSPI** (Node ≥24 + `--experimental-wasm-jspi`; async import **and** export). No ILC shims. WASI 0.3 remains the longer-term native CM async destination.
 - Pin **Node 24+** in devbox — Node 22 has no JSPI APIs even with the experimental flag.
 - Browser JSPI (Playwright) is a follow-up; Node is the CI gate.
 

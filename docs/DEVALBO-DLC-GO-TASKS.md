@@ -87,7 +87,7 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [x] **Spike 2 — protobuf-go-lite under TinyGo:** binary **and** canonical-JSON round-trip under `tinygo -target=wasip2`; `protobuf-es-lite` decodes the same bytes/JSON in JS. `proto/devalbo/spike/v1/spike.proto`, `spikes/proto/`, `make spike-proto` / `make test-b1`. Findings → [`spikes/README.md`](../spikes/README.md) (Spike 2): copy generated `.pb.ts` into the spike for Node resolution; `encoding/json` in the full spike deps comes from `cm`, not go-lite.
 - [x] **Spike 3 — OPFS filesystem:** engine `os.WriteFile` persists via WASI preopen → OPFS and survives reload. `spikes/opfs/`, `make spike-opfs` / `make spike-opfs-watch` (headed). Findings → [`spikes/README.md`](../spikes/README.md): preview2-shim browser wants FileData not DirectoryHandle; stock shim breaks TinyGo writes on bigint offsets (vendored `shim/filesystem.js`)
 - [x] **Spike 4 — in-engine CLI interpreter:** parser lives **inside** the TinyGo engine; host forwards argv → `execute-cli`. Bake-off measured (see [`spikes/README.md`](../spikes/README.md)): flag / ffcli / hand / go-arg matrix-green; cobra almost (fails `-name`); kong panics (`MethodByName`); subcommands unusable (hardcodes `os.Args`). **Default: ffcli**; wasip1 sizes show hand (~497 KiB) ≪ ffcli (~1.23 MiB) if portable splits later. `spikes/cli/`, `make spike-cli` / `make test-b1`. Decision 22 (→ **re-scoped by Decision 28**: parsing is host-side; this now informs the *host* parser choice) + 25.
-- [x] **Spike 5 — dual-track async probe:** **Rich ✅** (jco JSPI on Node ≥24 + `--async-exports execute-cli`; sync transpile remains negative control) · **Portable ✅** (TinyGo wasip1 + blocking `env.host_delay`; wazero stand-in for WAMR native fns). No ILC async shims. Pin `nodejs@24`. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
+- [x] **Spike 5 — async probe:** **✅** (jco JSPI on Node ≥24 + `--async-exports execute-cli`; sync transpile remains negative control). No ILC async shims. Pin `nodejs@24`. Findings → [`spikes/README.md`](../spikes/README.md) + [`WASI-UPGRADES.md`](./WASI-UPGRADES.md). `spikes/async/`, `make spike-async`. Decision 11 + 25.
 
 **Exit:** Spikes 1–5 green; **each with a findings section in `spikes/README.md`**; plan-contradicting findings folded back (as Spike 1 did). **Retired 2026-07-26:** spikes 1–4, oneof, and options were deleted once product code covered their claims (see `spikes/README.md` for what covers what). Spike 5 stays — nothing else exercises async. The findings are unchanged.
 
@@ -111,10 +111,10 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [x] **Host introspection (Decision 29) — GENERATED, not reflected at runtime.** The plugin emits a `clispec` command surface (rpc→subcommand, request field→flag, `help`/`required`/`default`/`short`/`cli_name`/`cli_flag`/`cli_source`, and the rpc's doc comment as `-h` summary); `engine/platform/cli` turns it into a parser with `ffcli` + stdlib `flag`, and encodes with `protowire`. **Amends the original plan**, which said the host would embed the FileDescriptorSet and walk it with protoreflect: the plugin already reads that descriptor set and already reads custom options, and go-lite messages carry no protoreflect, so runtime walking would additionally need `dynamicpb` plus the unknown-field dance the options spike measured as unreliable (`HasExtension` differs across dynamicpb type identities). Generating plain data makes a schema change a compile error instead of a runtime surprise; wasm cost measured at **1.6 KB**. Engine `describe()` stays **optional** — only for a *generic* host that doesn't embed the schema. **Bootstrap shim retired (Decision 28 complete):** `execute-cli` is gone from the world, `engine.Execute`/ffcli are gone from the *engine* (component **1.91 MB → 1.52 MB**, ~20% smaller), and the argv parity stream retired — the 19 method vectors cover it.
   - [ ] follow-up: the **web** tier's equivalent — a generated *form* description rather than flags. The TS side currently gets ids only.
   - [ ] follow-up: `huh` menus for missing enum args (the surface already carries `EnumValues`)
-- [x] **WIT boundary migration (Decisions 28/31):** `execute-cli(args: list<string>)` → **`execute(method: u32, request: list<u8>) -> command-result`** — scalar id + proto-bytes payload (WAMR-portable; only rich WIT records/variants need the Component Model). Keep the string-args shim until callers move. **Landed:** both exports declared on `world engine`; `cmd/engine-component` wires each through a shared `toCommandResult`. `make build-engine` (TinyGo wasip2) green, and `make verify-parity` now covers **both** boundaries — 9 argv vectors + 10 `execute(method, request)` byte-vectors (`verify/parity/method-vectors.json`, hex requests derived from typed fixtures via `make parity-vectors`; native side is `cmd/parity-runner` until hosts/native builds requests). The method diff includes the **error string**, so TinyGo and native Go must agree on envelope errors, unregistered ids, and decode failures too.
+- [x] **WIT boundary migration (Decisions 28/31):** `execute-cli(args: list<string>)` → **`execute(method: u32, request: list<u8>) -> command-result`** — scalar id + proto-bytes payload. Keep the string-args shim until callers move. **Landed:** both exports declared on `world engine`; `cmd/engine-component` wires each through a shared `toCommandResult`. `make build-engine` (TinyGo wasip2) green, and `make verify-parity` now covers **both** boundaries — 9 argv vectors + 10 `execute(method, request)` byte-vectors (`verify/parity/method-vectors.json`, hex requests derived from typed fixtures via `make parity-vectors`; native side is `cmd/parity-runner` until hosts/native builds requests). The method diff includes the **error string**, so TinyGo and native Go must agree on envelope errors, unregistered ids, and decode failures too.
 - [ ] `supported-abis() -> list<u8>` export (byte-ABI, Decision 31) — the guest advertises its boundaries + versions (`["bytes/1"]` today) so hosts pick the richest supported. Cheap hook now; enables a per-capability rich WIT boundary later without breaking the byte path.
 - [x] **`protoc-gen-dlc-registry` plugin** — reads the `service` + `method_id` options **from the `buf build` image / CodeGeneratorRequest descriptors** (go-lite emits no service stubs, so generated Go is not a source — spike-measured) → emits the engine's `method_id → handler` registration (the reflection-free part) and **enforces `method_id` stability** against a committed lock. Host-side introspection uses the standard descriptor set (no custom host config to generate). Runs under `dlc gen` / `buf generate` (Decision 29).
-- [x] `engine/caps_native.go` / `caps_wasip2.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26). **Landed with Events** as `engine/platform/caps_{native,wasip2}.go`; `caps_wasip1.go` stays unbuilt because there is no WAMR tier to run it
+- [x] `engine/caps_native.go` / `caps_wasip2.go` build seam for capability imports (§5.3) — native seam lets the CLI host link the engine in-process (Decision 26). **Landed with Events** as `engine/platform/caps_{native,wasip2}.go`; `caps_wasip1.go` was never written and is not coming — every wasm tier is wasip2
 - [x] `export-fs` / `import-fs` handlers over the WASI filesystem (§7.3) — needed because scaffolding = `import-fs`. **Landed** as method ids 4/5 in **BFT** (the real spec: recursive `directory`/`text`/`binary` nodes, alphabetical entries, base64 for binary). Hand-written encoder **and** parser in `engine/bft.go` — `encoding/json` is reflection-heavy and banned in the engine, so the parser accepts only the BFT subset (objects + strings). Bundles are byte-stable (sorted) and text-vs-binary is chosen by content, so a scaffold bundle is readable and diffable. Untrusted-input safe: every path goes through `safeJoin`. Non-regular files (symlinks) are **skipped** — BFT cannot represent them and reading one errors.
 - [x] Scaffolding handler (`new`): `import-fs` a template bundle → write tree → token-substitute (`{{.Module}}`, `{{.ProjectName}}`) — `engine/scaffold.go`, checked end-to-end by `make verify-scaffold` (new → gen → test → build → run) and `make verify-scaffold-web`
 
@@ -123,7 +123,6 @@ not optional — it's what turns a throwaway spike into durable regression + des
 - [ ] **Defer** versioned `dlc-platform` `go.mod` depend until submodule graduation (§16.4 / §16.6 #2)
 - [ ] `templates/fragments/` in-tree for overlay packs (`--caps` / `--tiers` / …) — ABI mode picks the skeleton, not a fragment
 - [x] `go:embed` the resolved `templates/` tree into the **engine** so `dlc new` is offline + browser-capable. Never runtime-clone templates — `templates/templates.go`, `//go:embed all:component-model`
-- [ ] **`templates/wamr/`** — Backlog until embedded verify exists; do not add an unverifiable stub in B2
 - [ ] **`reset-fs` / import modes in the UI** — `reset-fs` (id 12) and `ImportMode.REPLACE` exist and are tested; the browser uses REPLACE for imports but has no reset button and no per-file editing (§7.3 file verbs remain open — see the notes-app question in §13)
 
 ### Build pipeline
@@ -263,8 +262,7 @@ turns it into a 2.21 MB `.cwasm`, with the wasmtime already in devbox. The badge
 - [ ] **Phase 0 is the gate and everything depends on it:** does Wasmtime `no_std` + Pulley +
       component-model fit in 520 KB of SRAM (plus 8 MB of slower PSRAM)? Flash is not the constraint; RAM
       is, and nobody has measured it
-- [ ] Phases 1–6 in the plan doc. Fallbacks if Phase 0 fails, in order: trim the world; WAMR + wasip1 (the
-      1.77 MB module already compiles); or **native TinyGo — measured at a 263 KB `.uf2` for `pico2`**,
+- [ ] Phases 1–6 in the plan doc. Fallbacks if Phase 0 fails, in order: trim the world; or **native TinyGo — measured at a 263 KB `.uf2` for `pico2`**,
       blocked only by a build-tag bug (`caps_wasip2.go` is `//go:build tinygo`, so a bare-metal ARM build
       tries to link `wasmimport_Emit`; `tinygo && wasm` fixes it, verified)
 - [ ] **RISC-V is a REQUIREMENT** (D8): an embedded target must have an upstream Rust target, so **Xtensa
@@ -814,7 +812,7 @@ second area nothing uses would be a branch nothing tests.
 
   §6.4 argues for the semantic path from **dissimilarity of output** ("DOM, a TFT grid and terminal ASCII share
   no structure"). This argument is better, and it survives a case the other one does not: two tiers on ONE
-  screen (`badge-native` / `badge-wamr`) look like the case where a shared draw list should win — until you
+  screen (`rp2350-tinygo` / `rp2350`) look like the case where a shared draw list should win — until you
   notice **one of them is running an interpreter and the other is not**, so their envelopes differ even though
   their pixels are identical. **That retires the "the rule depends on which pair of tiers" finding** recorded
   here earlier: it does not depend on the pair, it depends on who knows the cost.
@@ -851,7 +849,7 @@ built. Every other row in that table is a task below, named by its constant, so 
 one vocabulary.
 
 **A tier is a composition recipe** (Decision 27): engine × host binding × ABI mode × capability set. Not a
-board — **one board can be two tiers** (`badge-native` and `badge-wamr` are the same hardware) and two boards
+board — **one board can be two tiers** (`rp2350-tinygo` and `rp2350` are the same hardware) and two boards
 can share one tier. Adding a tier is a table row plus a `templates/component-model/hosts/<tier>/` skeleton.
 
 #### Shared prerequisites — nothing embedded starts before these
@@ -873,53 +871,53 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
       `baremetal` tag is the likely candidate, unverified — plus the third file. **Blocks the first native
       embedded tier**, and found by reading the code rather than by building
       ([`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md) §10.1a).
-- [ ] **No wasip1 core-wasm build target exists.** `make build-wasm` emits the wasip2 component; WAMR needs
-      `engine.core.wasm` from `tinygo -target=wasip1`, and nothing produces one. Portable mode's other half
-      (Decision 25). **Blocks `badge-wamr` and `esp32-wamr`** but not the native embedded tiers, which use no
-      wasm at all.
-- [ ] **The deferred WAMR spike** — Phase-0 spike (3) of the main plan, the only one never run: *"WAMR running
-      a TinyGo core module on ESP32-S3 with one host import."* **WAMR tiers only** (`badge-wamr`,
-      `esp32-wamr`); the native embedded tiers do not need it. Worth noting what "one host import" now means
-      concretely: it is `emit`, whose lowering to `//go:wasmimport` `ilc.wit` still marks **UNVERIFIED**. So
-      the spike and the first real test of Decision 33's flat-scalars-and-bytes shape are the same piece of
-      work. Findings go in `spikes/<name>/README.md`, and a red result reshapes the plan (§11).
+- [x] **The AOT step is wired into `dlc build`** — done 2026-08-04. `dlc build rp2350` runs TinyGo and then
+      the precompiler, writing `build/engine.pulley32.cwasm`; measured at 1.20 MB for tictactoe's 1.82 MB
+      component. **It routes on the TARGET, not the tier name** (`engine.TierTarget`), so `esp32p4` needs no
+      code and produces the same file — adding a board is a landscape row, not a `switch` case. `[tiers.*]`
+      gained a `cwasm` key for the output path. *This replaced a task that read "no wasip1 core-wasm build
+      target exists"; nothing needs one, because embedded runs the same component.*
+      **Still hand-run:** `cargo` + `.uf2` for the firmware itself, and the crate is found via
+      `DLC_PRECOMPILE` outside this repo because a Rust crate cannot be embedded in the Go binary.
+- [ ] **The PSRAM allocator** — the measured blocker. ~890 KB of `.cwasm` against 520 KB of SRAM, so the badge
+      cannot instantiate until PSRAM is mapped and an allocator sits on it. Everything else on the board is
+      proven ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)).
 - [ ] **A skeleton per embedded shape.** There are **three** shapes to template eventually — a Go host with a
-      screen, a Go host without one, and a C++ host embedding WAMR — and `templates/wamr/` is deliberately
-      unbuilt until a WAMR spike can `verify` (§16.6). Until a tier has a skeleton it stays `TierPlanned` and
-      `dlc new` refuses it by name. **The hand-written build/flash target for each tier is the best input that
-      template will ever get**; write each as though it were going to be scaffolded.
+      screen, a Go host without one, and a Rust `no_std` host running the component — all over **one**
+      skeleton, since every tier speaks the same ABI (Decision 25). Until a tier has a slot it stays
+      `TierPlanned` and `dlc new` refuses it by name. **The hand-written build/flash target for each tier is
+      the best input that template will ever get**; write each as though it were going to be scaffolded.
 
 #### One task per planned tier
 
 - [ ] **`desktop`** — Wails v2: webview over the **native** binding, so no new engine build and no new ABI
       (§5.4, §10). The cheapest remaining tier, and the only planned one with no embedded prerequisites.
-- [ ] **`badge-native`** — RP2350B (Adafruit 6463, Badgeware Tufty): TinyGo compiled for the board and
-      **linked directly**, Go host, 320×240 TFT, five buttons. **Build this before `badge-wamr`**: it has one
-      unknown (does the pinned TinyGo target RP2350) where WAMR has several, so the badge *works* while WAMR
-      is still a question, and the port gets a running reference instead of a blank screen. Needs the caps
-      seam and the `Boot` fix above. Track N of
+- [ ] **`rp2350-tinygo`** — RP2350B (Adafruit 6463, Badgeware Tufty): TinyGo compiled for the board and
+      **linked directly**, Go host, 320×240 TFT, five buttons. **Build this before `rp2350`**: it has one
+      unknown (does the pinned TinyGo target RP2350) where the interpreted tier has a measured blocker, so
+      the badge *works* while PSRAM is still open, and the port gets a running reference instead of a blank
+      screen. Needs the caps seam and the `Boot` fix above. Track N of
       [`example-plans/TIC-TAC-TOE-PLAN.md`](./example-plans/TIC-TAC-TOE-PLAN.md).
-- [ ] **`badge-wamr`** — the same board, engine as **wasip1 core wasm under WAMR**, C++ host with Pimoroni
-      display libraries, capabilities as WAMR native functions. §14 risk 2 calls RP2350-under-WAMR the
-      least-proven combination in the project, and treating it as a *second tier* rather than an either/or
-      spike **retires that framing as a gate** — a red result is a result, because Track N already shipped.
-      **The prize for building both:** one engine source, core wasm vs native, on the same hardware — the
-      first real check of the portable byte ABI, and the first verification that `emit` survives to core wasm
-      (`ilc.wit` marks it UNVERIFIED today). **The cost:** two hosts in two languages, so the presentation is
-      written twice. Track W of the same plan.
-- [ ] **`keeb-native`** — RP2040 (Adafruit 5302, KB2040): TinyGo linked directly, and **no display at all**.
-      264 KB SRAM makes native mandatory rather than chosen (Decision 18), so there is no WAMR variant of this
-      tier. Renders over USB serial into someone else's terminal; input is a typed line or a **3×3 key matrix**,
-      the purest input-map in the project (Decision 14). This is where "an app ships no presentation"
-      (Decision 34) stops being a claim, and where `HasFilesystem() == false` is a fact about the hardware
-      rather than a policy. Shares both prerequisites with `badge-native`. Track K of the same plan.
-- [ ] **`esp32-wamr`** — ESP32-S3 under the official Espressif WAMR ESP-IDF component, PlatformIO C host, TFT
-      display, serial REPL (§4, §5.3). The tier the WAMR toolchain is actually documented for, which makes it
-      the *lower-risk* WAMR target even though no demo board for it is on the list yet
-      (`demo-platforms.txt`) — worth considering before `badge-wamr` if the WAMR port fights back.
+- [ ] **`rp2350`** — the same board running **the same `engine.component.wasm` the browser runs**, AOT'd to
+      Pulley bytecode, under a Rust `no_std` host. Treating it as a *second tier* rather than an either/or
+      spike retires the old framing as a gate — a red result is a result, because Track N already shipped.
+      **The prize for building both:** one engine *artifact*, interpreted vs natively linked, on the same
+      hardware — a stronger claim than the old plan's "one source", since a disagreement cannot be blamed on
+      a second build. **The cost:** two hosts in two languages, so the presentation is written twice. Track P
+      of the same plan.
+- [ ] **`rp2040-tinygo`** — RP2040 (Adafruit 5302, KB2040): TinyGo linked directly, and **no display at all**.
+      264 KB SRAM makes native mandatory rather than chosen (Decision 18), and 2 MB of flash could not hold an
+      interpreter plus the payload either, so there is no interpreted variant of this tier. Renders over USB
+      serial into someone else's terminal; input is a typed line or a **3×3 key matrix**, the purest input-map
+      in the project (Decision 14). This is where "an app ships no presentation" (Decision 34) stops being a
+      claim, and where `HasFilesystem() == false` is a fact about the hardware rather than a policy. Shares
+      both prerequisites with `rp2350-tinygo`. Track K of the same plan.
+- [ ] **`esp32p4`** — ESP32-P4 (RISC-V, PSRAM): **no build of its own** — Pulley bytecode is ISA-independent,
+      so it runs the identical `.cwasm` as `rp2350` behind a different HAL. That makes it the cheapest way to
+      demonstrate the cross-tier identity claim at its strongest. *Xtensa parts (ESP32-S3/S2) are out of
+      scope — no upstream Rust target (`EMBEDDED-PLAN.md` D8).*
 
-- [ ] **WAMR skeleton** (`templates/wamr/`) — wasip1 + native-fn caps; only after the WAMR spike can `verify` (§16.6, Decision 25); in-tree first, submodule later
-- [ ] **Lift skeletons to git submodules** (`component-model`, then `wamr`) + introduce versioned `dlc-platform` depends (§16.6 sequencing #1–#2)
+- [ ] **Lift the skeleton to a git submodule** (`component-model`) + introduce versioned `dlc-platform` depends (§16.6 sequencing #1–#2)
 
 #### How the landscape came to be declared
 
@@ -934,8 +932,8 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
       **Then corrected the same day:** derivation alone left no place that NAMES a tier — a typo'd
       `hosts/webb/` would silently become one, nothing tied the scaffolder's vocabulary to `dlc.toml`'s or the
       docs', and there was no constant to reference. So `engine/tiers.go` now declares the whole landscape as
-      constants plus a `TierLandscape` table (`native`, `web` available; `desktop`, `badge-native`,
-      `badge-wamr`, `keeb-native`, `esp32-wamr` planned), and the table drives both the offered set and the
+      constants plus a `TierLandscape` table (`native`, `web` available; `desktop`, `rp2350`, `esp32p4`,
+      `rp2350-tinygo`, `rp2040-tinygo` planned), and the table drives both the offered set and the
       `[tiers.*]` sections. The two check **each other**: a slot with no row is a template that outgrew its
       vocabulary, a row claiming availability with no slot is a lie. Same shape as `reserved_method_id` —
       claim the name without pretending it works. A declared-but-unbuilt tier is refused **differently** from
@@ -949,8 +947,8 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
       Decision 29 turns an enum into host-side menu choices), but that changes `NewRequest.tiers` from
       `repeated string` and is a wire change to make deliberately.
 
-      **So adding an embedded tier to `dlc new` is now a row plus a skeleton** — and the skeleton still waits
-      on the WAMR-vs-native answer below, since the two shapes differ.
+      **So adding an embedded tier to `dlc new` is now a row plus a slot** — one skeleton serves both
+      embedded shapes, since Decision 25 left only one ABI.
 ### Filesystem export/import (§7.3)
 - [ ] `--format=zip` and `--format=proto` (BFT is bootstrap; these are additive) — declared in `BundleFormat` and **explicitly refused** today rather than silently returning BFT
 - [ ] BFT **deflate** variant (size)
@@ -1118,7 +1116,7 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
 - [ ] FSA-granted directory backend for the web host (write to a user-picked local folder — Chromium) — §5.2
 - [ ] **Setup parameter: where the command line lives** — engine-embedded vs host-side. Today parsing is host-side by Decision 28/29: the engine takes `execute(method, request)` and the surface is generated per host.
 
-  **The case for engine-embedded is EMBEDDED, and it is strong.** On an ESP32 the "host" is C firmware under WAMR. Host-side parsing asks that firmware to know the command surface *and* encode protobuf requests in C (nanopb), per app. If the guest parses instead, the firmware is a dumb pipe — read a serial line, pass the string in, print what comes back — which is the difference between writing a parser per app in C and writing none. A serial REPL also maps cleanly onto the engine's *persistent* `execute` entry, which is already callable many times on a live instance. Also pairs with the deferred `wasi:cli/command` `run()` entry below, for a one-shot binary run straight under a wasm runtime with no host at all.
+  **The case for engine-embedded is EMBEDDED, and it is strong.** On the badge the "host" is Rust `no_std` firmware. Host-side parsing asks that firmware to know the command surface *and* encode protobuf requests, per app. If the guest parses instead, the firmware is a dumb pipe — read a serial line, pass the string in, print what comes back — which is the difference between writing a parser per app in C and writing none. A serial REPL also maps cleanly onto the engine's *persistent* `execute` entry, which is already callable many times on a live instance. Also pairs with the deferred `wasi:cli/command` `run()` entry below, for a one-shot binary run straight under a wasm runtime with no host at all.
 
   **The tension: embedded is also where size hurts most.** Spike 4 measured in-engine ffcli at ~1.23 MB wasip1 against ~497 KiB hand-rolled, and retiring the argv shim shrank the component 1.91 → 1.52 MB. So the embedded answer is almost certainly **not** ffcli.
 
@@ -1131,8 +1129,7 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
   1. **The invariant is `argv → request bytes`, not "one parser".** Heterogeneity already exists and is fine — the web tier parses no argv at all, it builds requests from a form. So what must be pinned is the mapping, not the implementation: a set of **parse vectors** (argv in, request bytes out), in the same shape as the existing parity vectors, that every CLI-bearing tier must satisfy in CI. That is the check that would catch a `-name` disagreement; nothing else can.
   2. **Keep the semantics portable and the platform-specific part tiny.** `platform/cli` already splits this way by accident and should on purpose: `encode.go` (required checks, defaults, enum names, source resolution, wire encoding) is pure and TinyGo-safe; only `run.go` pulls in ffcli for subcommand routing and help. If an in-engine parser reuses the portable half, what can differ shrinks to argv *tokenizing*.
 
-  Decided at `dlc new` alongside `--tiers`, and closer in kind to the ABI-mode toggle below than to a flag. Note it probably cannot be one project-wide answer — an ESP32 wants in-engine, a browser has no argv at all — so the conformance vectors are not optional extra credit, they are what makes the per-tier choice safe.
-- [ ] **ABI-mode toggle at setup** (§5.6, Decision 25): `dlc new` derives portable byte-ABI vs rich Component-Model ABI from the `tiers` (`--wamr` forces portable); scaffold the matching capability-boundary + build targets (wasip1 core seam only when portable); a lint/check that keeps a portable-mode engine core-wasm-safe
+  Decided at `dlc new` alongside `--tiers`. Note it probably cannot be one project-wide answer — a badge wants in-engine, a browser has no argv at all — so the conformance vectors are not optional extra credit, they are what makes the per-tier choice safe.
 - [→] `dlc doctor` — **promoted to Phase B2** (CLI host): the command form of preflight, assessing per-tier readiness — [`DEVALBO-DLC-PREREQUISITES.md`](./DEVALBO-DLC-PREREQUISITES.md)
 
 - [x] **Shell lint** (`make lint-scripts`, in `ci.sh`) — the patterns that stay green locally and only fail once output grows: capturing a verify script's output into a variable (blows Linux `ARG_MAX`), piping into `grep -q` (SIGPIPE + `pipefail` reports a *successful* match as failure), and writing into the repo without a cleanup trap. Each rule is a bug that already reached CI; each is falsified in place before being trusted.

@@ -26,7 +26,7 @@ import "embed"
 //go:embed all:component-model
 var FS embed.FS
 
-// Root is the directory inside FS holding the Component-Model skeleton. A second
-// skeleton (`wamr/`, portable byte-ABI) lands here when the embedded tier can
-// verify itself — an unverifiable template is worse than none.
+// Root is the directory inside FS holding the skeleton. There is one: every
+// tier runs the same wasip2 component, so a tier adds a host, never a second
+// project shape (Decision 25).
 const Root = "component-model"

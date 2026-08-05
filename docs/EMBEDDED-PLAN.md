@@ -85,6 +85,36 @@ microcontrollers. We trade a well-trodden path for the one that preserves the ar
 **What it buys:** the WIT world, Decision 31's single entry point, and §6.6's "mirror the standard" story
 all survive on embedded. Under WAMR every one of those becomes an embedded-only exception.
 
+### D2b — A TIER is a slot; a TARGET is an artifact. They are not the same axis.
+
+`dlc build web` made them look like one thing, because web and native happen to be 1:1. Embedded breaks
+that, and the reason is worth stating plainly: **Pulley bytecode is ISA-independent.** One `pulley32`
+artifact runs on the RP2350's Cortex-M33, on its Hazard3 RISC-V cores, and on an ESP32-P4.
+
+| | granularity | how many |
+| --- | --- | --- |
+| **tier** — host slot: display, buttons, HAL, boot block | per chip | grows with every board |
+| **target** — the artifact | per pointer width | **two, and always will be** |
+
+So `dlc build <tier>` is the fine-grained verb a user types, and it resolves to one of two artifacts.
+Naming artifacts after boards would invent variants that do not exist.
+
+**A target is a triple PLUS a profile.** `pulley32` alone does not determine whether a runtime can load the
+result — `pulley32 + no-CoW + no-signals + this feature set` does, because a `.cwasm` records the settings
+of the compiler that produced it. That is `TargetSpec.NoStdProfile` in `engine/tiers.go`, and it is a field
+rather than a flag precisely because remembering it is what cost an afternoon.
+
+**Tiers are named for the CHIP, not the board** (`rp2350`, `esp32p4`): the HAL, memory map and boot block
+are chip-level, and only crystal, pins and flash size are the board's. `badge-wamr` and `esp32-wamr` are
+gone — the first is now `rp2350` on Pulley, and the second named the one ESP32 family this approach cannot
+reach (D8).
+
+**`dlc build <tier>` routes on the target, and that is the whole payoff of the split.** The verb takes a
+tier because that is what a user has (a board); it switches on the target because that is what a compiler
+needs. `esp32p4` therefore required no builder code at all — it is a row in `TierLandscape` whose `Target`
+says `pulley32`, and it produces the same `build/engine.pulley32.cwasm` as `rp2350`. Had `dlc build` matched
+on tier names, every board would have been a new `case` emitting bytes identical to an existing one.
+
 ### D3 — The badge host is Rust (`no_std`), not C — and the RUNTIME IS INHERITED, not per-app
 
 Decision 18 assumed C/ESP-IDF. On RP2350 the mature paths are `rp-hal`/Embassy in Rust or the pico-sdk in
@@ -388,8 +418,7 @@ result over UART.
 3. **Link size.** Wasmtime + Pulley + component-model as `.text`, on top of the 2.21 MB payload.
 
 *Falsify:* it does not fit, or does not link. Then the fallbacks are, in order: trim the world and
-re-measure; WAMR + a wasip1 build (Decision 18's original plan, and the artifact already compiles —
-1.77 MB); or native TinyGo, which **is measured**: the tictactoe engine builds for `pico2` as a **263 KB**
+re-measure; then native TinyGo, which **is measured**: the tictactoe engine builds for `pico2` as a **263 KB**
 `.uf2` today, blocked only by a build-tag bug (§4).
 
 **Do not skip to Phase 2 because Phase 0 is boring.** Every later phase assumes the answer.
@@ -647,5 +676,6 @@ was never achievable" finding gets its correction — it was true of WAMR and is
 3. [ ] The engine has not changed to make any of it work.
 4. [ ] Pulley is a third column in the parity check, **watched going red**.
 5. [ ] Three slots render the same state and agree — CLI ASCII, browser DOM, badge TFT.
-6. [ ] Decision 18 says what is actually true, including why WAMR was dropped.
+6. [x] Decision 18 says what is actually true, including why WAMR was dropped — done 2026-08-04, along with
+   Decision 25 (the ABI toggle WAMR required) and the `templates/wamr/` skeleton family it implied.
 7. [ ] The README's embedded row is ✅ with a check behind it, and states the AOT caveat rather than hiding it.

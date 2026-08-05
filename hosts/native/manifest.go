@@ -47,8 +47,14 @@ type Tier struct {
 	Root string
 
 	// web only
-	Assets    string // jco output; must be inside Root
-	Component string // the wasm component (not a web asset)
+	Assets string // jco output; must be inside Root
+
+	Component string // the wasm component (not a web asset) — every wasm tier's input
+	// embedded only: where the AOT'd Pulley bytecode lands. Defaults to
+	// build/engine.<target>.cwasm, which names the TARGET rather than the tier
+	// because two boards sharing a target share the file (`rp2350` and `esp32p4`
+	// both consume build/engine.pulley32.cwasm — one build, not two).
+	Cwasm string
 }
 
 const manifestFile = "dlc.toml"
@@ -181,8 +187,10 @@ func assign(m *Manifest, section, key, value string) error {
 			tier.Assets = unquote(value)
 		case "component":
 			tier.Component = unquote(value)
+		case "cwasm":
+			tier.Cwasm = unquote(value)
 		default:
-			return unknownKey(section, key, "capabilities", "root", "assets", "component")
+			return unknownKey(section, key, "capabilities", "root", "assets", "component", "cwasm")
 		}
 		m.Tiers[name] = tier
 	}

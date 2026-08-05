@@ -239,7 +239,7 @@ assumption. Keep each spike's artifact under `spikes/<name>/` so it stays runnab
 
 **B1 gate (must green):** at least one **lean** parser works under TinyGo — stdlib `flag` (default tag) and/or `ff/v3/ffcli` (`-tags cliffcli`); **hand-rolled** (`-tags clihand`) if both fail.
 
-**Spike complete (Decision 22):** full bake-off table filled for every candidate tag — `flag` · `cliffcli` · `clisub` · `clicobra` · `clikong` · `cligoarg` · `clihand` — each: compiles under wasip2? matrix green? wasm size? Then record **two defaults**: portable/WAMR → leanest green reflection-free; rich/non-WAMR → most ergonomic that still compiles under TinyGo.
+**Spike complete (Decision 22):** full bake-off table filled for every candidate tag — `flag` · `cliffcli` · `clisub` · `clicobra` · `clikong` · `cligoarg` · `clihand` — each: compiles under wasip2? matrix green? wasm size? Then record the default: the most ergonomic that still compiles under TinyGo.
 
 - **Steps:**
   1. Enrich the scaffold so `execute-cli` dispatches at least:

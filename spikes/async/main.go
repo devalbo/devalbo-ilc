@@ -4,7 +4,7 @@
 // implement delay with setTimeout/Promise. We use only stock TinyGo + jco
 // (--async-mode jspi is jco's ecosystem feature, not an ILC shim).
 //
-// World: devalbo:ilc/async-engine (see wit/ilc.wit). WAMR is out of scope.
+// World: devalbo:ilc/async-engine (see wit/ilc.wit).
 package main
 
 import (

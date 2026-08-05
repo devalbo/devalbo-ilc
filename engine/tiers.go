@@ -56,11 +56,55 @@ const (
 
 	TierDesktop = "desktop" // Wails webview over the native host binding
 
-	TierBadgeNative = "badge-native" // RP2350 (Tufty): TinyGo linked directly, Go host
-	TierBadgeWAMR   = "badge-wamr"   // RP2350 (Tufty): wasip1 core wasm under WAMR, C++ host
-	TierKeebNative  = "keeb-native"  // RP2040 (KB2040): TinyGo linked directly, no display
-	TierESP32WAMR   = "esp32-wamr"   // ESP32-S3: wasip1 core wasm under WAMR, ESP-IDF host
+	// Embedded tiers are named for the CHIP, not the board: the HAL, the boot
+	// block and the memory map are chip-level, and only a handful of values
+	// (crystal, pins, flash size) are the board's.
+	TierRP2350       = "rp2350"        // RP2350 (Tufty 2350): pulley32 under Wasmtime no_std, Rust host
+	TierRP2350TinyGo = "rp2350-tinygo" // RP2350: TinyGo linked directly — no wasm, the measured fallback
+	TierRP2040TinyGo = "rp2040-tinygo" // RP2040: TinyGo only; 2 MB flash cannot hold a wasm runtime + payload
+	TierESP32P4      = "esp32p4"       // ESP32-P4 (RISC-V + PSRAM): pulley32, the same artifact as rp2350
 )
+
+// Build targets — what an ARTIFACT is compiled for.
+//
+// NOT the same axis as a tier, and conflating them is the mistake `dlc build
+// web` almost taught us. A tier is a slot: host code, a display, buttons. A
+// target is an artifact. Web and native happen to be 1:1, so the difference
+// never showed — but embedded breaks it, because **Pulley bytecode is
+// ISA-independent**. One `pulley32` artifact runs on the RP2350's Cortex-M33,
+// on its Hazard3 RISC-V cores, and on an ESP32-P4. Many tiers, one artifact.
+//
+// So there are exactly two embedded targets and there always will be: pointer
+// width is the only thing the artifact can differ on.
+const (
+	TargetNative   = "native"   // linked in-process; there is no artifact (Decision 26)
+	TargetWasip2   = "wasip2"   // the component the browser runs, via jco
+	TargetPulley32 = "pulley32" // every 32-bit embedded chip, and the QEMU harness
+	TargetPulley64 = "pulley64" // 64-bit dev machines: the laptop harness and the parity column
+)
+
+// TargetSpec is what `dlc build` needs to produce an artifact.
+//
+// The PROFILE is part of the target, not a flag someone remembers. A `.cwasm`
+// records the compiler's settings, so "pulley32" alone does not determine
+// whether a runtime can load it — `pulley32 + no-CoW + no-signals` does. That
+// distinction cost an afternoon of "compilation settings are not compatible
+// with the native host" before it was written down here.
+type TargetSpec struct {
+	Name string
+	What string
+	// NoStdProfile marks targets whose runtime has no virtual memory and no host
+	// signal handlers, so the compiler must be told the same.
+	NoStdProfile bool
+}
+
+// TargetLandscape is every artifact shape this project produces.
+var TargetLandscape = []TargetSpec{
+	{Name: TargetNative, What: "no artifact — the engine is a linked Go package"},
+	{Name: TargetWasip2, What: "wasip2 component; the web tier's artifact"},
+	{Name: TargetPulley32, What: "Pulley bytecode for 32-bit runtimes (every embedded chip so far)", NoStdProfile: true},
+	{Name: TargetPulley64, What: "Pulley bytecode for 64-bit runtimes (dev harness, parity column)", NoStdProfile: true},
+}
 
 // TierStatus separates "you can scaffold this" from "we have named it".
 type TierStatus int
@@ -89,6 +133,10 @@ type TierSpec struct {
 	// every other tier, which is why `tierSections` defaults rather than switches.
 	Assets    string
 	Component string
+	// Target is the ARTIFACT this tier consumes. Several tiers share one — every
+	// 32-bit embedded chip runs the same `pulley32` bytecode — which is why this
+	// is a field rather than a rename of Name.
+	Target string
 }
 
 // TierLandscape is the whole list, in the canonical order tiers are written in
@@ -101,12 +149,14 @@ var TierLandscape = []TierSpec{
 	{
 		Name:    TierNative,
 		Status:  TierAvailable,
+		Target:  TargetNative,
 		What:    "terminal CLI; the engine is linked in-process (Decision 26)",
 		Comment: "This tier's HOST code — native input in, a proto request out.",
 	},
 	{
 		Name:      TierWeb,
 		Status:    TierAvailable,
+		Target:    TargetWasip2,
 		What:      "browser; the engine is a wasip2 component under jco",
 		Comment:   "This tier's HOST code, and where `dlc build web` writes into it.\n# The assets MUST sit inside the slot: jco's loader fetches the core\n# .wasm at run time, and a dev server will not serve a path outside\n# its root.",
 		Assets:    "hosts/web/src/wasm",
@@ -115,27 +165,32 @@ var TierLandscape = []TierSpec{
 	{
 		Name:   TierDesktop,
 		Status: TierPlanned,
+		Target: TargetNative,
 		What:   "Wails webview over the native binding (§5.4, §10 of the Go plan)",
 	},
 	{
-		Name:   TierBadgeNative,
+		Name:   TierRP2350,
 		Status: TierPlanned,
-		What:   "RP2350 Tufty badge; TinyGo linked directly, Go host, 320x240 TFT",
+		Target: TargetPulley32,
+		What:   "RP2350 (Tufty 2350); the SAME component the browser runs, AOT-compiled to Pulley (docs/EMBEDDED-PLAN.md)",
 	},
 	{
-		Name:   TierBadgeWAMR,
+		Name:   TierESP32P4,
 		Status: TierPlanned,
-		What:   "RP2350 Tufty badge; wasip1 core wasm under WAMR, C++ host",
+		Target: TargetPulley32,
+		What:   "ESP32-P4 (RISC-V, PSRAM); the same pulley32 artifact as rp2350 — Xtensa parts are out of scope (D8)",
 	},
 	{
-		Name:   TierKeebNative,
+		Name:   TierRP2350TinyGo,
 		Status: TierPlanned,
-		What:   "RP2040 KB2040; TinyGo linked directly, no display, serial or key matrix",
+		Target: TargetNative,
+		What:   "RP2350 without a wasm runtime; TinyGo compiles the engine natively — measured at a 263 KB .uf2, the fallback if Pulley will not fit",
 	},
 	{
-		Name:   TierESP32WAMR,
+		Name:   TierRP2040TinyGo,
 		Status: TierPlanned,
-		What:   "ESP32-S3; wasip1 core wasm under WAMR, ESP-IDF host",
+		Target: TargetNative,
+		What:   "RP2040; TinyGo only — 2 MB of flash cannot hold a wasm runtime plus a ~1 MB payload",
 	},
 }
 
@@ -147,6 +202,22 @@ func tierSpec(name string) (TierSpec, bool) {
 		}
 	}
 	return TierSpec{}, false
+}
+
+// TierTarget reports which artifact a tier consumes — the mapping `dlc build`
+// routes on. Exported because the builder is HOST-side (Decision 30) and the
+// tier landscape is engine-side; without this the host would keep its own copy
+// of the table and the two would drift.
+//
+// MANY TIERS SHARE ONE TARGET, which is the whole point: `rp2350` and `esp32p4`
+// both answer `pulley32`, because Pulley bytecode is ISA-independent and one
+// artifact serves both boards.
+func TierTarget(tier string) (string, bool) {
+	spec, ok := tierSpec(tier)
+	if !ok {
+		return "", false
+	}
+	return spec.Target, true
 }
 
 // slotRoot is where a tier's host code lives — `hosts/<tier>` unless the row

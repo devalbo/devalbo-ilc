@@ -97,14 +97,27 @@ badge-uf2: ## build the badge bring-up firmware and convert it to a flashable .u
 
 
 .PHONY: embedded-cwasm
-embedded-cwasm: ## AOT-compile a component for the badge (pulley32) — the artifact you flash
-	# The badge has no compiler: Wasmtime `no_std` ships no Cranelift, so the
-	# component is compiled AHEAD OF TIME here and the .cwasm is what gets
-	# flashed. pulley32 because the RP2350 is 32-bit — Pulley bytecode is
-	# pointer-width specific and a host runs only its own width.
-	@test -n "$(COMPONENT_IN)" || { echo "usage: make embedded-cwasm COMPONENT_IN=<file.wasm> [CWASM_OUT=<file.cwasm>]"; exit 2; }
-	wasmtime compile --target pulley32 -o $(or $(CWASM_OUT),build/engine.pulley32.cwasm) $(COMPONENT_IN)
-	@ls -l $(or $(CWASM_OUT),build/engine.pulley32.cwasm) | awk '{print "  pulley32 artifact: "$$5" bytes"}'
+embedded-cwasm: ## AOT a loose component — the escape hatch under `dlc build <tier>`
+	#
+	# PREFER `dlc build rp2350`, which does tinygo + this in one verb and takes the
+	# output path from dlc.toml. This target stays for components that belong to no
+	# project — the hello example, a hand-built probe — where there is no manifest
+	# to read a tier out of.
+	# `dlc-precompile`, NOT `wasmtime compile`. A .cwasm records the feature set
+	# of the compiler that produced it, so the stock CLI's artifacts are
+	# unloadable by our default-features=false runtime — five features' worth of
+	# mismatch before the cause was clear. The crate is built like the runtime,
+	# which makes the mismatch impossible rather than merely fixed.
+	#
+	# TARGET is pulley32/pulley64 — pointer width, and nothing else. Pulley
+	# bytecode is ISA-independent, so one pulley32 artifact serves the RP2350's
+	# Cortex-M33, its Hazard3 RISC-V cores, and an ESP32-P4 alike.
+	@test -n "$(COMPONENT_IN)" || { echo "usage: make embedded-cwasm COMPONENT_IN=<file.wasm> [CWASM_OUT=<f>] [TARGET=pulley32]"; exit 2; }
+	cd dlc-platform/embedded/precompile && cargo run -q -- \
+		$(PWD)/$(COMPONENT_IN) \
+		$(PWD)/$(or $(CWASM_OUT),build/engine.pulley32.cwasm) \
+		$(or $(TARGET),pulley32)
+
 
 .PHONY: verify-npm-package
 verify-npm-package: ## @devalbo/dlc-web ships what its `exports` advertise
@@ -177,7 +190,7 @@ test-b0: ## Phase B0 repo-integrity checks (no toolchain needed)
 
 
 .PHONY: spike-async
-spike-async: gen ## Spike 5 (T-B1.5): async probe Rich/CM + Portable/WAMR-shaped
+spike-async: gen ## Spike 5 (T-B1.5): async probe — jco JSPI vs sync transpile
 	@./scripts/spike-async.sh
 
 .PHONY: spike-sqlite-sync

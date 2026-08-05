@@ -571,7 +571,8 @@ No new branch was needed for any of it: the behaviour falls out of `Fill`-then-`
 - **Not the Display capability.** §6.4's draw-command list and retained widget tree are untouched; this adds
   a third path beside them and builds neither of the other two. Display is now **optional** and waits for an
   app that wants app-side rendering across tiers (D4) — so "not now" here is a decision, not a deferral.
-- **No embedded host.** The ESP32-S3 slot is the obvious beneficiary and there is still no WAMR spike.
+- **No embedded host.** The RP2350 slot is the obvious beneficiary; the runtime now exists
+  ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)) but no tier slot is wired to it.
 - **No input capability.** Slots render; symmetric input stays §14 risk 5.
 - **No cross-app widget library.** Two apps rendering similar things duplicate; sharing that is a later
   question and a worse one to answer early.

@@ -538,7 +538,7 @@ func TestLandscapeAndTemplateAgree(t *testing.T) {
 // typo.
 func TestPlannedTierIsRefusedByName(t *testing.T) {
 	for _, tc := range []struct{ tier, wants string }{
-		{engine.TierBadgeNative, "declared but has no template slot"},
+		{engine.TierRP2350, "declared but has no template slot"},
 		{"hologram", "is not a tier"},
 	} {
 		in, err := (&dlcv1.NewRequest{Name: "t-" + tc.tier, Tiers: []string{"native", tc.tier}}).MarshalVT()

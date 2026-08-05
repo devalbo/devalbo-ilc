@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Spike 5 — dual-track async probe (Rich/CM + Portable/WAMR-shaped).
+# Spike 5 — async probe: does stock jco reach a Promise host import?
 # See docs/WASI-UPGRADES.md and spikes/async/README.md.
 #
 # Rich/JSPI needs Node ≥24 with --experimental-wasm-jspi (devbox pins nodejs@24).
@@ -32,17 +32,9 @@ echo "======== Spike 5 / Rich/CM (jco + Promise host) ========"
 ) || fail=1
 
 echo
-echo "======== Spike 5 / Portable/WAMR-shaped (wasip1 + blocking host) ========"
-(
-  set -e
-  tinygo build -target=wasip1 -o "$SPIKE/engine.core.wasm" "$SPIKE/portable"
-  go run "$SPIKE/cmd/portable-host" "$SPIKE/engine.core.wasm" 50
-) || fail=1
-
-echo
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then
-  echo "→ Spike 5 probes finished (Rich JSPI should be GREEN on Node ≥24; Portable GREEN)"
+  echo "→ Spike 5 finished (JSPI should be GREEN on Node ≥24)"
   exit 0
 fi
 echo "→ Spike 5 infrastructure failure"

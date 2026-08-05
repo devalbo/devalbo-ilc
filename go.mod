@@ -4,7 +4,6 @@ go 1.23.0
 
 require (
 	github.com/aperturerobotics/protobuf-go-lite v0.15.0
-	github.com/tetratelabs/wazero v1.9.0
 	go.bytecodealliance.org/cm v0.3.0
 )
 

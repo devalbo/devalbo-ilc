@@ -56,7 +56,7 @@ draft proposed is unnecessary and has been dropped.
 `method-ids.lock`). The host calls it like any other command.
 
 **Why not a `describe()` import per capability:** Decision 31 consolidated to one engine entry point, and a
-per-capability import reopens a second — one that every WAMR-portable tier would have to mirror. A manifest
+per-capability import reopens a second — one that every tier would have to mirror. A manifest
 is bytes on a boundary already proven to cross every tier, and `buf breaking` versions it like everything
 else.
 
@@ -100,7 +100,7 @@ reasoning from stale facts, and nothing detects it. Carry a revision number so s
 *visible*, and emit `ilc.environment-changed` so a slot re-reads instead of polling.
 
 **Why push rather than a `describe()` the engine calls.** A query is an *import*, and imports are the
-expensive direction: WIT has no optional ones, so every tier — including WAMR-portable embedded targets
+expensive direction: WIT has no optional ones, so every tier — including embedded targets
 that do not exist yet — must supply it or the component will not link. Worse, a query returns a value and
 is therefore synchronous, while probing OPFS is inherently async and jco only supports async imports under
 `--async-imports` (refused, Decision 22). A synchronous `describe()` in the worker could only answer from a

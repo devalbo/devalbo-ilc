@@ -899,9 +899,9 @@ Target hardware, either of:
 - **[KB2040](https://www.adafruit.com/product/5302)** — RP2040, **no screen**: it renders over USB serial into
   a terminal on your laptop, with input typed or from a 3×3 key matrix.
 
-Those are **three tiers**, not two boards: `badge-native` (TinyGo linked directly), `badge-wamr` (the same
-board running the engine as core wasm under WAMR), and `keeb-native`. A tier is a host binding, so one board
-running two runtimes is two tiers.
+Those are **three tiers**, not two boards: `rp2350-tinygo` (TinyGo linked directly), `rp2350` (the same
+board running the *same component the browser runs*, under Wasmtime's Pulley interpreter), and
+`rp2040-tinygo`. A tier is a host binding, so one board running two runtimes is two tiers.
 
 **What is missing:**
 
@@ -913,11 +913,11 @@ running two runtimes is two tiers.
    so explicitly"* — and there is no way to say so; it then reports the filesystem present unconditionally. A
    board with no WASI has nothing to grant. (The browser host does not use `Boot` — it builds its manifest by
    hand — which is why the absent-filesystem path works there and this gap went unnoticed.)
-3. **No embedded skeleton, and no wasip1 core build.** `dlc new` will scaffold any tier the template has a
-   `hosts/<tier>/` directory for, and there is no embedded one — deliberately, because its shape depends on
-   whether WAMR ports to RP2350, and scaffolding an unverifiable stub would teach the wrong thing to every
-   project made afterwards. The WAMR tiers additionally need `engine.core.wasm`, which no build target
-   produces.
+3. **No embedded skeleton.** `dlc new` will scaffold any tier the template has a `hosts/<tier>/` directory
+   for, and there is no embedded one — deliberately, because scaffolding an unverifiable stub would teach the
+   wrong thing to every project made afterwards. `rp2350` needs no second guest build (it runs the same
+   component), but the badge cannot instantiate it until the PSRAM allocator lands — see
+   [`EMBEDDED-PLAN.md`](../EMBEDDED-PLAN.md).
 
 **Nothing in `engine/` changes for any of this.** Your rules are done. What a badge needs is a *host*: a
 display driver, a button reader, and a renderer that reads the same `outcome` / `turn` / `winning_line` your

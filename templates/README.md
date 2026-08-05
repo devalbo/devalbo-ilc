@@ -55,12 +55,11 @@ templates stay logic-free and the derivation stays testable.
 
 ## Layout
 
-(§16.6, Decision 25) — directory names = **substrate**; track prose = Rich/CM vs Portable/WAMR:
+(§16.6, Decision 25) — directory names = **substrate**:
 
 | Path | Kind | Role |
 | --- | --- | --- |
 | `templates/component-model/` | **in-tree first** (submodule later) | Rich/CM skeleton. **Terminal path works today; the web host is not written yet.** |
-| `templates/wamr/` | 📋 not created | Portable/WAMR — only after embedded verify exists |
 | `templates/fragments/` | 📋 not created | `--caps` / `--tiers` / `--ui` / `--storage` overlays |
 
 **Bootstrap sequencing (locked):**

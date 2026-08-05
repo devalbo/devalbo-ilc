@@ -12,7 +12,6 @@
 | --- | --- | --- | --- | --- |
 | **F-R-sync** | Rich / CM | TinyGo wasip2 `async-engine` → `engine.component.wasm`; `execute-cli(["wait","50"])` → `host-delay.delay(50)` | `host-delay.js` returns Promise → `"ok:50"` after `setTimeout` | sync `jco transpile` + Node `executeCli(["wait","50"])` *(negative control)* |
 | **F-R-jspi** | Rich / CM | same guest wasm | same host | `jco transpile --async-mode jspi --async-imports '…#delay' --async-exports 'execute-cli'` + `node --experimental-wasm-jspi` |
-| **F-P** | Portable / WAMR-shaped | TinyGo wasip1 `portable/` → `engine.core.wasm`; `run_wait` → `env.host_delay` | wazero: `host_delay` = `Sleep` then return `ms` | `go run ./cmd/portable-host engine.core.wasm 50` |
 
 ---
 

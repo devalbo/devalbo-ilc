@@ -7,8 +7,8 @@
 // later capability inherits (display, index, network), so it is deliberately
 // the same shape as `execute`: flat scalars + bytes.
 //
-// Flat because a rich WIT record or variant would require the Component Model
-// and strand the embedded tier — WAMR speaks core wasm + WASI p1 only (§5.3).
+// Flat because a rich WIT record or variant would be a second, differently
+// shaped way across a boundary Decision 31 says has exactly one shape.
 // `string + list<u8>` lowers to pointer/length pairs, which `//go:wasmimport`
 // can express, so this declaration can survive to embedded. (UNVERIFIED: there
 // is no embedded tier to run it yet.)

@@ -121,7 +121,7 @@ func checkScaffoldOptions(req *dlcv1.NewRequest) error {
 			continue
 		}
 		// A DECLARED tier gets a different error from an unknown one, because the
-		// two are different mistakes. "badge-native has no skeleton yet" tells you
+		// two are different mistakes. "rp2350 has no skeleton yet" tells you
 		// the name was right and the work is pending; "hologram is not a tier"
 		// tells you to check your spelling. Collapsing them into one message
 		// makes the roadmap look like a typo.

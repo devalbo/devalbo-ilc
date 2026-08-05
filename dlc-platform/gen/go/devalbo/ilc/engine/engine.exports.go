@@ -16,8 +16,7 @@ var Exports struct {
 	//
 	// `method` is the permanent method_id from commands.proto's DlcService; `request`
 	// is the proto-encoded request message, flat (no envelope — Decision 28/31). A
-	// scalar + bytes is WAMR-portable: only rich WIT records/variants would require
-	// the Component Model, so the same boundary shape survives on the embedded tier.
+	// scalar + bytes is one shape, versioned by `buf breaking` rather than by WIT.
 	//
 	//	execute: func(method: u32, request: list<u8>) -> command-result
 	Execute func(method uint32, request cm.List[uint8]) (result CommandResult)

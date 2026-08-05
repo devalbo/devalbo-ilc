@@ -1,7 +1,7 @@
 //! Running an ILC component under Wasmtime's Pulley interpreter.
 //!
 //! WHY PULLEY. The badge (RP2350) has no JIT and no OS, so Cranelift is out.
-//! Pulley is Wasmtime's portable bytecode interpreter, and — unlike WAMR — it
+//! Pulley is Wasmtime's portable bytecode interpreter, and it
 //! supports the Component Model, which is what lets the embedded tier run the
 //! same artifact as the browser instead of a separate wasip1 build.
 //!

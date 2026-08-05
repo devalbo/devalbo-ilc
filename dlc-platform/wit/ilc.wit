@@ -22,8 +22,8 @@ interface types {
 // later capability inherits (display, index, network), so it is deliberately
 // the same shape as `execute`: flat scalars + bytes.
 //
-// Flat because a rich WIT record or variant would require the Component Model
-// and strand the embedded tier — WAMR speaks core wasm + WASI p1 only (§5.3).
+// Flat because a rich WIT record or variant would be a second, differently
+// shaped way across a boundary Decision 31 says has exactly one shape.
 // `string + list<u8>` lowers to pointer/length pairs, which `//go:wasmimport`
 // can express, so this declaration can survive to embedded. (UNVERIFIED: there
 // is no embedded tier to run it yet.)
@@ -54,8 +54,7 @@ world engine {
   //
   // `method` is the permanent method_id from commands.proto's DlcService; `request`
   // is the proto-encoded request message, flat (no envelope — Decision 28/31). A
-  // scalar + bytes is WAMR-portable: only rich WIT records/variants would require
-  // the Component Model, so the same boundary shape survives on the embedded tier.
+  // scalar + bytes is one shape, versioned by `buf breaking` rather than by WIT.
   export execute: func(method: u32, request: list<u8>) -> command-result;
 }
 

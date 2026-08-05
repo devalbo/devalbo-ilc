@@ -91,7 +91,7 @@ make dev-web                               # ✅ dlc in the browser (React UI, O
 | **CLI** | engine linked in-process | Go | ✅ `dlc` runs; scaffolded apps build + run |
 | **Web** | jco | TypeScript | ✅ `dlc` runs in the browser (scaffold → OPFS → survives reload) **and so do scaffolded apps**, each with its own shipped browser test |
 | **Desktop** | — | Go (Wails) | 📋 |
-| **Embedded** (RP2350 badge; ESP32 **RISC-V only**) | Wasmtime + **Pulley** (`no_std` interpreter) | Rust | 📋 [`EMBEDDED-PLAN.md`](docs/EMBEDDED-PLAN.md) — reverses the WAMR choice, because Pulley runs *components* and WAMR cannot |
+| **Embedded** (RP2350 badge; ESP32 **RISC-V only**) | Wasmtime + **Pulley** (`no_std` interpreter) | Rust | 📋 [`EMBEDDED-PLAN.md`](docs/EMBEDDED-PLAN.md) — the *same component* the browser runs, AOT-compiled |
 
 📋 A capability a tier lacks returns `unavailable` and the engine degrades gracefully. The graceful-
 degradation path is designed but unexercised: only Console + Filesystem exist, and both tiers have them.
