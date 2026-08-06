@@ -5,8 +5,14 @@
 # A regression check that cannot fail is worse than no check: it reports green
 # forever and nobody notices. This is the falsification test for
 # verify-parity.sh — it injects a known native↔wasm divergence, asserts the
-# parity check reports a MISMATCH on **both** boundaries, then removes the
-# injection.
+# parity check reports a MISMATCH on every column that should see it, then
+# removes the injection.
+#
+# EVERY COLUMN, checked by name. Both probes perturb the COMPONENT, and since
+# Pulley runs that same component all three columns should react. A check that
+# only grepped for "PARITY MISMATCH" would stay green if the Pulley column
+# silently stopped comparing anything — which is exactly how a third column
+# rots.
 #
 # The divergence is a `//go:build tinygo` file, so it changes engine behavior in
 # the wasm build ONLY. That is precisely the failure class Decision 26 accepts
@@ -149,6 +155,15 @@ run_scenario() {
 	[ "$status" -ne 0 ]; check "parity check exited non-zero" $?
 	grep -q "PARITY MISMATCH" "$OUT"; check "reported a PARITY MISMATCH" $?
 	grep -q "wasm-parity \[method\]" "$OUT"; check "ran the method boundary" $?
+
+	# THE PULLEY COLUMN SPECIFICALLY, not just "some column went red". Both probes
+	# are `//go:build tinygo` files, so they change the COMPONENT — and Pulley runs
+	# that same component, which means a generic "PARITY MISMATCH" above could be
+	# entirely the jco column while Pulley silently agreed with nobody. Asserting
+	# the pulley diff by name is what makes the third column load-bearing rather
+	# than decorative; it is the same argument the events dimension makes below.
+	grep -q "wasm-parity \[method pulley\]" "$OUT"; check "ran the pulley interpreter" $?
+	grep -q "MISMATCH (< native  > pulley)" "$OUT"; check "the pulley column caught it too" $?
 
 	case "$probe" in
 	templates)

@@ -879,6 +879,11 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
       target exists"; nothing needs one, because embedded runs the same component.*
       **Still hand-run:** `cargo` + `.uf2` for the firmware itself, and the crate is found via
       `DLC_PRECOMPILE` outside this repo because a Rust crate cannot be embedded in the Go binary.
+- [x] **Pulley joined the parity check** — done 2026-08-05, `dlc-platform/embedded/parity/`. A std Rust
+      runner with stock `wasmtime-wasi`, deliberately NOT the `no_std` host: what needs testing is the
+      INTERPRETER's execution of our component, and sharing the hand-written host would test the harness
+      instead of the guest. It runs the plain `.wasm` with `Config::target("pulley64")` rather than a
+      `.cwasm`, so an AOT failure and an interpreter failure stay distinguishable.
 - [ ] **The PSRAM allocator** — the measured blocker. ~890 KB of `.cwasm` against 520 KB of SRAM, so the badge
       cannot instantiate until PSRAM is mapped and an allocator sits on it. Everything else on the board is
       proven ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)).

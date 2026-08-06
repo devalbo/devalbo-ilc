@@ -13,7 +13,14 @@
 # there is no second boundary to compare. The native side is cmd/parity-runner,
 # which dispatches the same way `dlc` does.
 #
-# Run inside `devbox shell` (needs go, tinygo, node/jco).
+# THREE COLUMNS, not two. Native and jco are both compiled-and-JITted; the badge
+# runs an INTERPRETER, and until Pulley joined this check nothing outside the
+# board exercised one. A Pulley-only divergence would otherwise surface on
+# hardware over a UART with no way to bisect it. The Pulley column runs the same
+# component through the same interpreter the badge uses (pulley64 here, pulley32
+# there — same bytecode semantics, different pointer width).
+#
+# Run inside `devbox shell` (needs go, tinygo, node/jco, cargo).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Z=$'\033[0m'; else G=''; R=''; Z=''; fi
@@ -65,6 +72,24 @@ compare() {
 	return 1
 }
 
+# compare_pulley <label> <native stream> <pulley stream> <vector count>
+#
+# Diffed against NATIVE rather than against the jco column, deliberately. Native
+# is the reference every other column is already measured against, so a Pulley
+# failure reads as "Pulley disagrees with the engine" rather than as "two wasm
+# runtimes disagree", which would leave open which one was wrong.
+compare_pulley() {
+	local label="$1" native="$2" pulley="$3" n="$4"
+	echo "wasm-parity [$label]: $n golden vectors (native vs pulley64 interpreter)"
+	if [ "$native" = "$pulley" ]; then
+		printf "  ${G}✓${Z} native == pulley\n"
+		return 0
+	fi
+	printf "  ${R}✗${Z} PARITY MISMATCH (< native  > pulley):\n"
+	diff <(printf '%s\n' "$native") <(printf '%s\n' "$pulley") | sed 's/^/  /'
+	return 1
+}
+
 # compare_trees <label> <native root> <component root>
 #
 # The golden FS snapshot (§11): commands like `new` write real files, so the
@@ -90,8 +115,30 @@ compare "method" "$(native_method)" "$(component_stream method "$METHOD_VEC")" "
 # The streams above ran first, so the roots now hold whatever each engine wrote.
 compare_trees "method fs" "$BIN/root-native-method" "$BIN/root-component-method" || status=1
 
+# ---- the Pulley column (EMBEDDED-PLAN D2/DoD #4) -------------------------
+#
+# The component is already built above — the SAME file, not a rebuild. Rebuilding
+# for this column would be the one thing that could make it pass while the badge
+# fails.
+if ! cargo build --quiet --manifest-path dlc-platform/embedded/parity/Cargo.toml; then
+	printf "  ${R}✗${Z} could not build the pulley parity runner\n"
+	status=1
+else
+	pulley_root="$(fresh_root pulley-method)"
+	pulley_out="$(./dlc-platform/embedded/parity/target/debug/dlc-parity-pulley \
+		"$REPO/engine.component.wasm" "$REPO/$METHOD_VEC" "$pulley_root" 2>"$BIN/pulley.err")"
+	if [ -z "$pulley_out" ]; then
+		printf "  ${R}✗${Z} the pulley runner produced nothing:\n"
+		sed 's/^/  /' "$BIN/pulley.err"
+		status=1
+	else
+		compare_pulley "method pulley" "$(native_method)" "$pulley_out" "$(count "$METHOD_VEC")" || status=1
+		compare_trees "method fs pulley" "$BIN/root-native-method" "$pulley_root" || status=1
+	fi
+fi
+
 if [ "$status" -eq 0 ]; then
-	printf "${G}✓${Z} Decision 26 parity holds — same results AND same filesystem, native and wasm\n"
+	printf "${G}✓${Z} Decision 26 parity holds — same results AND same filesystem, across native, wasip2 and pulley\n"
 else
 	printf "${R}✗${Z} parity broken — see the diff above\n"
 fi

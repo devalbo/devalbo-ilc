@@ -74,6 +74,26 @@ type BootOptions struct {
 	// Sink receives emitted events, or nil on a tier where nothing listens —
 	// which an app must not be able to detect (Decision 33).
 	Sink EventSink
+
+	// NoFilesystem declares that this host has NOTHING TO GRANT.
+	//
+	// Not a convenience. Root's error message has always ended "…or say so
+	// explicitly", and until now there was no way to say so — so a host with no
+	// storage could not boot at all, and one that lied with a fake root got a
+	// manifest claiming a filesystem was PRESENT. The keyboard tier (RP2040, no
+	// flash filesystem) is the first host for which that is simply the truth.
+	//
+	// A SEPARATE FIELD RATHER THAN AN EMPTY ROOT, because those are different
+	// claims and only one of them is safe to infer. An empty Root is far more
+	// often a host that forgot to set it than a host that has no storage, and
+	// reading the first as the second would turn a bug into a silently
+	// degraded app — every filesystem verb quietly missing, which looks like a
+	// platform fault from inside the app.
+	//
+	// It contradicts Root and FilesystemKind, and contradictions are refused
+	// below rather than resolved by precedence: whichever way a precedence rule
+	// fell, half the callers who hit it would be surprised.
+	NoFilesystem bool
 }
 
 // Boot runs the startup sequence in the one order that works.
@@ -88,15 +108,27 @@ type BootOptions struct {
 // id 2 at all, and parity would be comparing two different startup sequences —
 // which is precisely the divergence it exists to catch.
 func Boot(opts BootOptions) error {
-	if opts.Root == "" {
-		return errors.New("boot: no filesystem root — grant one (see platform.AppRoot) or say so explicitly")
-	}
-	if opts.FilesystemKind == ilcv1.FilesystemKind_FILESYSTEM_KIND_UNSPECIFIED {
-		return errors.New("boot: filesystem kind unset — the host is the only party that knows what its root is")
-	}
+	if opts.NoFilesystem {
+		// Refuse the contradiction instead of picking a winner. A host that sets
+		// both has two beliefs about itself and needs to lose one; guessing which
+		// would hide the confusion at exactly the moment it is cheapest to see.
+		if opts.Root != "" {
+			return errors.New("boot: NoFilesystem is set but a root was granted — a host has storage or it does not")
+		}
+		if opts.FilesystemKind != ilcv1.FilesystemKind_FILESYSTEM_KIND_UNSPECIFIED {
+			return errors.New("boot: NoFilesystem is set but a filesystem kind was given — there is nothing for it to describe")
+		}
+	} else {
+		if opts.Root == "" {
+			return errors.New("boot: no filesystem root — grant one (see platform.AppRoot), or set NoFilesystem if this host has no storage")
+		}
+		if opts.FilesystemKind == ilcv1.FilesystemKind_FILESYSTEM_KIND_UNSPECIFIED {
+			return errors.New("boot: filesystem kind unset — the host is the only party that knows what its root is")
+		}
 
-	if err := SetRoot(opts.Root); err != nil {
-		return err
+		if err := SetRoot(opts.Root); err != nil {
+			return err
+		}
 	}
 	// Before the manifest: SetEnvironment may emit, and a sink installed
 	// afterwards would miss the first event with nothing to indicate it had.
@@ -104,15 +136,23 @@ func Boot(opts BootOptions) error {
 		SetEventSink(opts.Sink)
 	}
 
+	// ABSENT carries no kind, no ephemerality and no isolation — they describe a
+	// root, and there is no root to describe. Sending the zero values alongside
+	// PRESENT would be a claim; sending them alongside ABSENT would be noise a
+	// reader could mistake for one.
+	fs := &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT}
+	if !opts.NoFilesystem {
+		fs = &ilcv1.Filesystem{
+			Availability: ilcv1.Availability_AVAILABILITY_PRESENT,
+			Kind:         opts.FilesystemKind,
+			Ephemeral:    opts.Ephemeral,
+			Isolation:    opts.Isolation,
+		}
+	}
 	body, err := (&ilcv1.SetEnvironmentRequest{
 		Environment: &ilcv1.Environment{
-			Revision: 1,
-			Filesystem: &ilcv1.Filesystem{
-				Availability: ilcv1.Availability_AVAILABILITY_PRESENT,
-				Kind:         opts.FilesystemKind,
-				Ephemeral:    opts.Ephemeral,
-				Isolation:    opts.Isolation,
-			},
+			Revision:   1,
+			Filesystem: fs,
 		},
 	}).MarshalVT()
 	if err != nil {

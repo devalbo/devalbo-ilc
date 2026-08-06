@@ -653,7 +653,7 @@ was never achievable" finding gets its correction — it was true of WAMR and is
 | **Interpreted speed** | Pulley is an interpreter; tictactoe is trivial, a future app may not be | measure in Phase 2; the badge is a demo tier, not a compute tier |
 | **The build-tag bug** | `caps_wasip2.go` is `//go:build tinygo`, so any non-wasm TinyGo target tries to link `wasmimport_Emit` | one-line fix (`tinygo && wasm`); **verified** to unblock a `pico2` build |
 | **`wasi:filesystem` is a big interface** | implementing it `no_std` could dwarf the rest | D5's RAM backend implements only what the engine calls; grow on demand |
-| **Two runtimes to keep in step** | jco and Pulley can disagree | Phase 1 puts Pulley in the parity check before hardware exists |
+| **Two runtimes to keep in step** | jco and Pulley can disagree | **Closed 2026-08-05** — Pulley is a parity column, on every `ci.sh full` |
 | **Xtensa** | ESP32-S3 is not an upstream Rust target | D8: RISC-V ESP parts only, and not on the critical path |
 
 ---
@@ -674,7 +674,13 @@ was never achievable" finding gets its correction — it was true of WAMR and is
 1. [ ] A Rust `no_std` firmware runs a component under Pulley on the RP2350, with measured RAM headroom.
 2. [ ] tictactoe is playable on the badge, from the same component the browser runs.
 3. [ ] The engine has not changed to make any of it work.
-4. [ ] Pulley is a third column in the parity check, **watched going red**.
+4. [x] Pulley is a third column in the parity check, **watched going red** — done 2026-08-05.
+   `dlc-platform/embedded/parity/` runs the golden vectors through the same interpreter the badge uses
+   (`pulley64` here, `pulley32` there) and diffs against NATIVE, so a failure reads as "Pulley disagrees
+   with the engine" rather than "two wasm runtimes disagree". 30 vectors and a 71-file tree, identical.
+   The self-test asserts the pulley diff BY NAME: both its probes perturb the component, which Pulley also
+   runs, so a generic "PARITY MISMATCH" grep would have stayed green if this column quietly stopped
+   comparing anything.
 5. [ ] Three slots render the same state and agree — CLI ASCII, browser DOM, badge TFT.
 6. [x] Decision 18 says what is actually true, including why WAMR was dropped — done 2026-08-04, along with
    Decision 25 (the ABI toggle WAMR required) and the `templates/wamr/` skeleton family it implied.

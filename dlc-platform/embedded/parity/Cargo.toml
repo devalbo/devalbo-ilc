@@ -1,0 +1,26 @@
+# The PULLEY column of the parity check (Decision 26, EMBEDDED-PLAN DoD #4).
+#
+# Runs the shared component under the same interpreter the badge runs, on a
+# developer machine, so a native↔wasm↔Pulley disagreement is a CI failure rather
+# than something discovered on hardware with a UART and a guess.
+#
+# NOT the no_std host, and deliberately so. This is a std build with the stock
+# `wasmtime-wasi`, because what needs testing here is the INTERPRETER's execution
+# of our component — not the hand-written imports, which the firmware has its own
+# way to exercise. Trying to share the no_std host would test the harness instead
+# of the guest.
+#
+# `runtime` IS enabled here (unlike dlc-precompile, which only compiles): the
+# whole point is to execute. Target == host holds because Pulley's interpreter is
+# itself the target — `pulley64` runs anywhere 64-bit.
+[package]
+name = "dlc-parity-pulley"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasmtime = { version = "=46.0.1", features = ["component-model", "pulley", "runtime", "cranelift"] }
+wasmtime-wasi = "=46.0.1"
+serde_json = "1"
+base64 = "0.22"
+anyhow = "1"

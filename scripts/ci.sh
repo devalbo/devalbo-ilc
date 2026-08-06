@@ -104,6 +104,15 @@ step "windows cross-build (dlc)" run env GOOS=windows GOARCH=amd64 go build ./en
 
 # ---- full: the engine boundary and the web tier -------------------------
 if [ "$TIER" != "fast" ]; then
+	# BARE METAL, checked by LINKING rather than by reasoning about build tags.
+	# The capability seam selects a file by constraint, and a wrong constraint is
+	# invisible to vet, to every unit test, and to both wasm builds — it surfaces
+	# only as a linker error, and only for a target nothing else here builds.
+	# `//go:build tinygo` did exactly this: TinyGo compiles for boards too, so the
+	# wasip2 half was selected for a chip with no host to import from. Falsified
+	# in place before being trusted — restore the old tag and this step goes red.
+	# In `full` rather than `fast` because it needs the TinyGo toolchain.
+	step "bare-metal link (rp2350)" run ./scripts/check-baremetal.sh
 	# B2 covers unit + native↔wasm parity + the parity self-test + the scaffold
 	# actually building and running. B3 is the browser tier.
 	step "engine boundary (B2)"  run make test-b2

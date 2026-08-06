@@ -149,3 +149,59 @@ func TestBootWithNothingRegisteredExplainsWhy(t *testing.T) {
 		t.Fatalf("error does not point at the missing import: %q", err)
 	}
 }
+
+// A HOST WITH NO STORAGE CAN BOOT — the keyboard tier (RP2040) has no
+// filesystem at all, and until NoFilesystem existed such a host could not start:
+// Boot's own error told it to "say so explicitly" and gave it no way to.
+func TestBootWithoutAFilesystem(t *testing.T) {
+	if err := bootIn(t, BootOptions{NoFilesystem: true}); err != nil {
+		t.Fatalf("boot without a filesystem: %v", err)
+	}
+	if HasFilesystem() {
+		t.Fatal("filesystem reported PRESENT on a host that declared it has none")
+	}
+	// The point of the manifest, not a side effect: an absent filesystem takes
+	// the filesystem verbs with it, so an app cannot call export-fs into a void.
+	if _, ok := registry[MethodExportFs]; ok {
+		t.Fatal("export-fs is registered on a host with no filesystem")
+	}
+}
+
+// The two ways of describing storage CONTRADICT each other, and Boot refuses
+// rather than picking a winner — a host that sets both holds two beliefs about
+// itself, and any precedence rule would hide that at the cheapest moment to see
+// it.
+func TestBootRefusesAFilesystemBothWays(t *testing.T) {
+	err := bootIn(t, BootOptions{NoFilesystem: true, Root: "."})
+	if err == nil {
+		t.Fatal("Boot accepted NoFilesystem together with a granted root")
+	}
+	if !strings.Contains(err.Error(), "NoFilesystem") {
+		t.Fatalf("error does not name the contradiction: %q", err)
+	}
+
+	err = bootIn(t, BootOptions{
+		NoFilesystem:   true,
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+	})
+	if err == nil {
+		t.Fatal("Boot accepted NoFilesystem together with a filesystem kind")
+	}
+	if !strings.Contains(err.Error(), "NoFilesystem") {
+		t.Fatalf("error does not name the contradiction: %q", err)
+	}
+}
+
+// The message a host actually hits must name the way OUT. This is the gap that
+// made the whole feature necessary — the old text ended "or say so explicitly"
+// while offering nothing to say it with, which reads as a platform that lost an
+// argument with itself.
+func TestBootUngrantedRootNamesTheEscape(t *testing.T) {
+	err := bootIn(t, BootOptions{FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	if err == nil {
+		t.Fatal("Boot accepted an empty root")
+	}
+	if !strings.Contains(err.Error(), "NoFilesystem") {
+		t.Fatalf("error tells a storageless host nothing it can do: %q", err)
+	}
+}
