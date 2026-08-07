@@ -23,13 +23,29 @@ cortex-m-semihosting = "0.5"
 panic-semihosting = "0.6"
 embedded-alloc = "0.6"
 
-# EXACT VERSION, and it must equal the `wasmtime` in devbox.json.
+# The INHERITED host (EMBEDDED-PLAN D3), built without `std` — the same crate the
+# laptop harness uses, minus `host.rs`. Depending on it rather than copying it is
+# the whole point: a fix to the WASI shim reaches the board, the emulator and the
+# laptop at once. `minimal.rs` is what satisfies the component's imports here.
+dlc-platform-embedded = { path = "..", default-features = false }
+
+# EXACT VERSION, and it must equal the pin in every other crate here —
+# `dlc-platform-embedded`, `rp2350`, `precompile`, `parity`. A `.cwasm` is
+# version-locked to the wasmtime that produced it, and a mismatch reports
+# "compilation settings are not compatible with the native host", a message that
+# never mentions versions.
 #
-# Wasmtime version-locks precompiled artifacts. `wasmtime compile` (CLI 46.0.1)
-# producing a .cwasm the firmware (crate 46.0.2) then loads fails with
-# "compilation settings are not compatible with the native host" — a message
-# that never mentions versions, and cost three builds of memory tuning before
-# the real cause showed up.
+# NOT coupled to devbox's `wasmtime` CLI, despite what this comment used to say.
+# That was true while `wasmtime compile` produced the artifact; `dlc-precompile`
+# does now, so the CLI is not in the artifact path at all — `preflight.sh` only
+# checks that it exists. devbox pins 46.0.1 anyway, because a floating `@latest`
+# beside five exact pins is a trap even when nothing currently reads it.
+#
+# ON UPGRADING, and this is not boilerplate: bump all five together, regenerate
+# the .cwasm, AND diff `platform.rs` against wasmtime's
+# `runtime/vm/sys/custom/capi.rs`. The TLS hooks changed signature between 35 and
+# 46 with no compiler or linker error — `extern "C"` links by name — and the
+# breakage only appears at instantiation. See EMBEDDED-PLAN Phase 0d.
 wasmtime = { version = "=46.0.1", default-features = false, features = [
     "runtime",
     "component-model",

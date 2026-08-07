@@ -9,11 +9,26 @@
 //! a sibling directory named for its target — `rp2350/` for the badge's chip,
 //! `qemu-armv7m/` for the emulator. So "embedded" here means the portable half,
 //! and the moment it runs on a second chip that claim stops being a hope.
+//! **`no_std` UNLESS `std` IS ASKED FOR** (Cargo.toml explains the two profiles).
+//! The badge and the QEMU harness build this crate with `--no-default-features`;
+//! the laptop tools keep the default. Everything below the `cfg` is what the
+//! board gets.
+#![cfg_attr(not(feature = "std"), no_std)]
+
 extern crate alloc;
 
 pub mod block_on;
 pub mod cli_bindings;
-pub mod host;
+pub mod command;
+pub mod no_vm;
 pub mod minimal;
 pub mod uart;
 pub mod pulley;
+
+/// The `wasmtime-wasi` host — a laptop's, and the one Phase 2 replaces.
+///
+/// Gated because `wasmtime-wasi` is `std`. `minimal.rs` is the badge's answer to
+/// the same question and is always compiled, which is the point: the portable
+/// host is the default and the convenient one is the exception.
+#[cfg(feature = "std")]
+pub mod host;

@@ -25,9 +25,22 @@ pub fn pulley_engine(pointer_width: PulleyWidth) -> Result<Engine> {
     let mut config = Config::new();
     config.target(pointer_width.triple())?;
     config.wasm_component_model(true);
-    // Required by `wasi:io`, which is registered through `add_to_linker_async`.
-    // See block_on.rs for why this costs a loop rather than a runtime.
-    config.async_support(true);
+    // NO `async_support(true)` — wasmtime 46 deprecates it as "no longer has any
+    // effect", so the call was pure warning noise. Async is still what `wasi:io`
+    // needs (it registers through `add_to_linker_async`, and calls go through
+    // `call_async`); it simply no longer has to be asked for. See block_on.rs for
+    // why driving those futures costs a loop rather than a runtime.
+    // A machine with no OS has neither copy-on-write mappings nor signal
+    // handlers, and Wasmtime's defaults assume both. Set here rather than in each
+    // firmware because it is a property of the ENGINE this crate builds, not of
+    // any one board — and because getting it wrong surfaces as "virtual memory
+    // disabled at compile time -- cannot enable CoW" at *load* time, which reads
+    // like a bad artifact and is a Config mistake.
+    //
+    // Harmless with `std`: they disable optimisations a laptop could have used,
+    // and keeping one code path is worth more than that on a tier whose whole
+    // purpose is to be the same everywhere.
+    crate::no_vm::no_virtual_memory(&mut config);
     Engine::new(&config)
 }
 

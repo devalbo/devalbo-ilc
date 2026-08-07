@@ -489,7 +489,7 @@
         }
       }
     },
-    "wasmtime@latest": {
+    "wasmtime@46.0.1": {
       "last_modified": "2026-07-16T04:38:10Z",
       "resolved": "github:NixOS/nixpkgs/6368bc923cec55a5f78960ade0cb4dd99580e087#wasmtime",
       "source": "devbox-search",
@@ -557,12 +557,12 @@
               "default": true
             },
             {
-              "name": "lib",
-              "path": "/nix/store/xvkspl7cvdyv1y8j8kkhd13vzqcqyyld-wasmtime-46.0.1-lib"
-            },
-            {
               "name": "dev",
               "path": "/nix/store/2qwcyhvdlm1iha3vmla5nprr73a72rxg-wasmtime-46.0.1-dev"
+            },
+            {
+              "name": "lib",
+              "path": "/nix/store/xvkspl7cvdyv1y8j8kkhd13vzqcqyyld-wasmtime-46.0.1-lib"
             }
           ],
           "store_path": "/nix/store/86p5p8zp581r0xbmsxj7vcmvzwx5vw3x-wasmtime-46.0.1"

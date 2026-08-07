@@ -59,6 +59,13 @@ and the only one that costs hardware (a second Pico works as a probe).
 ## What to expect from the bring-up firmware
 
 It prints its heap size, then creates a Wasmtime engine configured for `pulley32`, then says `PASS`. It
-does **not** load a component: QEMU already showed that needs one contiguous allocation the size of the
-artifact (1.59 MB for hello), which does not fit in the RP2350's 520 KB of SRAM. **PSRAM is a prerequisite,
-not a follow-up** — so the next firmware change is the allocator, not the component.
+does **not** load a component yet.
+
+**The reason it does not has changed, so ignore any older note saying PSRAM comes first.** The blocker was
+`Component::deserialize`, which copies the artifact into one contiguous allocation — 890 KB against 520 KB of
+SRAM. `deserialize_raw` does not copy: the artifact stays in flash, and QEMU now loads hello in **81 KB of
+heap** at the badge's real SRAM size. So the next firmware change *is* the component, and PSRAM waits on a
+measurement of instantiation rather than on an assumption about loading.
+
+Pin values are in [`src/board.rs`](./src/board.rs), read off Pimoroni's own board definition rather than
+guessed — including the two the firmware had wrong.

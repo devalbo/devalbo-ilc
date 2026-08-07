@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# check-baremetal.sh — does the platform LINK for a microcontroller?
+# check-baremetal.sh — does the GO platform LINK for a microcontroller?
+#
+# SIBLING, and the names do not distinguish them: `check-embedded.sh` asks the
+# same question of the RUST inherited runtime. This one is the Go capability seam
+# under TinyGo; that one is `dlc-platform-embedded` under rustup. Different
+# toolchains entirely, which is why they are two scripts and not one.
 #
 # WHY THIS EXISTS. The capability seam (§5.3) picks its implementation with a
 # build constraint, and a wrong constraint is invisible to everything else here:

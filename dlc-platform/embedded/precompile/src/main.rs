@@ -2,6 +2,11 @@
 //! feature set matches the runtime that will load it.
 //!
 //!   cargo run -p dlc-precompile -- <component.wasm> <out.cwasm> [pulley32|pulley64]
+/// SHARED WITH THE RUNTIME, not copied — see the file's own header for why it is
+/// included by path rather than depended on as a crate.
+#[path = "../../src/no_vm.rs"]
+mod no_vm;
+
 fn main() -> wasmtime::Result<()> {
     let mut args = std::env::args().skip(1);
     let input = args.next().expect("usage: <component.wasm> <out.cwasm> [width]");
@@ -11,11 +16,10 @@ fn main() -> wasmtime::Result<()> {
     let mut config = wasmtime::Config::new();
     config.target(&target)?;
     config.wasm_component_model(true);
-    // The same two the no_std runtime must set, because it has no virtual
-    // memory and no host signal handlers. They are compilation settings, so
-    // they have to agree on both sides.
-    config.memory_init_cow(false);
-    config.signals_based_traps(false);
+    // Everything a target with no MMU requires, from the one list the runtime
+    // also uses. Compilation settings are recorded in the artifact, so a
+    // disagreement here is a load failure there.
+    no_vm::no_virtual_memory(&mut config);
     // 44% OF THE ARTIFACT IS DEBUG METADATA. `.wasmtime.addrmap` alone was
     // 679 KB of hello's 1.57 MB — a wasm-offset-to-code-offset map that exists
     // for backtraces. On a device where the whole artifact must be ONE

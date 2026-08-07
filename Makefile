@@ -78,6 +78,27 @@ qemu-payload: ## AOT-compile hello for the QEMU firmware to embed (gitignored; r
 	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
 		CWASM_OUT=dlc-platform/embedded/qemu-armv7m/hello.pulley32.cwasm
 
+.PHONY: qemu
+qemu: ## run the embedded tier on an emulated 32-bit ARM core and print its RAM cost
+	# THE MEASUREMENT THE PSRAM DECISION RESTS ON, so it is a target rather than a
+	# command someone has to remember. It loads a flash-resident .cwasm with
+	# `deserialize_raw`, instantiates it through `MinimalHost` — the badge's own
+	# host, not a stand-in — runs one command, and prints the peak heap against the
+	# RP2350's 520 KB of SRAM.
+	#
+	# NOT the badge (EMBEDDED-PLAN D7): a Cortex-M3, no RP2350 peripherals, and
+	# QEMU's own 16 MB window standing in for a heap. What it does share is the
+	# thing under test — `pulley32` on a 32-bit core, through the real host.
+	#
+	# `mps2-an385` rather than a real M33 machine: QEMU's mps2-an505 boots secure
+	# at an address cortex-m-rt's default layout does not match, and the claim
+	# under test does not depend on ARMv8-M.
+	$(MAKE) qemu-payload
+	cd dlc-platform/embedded/qemu-armv7m && cargo build --release
+	qemu-system-arm -machine mps2-an385 -cpu cortex-m3 -nographic \
+		-semihosting-config enable=on,target=native \
+		-kernel dlc-platform/embedded/qemu-armv7m/target/thumbv7m-none-eabi/release/dlc-qemu-armv7m
+
 .PHONY: badge-uf2
 badge-uf2: ## build the badge bring-up firmware and convert it to a flashable .uf2
 	# picotool, NOT elf2uf2-rs — because it tags the UF2 family and elf2uf2-rs got

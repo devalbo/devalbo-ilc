@@ -4,7 +4,7 @@
     "git@latest",
     "go@latest",
     "tinygo@latest",
-    "wasmtime@latest",
+    "wasmtime@46.0.1",
     "wasm-tools@latest",
     "buf@latest",
     "nodejs@24",

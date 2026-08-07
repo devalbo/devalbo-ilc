@@ -518,6 +518,103 @@ changes an allocation that is by construction the artifact's size. The badge's 8
 "where the heap should probably live" and becomes the thing without which nothing runs, which promotes it
 from step 2 of the firmware to step 1.
 
+#### 🟢 WITHDRAWN 2026-08-07 — it was `deserialize` that was mandatory, not PSRAM
+
+The allocation above is real, and the conclusion drawn from it was wrong. **`Component::deserialize` copies**
+— it routes through `MmapVec::from_slice_with_alignment`, which allocates and then memcpys — so the demand
+for 890 KB of contiguous heap was a property of the *API call*, not of loading a component.
+
+`Component::deserialize_raw` takes externally-owned memory instead, and `engine.rs` states the contract that
+makes this safe: *"the memory provided is guaranteed to only be immutably [read] by the runtime"*. So the
+artifact can stay in flash, where XIP already makes it directly addressable. **Pulley bytecode is
+interpreted, never executed natively**, so there was never a reason for it to be in RAM — which is the part
+that should have been noticed a week ago, from the architecture rather than from an allocator.
+
+Same harness, same 890 KB payload, heap set back to the badge's real SRAM:
+
+```
+heap: 512 KB (pinned to the RP2350's SRAM)
+payload: 890048 bytes of pulley32
+payload at: 0x38200 (flash is below 0x20000000)
+component: DESERIALIZED — it fits
+heap used: 81 KB of 512 KB (artifact stayed in flash)
+```
+
+**81 KB, not 890 KB**, and the address is printed rather than asserted so a linker change that quietly moved
+the payload into `.data` cannot make this pass while proving the opposite. *Falsified:* swapping back to
+`deserialize` goes red at 512 KB with `out of memory (failed to allocate 890048 bytes)` — the original
+finding, reproduced on demand.
+
+One mechanical detail that will bite anyone repeating this: the payload must be **16-byte aligned**.
+Wasmtime parses a `.cwasm` as an ELF and the header reads require it; `deserialize` never had to care
+because an allocator returns aligned memory, and `include_bytes!` alone promises 1.
+
+**What this does and does not settle.** Settled: loading is not the RAM gate, and PSRAM is not a
+prerequisite for it. Not settled: *instantiation* additionally needs the component's linear memory and
+resource tables, which nobody has measured. PSRAM may still be wanted — but it must now be sized against a
+real number rather than against an artifact-sized allocation that no longer happens.
+
+#### 🟢 Phase 0d — instantiation measured, and hello RUNS on a 32-bit core (2026-08-07)
+
+The QEMU harness now instantiates through **`MinimalHost` — the badge's own hand-written host**, not a
+stand-in. `dlc-platform-embedded` builds `--no-default-features` as `no_std` for `thumbv7m-none-eabi`
+(a `std` feature gates `host.rs` and Cranelift), so the emulator and the firmware share one implementation
+rather than two that drift.
+
+```
+heap after load:        81 KB   (artifact stayed in flash)
+heap after instantiate: 2911 KB
+execute(10000): success=true
+output: hello, world — from hello
+verdict: 2911 KB needed vs 520 KB of RP2350 SRAM -> PSRAM REQUIRED
+```
+
+**Two results, and they point opposite ways.**
+
+The good one: **an ILC app runs end to end on an emulated 32-bit ARM core**, from a flash-resident AOT
+artifact, through the host the badge will actually use, with no `wasmtime-wasi` and no OS. Phase 1b's rung
+is cleared at the badge's pointer width.
+
+The constraining one: **PSRAM is required after all — for instantiation, not for loading.** 2.9 MB against
+520 KB of SRAM. So the original conclusion was right by accident and wrong in its reason, which matters,
+because the reason determines the fix: no amount of shrinking the *artifact* would have helped, and the
+2.9 MB is dominated by the guest's linear memory. That is a TinyGo build-time knob, so "does hello fit in
+SRAM" is not yet a closed question — it is now a question about the guest's heap size rather than about
+Wasmtime. Either way it fits comfortably in the badge's 8 MB.
+
+**The bug that blocked this is worth more than the number, and it is a VERSION bug, not a coding one.**
+`wasmtime-platform.h`'s TLS hooks changed shape between the wasmtime we started against and the one we pin:
+
+```c
+void *wasmtime_tls_get(void);              /* 35.0.0 */
+void  wasmtime_tls_set(void *ptr);
+
+void *wasmtime_tls_get(size_t slot);       /* 46.0.1 */
+void  wasmtime_tls_set(size_t slot, void *ptr);
+```
+
+`platform.rs` was a **correct implementation of the older contract**. `extern "C"` links by name alone, so
+the ABI changed with no error from the compiler, the linker, or a deprecation warning. Wasmtime's
+documentation is accurate and the runtime is not buggy — the assertion is wasmtime correctly *detecting* a
+broken embedder contract. Nothing in the toolchain connects the two.
+
+**The mechanism is dumber than it looks.** Wasmtime calls `wasmtime_tls_set(0, ptr)`; on ARM `slot` lands in
+r0 and `ptr` in r1. The one-argument version read r0 — so it stored `0` every time and discarded the
+pointer. The TLS slot was permanently null, `push` recorded null as the previous head, and `pop` read null
+and asserted it equalled `self`. The activation chain was never stored at all. **Not slot collision:** slot
+1 is `component-model-async`, which this build does not enable, so wasmtime never passes it.
+
+It could not have been caught earlier, because loading a component never touches TLS — only instantiation
+reaches it. **The rule this earns:** every symbol in `platform.rs` must be diffed against wasmtime's own
+`runtime/vm/sys/custom/capi.rs` **on every version bump**, because the linker will not do it for you and a
+pinned version is exactly the thing that makes this invisible until the pin moves.
+
+Two things ruled out on the way, so nobody re-runs them: the TLS slot being cached under LTO (making it
+atomic changed nothing), and `wasmtime/async` lacking a backend — `wasmtime-internal-fiber` has a `no_std`
+implementation and `target_arch = "arm"` selects real Thumb-2-compatible stack-switching assembly.
+`wasmtime-wasi-io` has **only** `add_to_linker_async`, so there is no sync path to retreat to — and none is
+needed.
+
 #### 🟢 RESOLVED (2026-08-03) — and what `.cwasm` actually contains
 
 **A `.cwasm` records what the COMPILER BINARY WAS BUILT WITH, not what flags it was given.** `-W gc=n` and
@@ -556,8 +653,11 @@ heap needed: 3 MB -> 1 MB
 The cost is honest: a trap on the badge reports an address rather than a wasm location. Worth it while the
 question is still "does it load at all".
 
-**Still true, and still the gate: PSRAM is a prerequisite.** 890 KB will not fit in 520 KB of SRAM either.
-The margin just went from hopeless to close.
+**~~Still true, and still the gate: PSRAM is a prerequisite.~~** ~~890 KB will not fit in 520 KB of SRAM
+either. The margin just went from hopeless to close.~~ — **withdrawn 2026-08-07, see above.** 890 KB does
+not need to fit in SRAM, because it does not need to leave flash. The size win below is still worth having
+(it is 890 KB of flash rather than 1.57 MB, and less to read over XIP), but it was pursued as a way to fit
+an allocation that turned out to be avoidable.
 
 <details><summary>the original blocker, kept for the reasoning</summary>
 
@@ -648,7 +748,7 @@ was never achievable" finding gets its correction — it was true of WAMR and is
 
 | Risk | Why it bites | Mitigation |
 | --- | --- | --- |
-| **RAM on the RP2350** | 2.21 MB in flash is easy; interpreter + linear memory in 520 KB SRAM is not, and PSRAM is slower QSPI | Phase 0 exists to answer exactly this, before any other work |
+| **RAM on the RP2350** | 2.21 MB in flash is easy; interpreter + linear memory in 520 KB SRAM is not, and PSRAM is slower QSPI | **Halved 2026-08-07**: `deserialize_raw` leaves the artifact in flash, so loading costs 81 KB, not 890 KB (Phase 0c). What remains unmeasured is instantiation — linear memory and resource tables |
 | **Wasmtime `no_std` on Cortex-M is young** | the docs name no tested embedded architectures | the fallbacks are real and one of them is measured (263 KB native TinyGo) |
 | **Interpreted speed** | Pulley is an interpreter; tictactoe is trivial, a future app may not be | measure in Phase 2; the badge is a demo tier, not a compute tier |
 | **The build-tag bug** | `caps_wasip2.go` is `//go:build tinygo`, so any non-wasm TinyGo target tries to link `wasmimport_Emit` | one-line fix (`tinygo && wasm`); **verified** to unblock a `pico2` build |

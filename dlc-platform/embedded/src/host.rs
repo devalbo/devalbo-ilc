@@ -45,19 +45,10 @@ impl WasiView for HostState {
     }
 }
 
-/// The result of one command — the WIT `command-result`, in Rust.
-///
-/// DERIVED, not hand-lifted: `command-result` is a WIT *record*, so wasmtime
-/// needs the shape to map field-by-field. Reading it as a tuple fails with
-/// "expected tuple found record", which is the canonical ABI refusing to guess.
-#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift)]
-#[component(record)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandResult {
-    pub success: bool,
-    pub output: Vec<u8>,
-    pub error: Option<String>,
-}
+// `CommandResult` moved to `command.rs` when this module became std-only — the
+// badge's host lifts the same record and must not depend on this one. Re-exported
+// so callers keep the path they had.
+pub use crate::command::CommandResult;
 
 /// A live ILC engine: one component instance, ready for many commands.
 ///

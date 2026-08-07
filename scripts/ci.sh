@@ -113,6 +113,16 @@ if [ "$TIER" != "fast" ]; then
 	# in place before being trusted — restore the old tag and this step goes red.
 	# In `full` rather than `fast` because it needs the TinyGo toolchain.
 	step "bare-metal link (rp2350)" run ./scripts/check-baremetal.sh
+	# THE SAME CLASS, one language over — and NEITHER profile was covered before
+	# this. `dlc-platform-embedded` builds two ways, and the parity runner is a
+	# separate crate that depends on neither, so a `use std::` in a portable
+	# module or a break in `host.rs` would pass everything here and surface only
+	# when somebody cross-compiled for a board. Falsified before being trusted:
+	# adding a `std::` to command.rs turns both no_std targets red.
+	# Two no_std targets because D8's "one Rust family for badge and ESP" is
+	# otherwise a hope rather than a check. The firmware crates that CONSUME the
+	# library are slower and live in `all` below.
+	step "embedded runtime builds" run ./scripts/check-embedded.sh
 	# B2 covers unit + native↔wasm parity + the parity self-test + the scaffold
 	# actually building and running. B3 is the browser tier.
 	step "engine boundary (B2)"  run make test-b2
@@ -125,6 +135,14 @@ if [ "$TIER" = "all" ]; then
 	# day-to-day work, so this belongs on a schedule rather than every push —
 	# which is also what DEVALBO-DLC-TEST-STEPS.md recommends.
 	step "de-risking spikes (B1)" run make test-b1
+	# The FIRMWARE half of the embedded check — the two crates that consume the
+	# runtime library, each a fresh wasmtime build, so minutes rather than
+	# seconds. Here rather than in `full` for that cost alone; what it catches is
+	# real and invisible to the lib builds, because an API change keeps a library
+	# green and breaks its callers. Falsified by renaming
+	# `MinimalHost::from_precompiled`: all three lib builds stayed green and the
+	# qemu firmware went red, which is exactly the gap this closes.
+	step "embedded firmware builds" run ./scripts/check-embedded.sh --firmware
 	# Resolves a FRESH devbox environment for a scaffolded project (its @latest
 	# packages are unlocked), so it needs the network and costs minutes. It also
 	# fails for a reason nothing else can see: a tool the template forgets to

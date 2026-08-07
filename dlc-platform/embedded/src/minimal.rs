@@ -14,6 +14,9 @@
 //! `std`-free in shape so Phase 2 is a copy rather than a redesign — the only
 //! `std` left is `Vec`/`String` from `alloc`, which bare metal has.
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use wasmtime::component::{Component, HasSelf, Linker, Resource, ResourceTable};
 use wasmtime_wasi_io::IoView;
 
@@ -29,7 +32,7 @@ use crate::cli_bindings::wasi::filesystem::types::{
 };
 
 use crate::uart::{boxed, boxed_input, BufferSink};
-use wasmtime::{Result, Store};
+use wasmtime::{Engine, Result, Store};
 
 use crate::pulley::{pulley_engine, PulleyWidth};
 
@@ -247,9 +250,44 @@ pub struct MinimalHost {
 }
 
 impl MinimalHost {
+    /// Compile a plain `.wasm` and instantiate it — **the laptop's path**.
+    ///
+    /// `Component::new` runs Cranelift, which a `no_std` Wasmtime does not have,
+    /// so this is `std`-only by necessity rather than by choice.
+    #[cfg(feature = "std")]
     pub fn new(component_bytes: &[u8], width: PulleyWidth) -> Result<Self> {
         let engine = pulley_engine(width)?;
         let component = Component::new(&engine, component_bytes)?;
+        Self::from_component(engine, component)
+    }
+
+    /// Instantiate an AOT artifact **without moving it out of flash** — the badge's path.
+    ///
+    /// `deserialize_raw` rather than `deserialize`, and the difference is the
+    /// whole reason the badge can load anything at all: `deserialize` copies into
+    /// a fresh allocation the size of the artifact (890 KB for hello), which
+    /// 520 KB of SRAM can never provide. `deserialize_raw` borrows, and the
+    /// runtime only ever reads — so interpreted Pulley bytecode can stay in the
+    /// flash the linker already put it in. Measured in QEMU at 81 KB of heap
+    /// against 890 KB for the copying path.
+    ///
+    /// # Safety
+    ///
+    /// `cwasm` must be a `.cwasm` this project produced (precompiled bytes are
+    /// trusted by construction — they are not parsed defensively), **16-byte
+    /// aligned** because Wasmtime reads it as an ELF, and `'static` so it
+    /// outlives the component as `deserialize_raw` requires. A `static` in flash
+    /// satisfies the last two; `include_bytes!` alone does not satisfy alignment.
+    pub unsafe fn from_precompiled(cwasm: &'static [u8], width: PulleyWidth) -> Result<Self> {
+        let engine = pulley_engine(width)?;
+        // SAFETY: forwarded to the caller by this function's own contract.
+        let component =
+            unsafe { Component::deserialize_raw(&engine, core::ptr::NonNull::from(cwasm))? };
+        Self::from_component(engine, component)
+    }
+
+    /// Everything both paths share: the linker, and the one instantiation.
+    fn from_component(engine: Engine, component: Component) -> Result<Self> {
         let mut linker: Linker<MinimalState> = Linker::new(&engine);
 
         // SHADOWING ON, and it is not laziness — it is the only order that works.
@@ -386,16 +424,18 @@ impl MinimalHost {
         Ok(Self { store, execute })
     }
 
-    pub fn execute(&mut self, method: u32, request: &[u8]) -> Result<crate::host::CommandResult> {
+    pub fn execute(&mut self, method: u32, request: &[u8]) -> Result<crate::command::CommandResult> {
         let typed = self
             .execute
-            .typed::<(u32, Vec<u8>), (crate::host::CommandResult,)>(&self.store)?;
+            .typed::<(u32, Vec<u8>), (crate::command::CommandResult,)>(&self.store)?;
         let (result,) = crate::block_on::block_on(
             typed.call_async(&mut self.store, (method, request.to_vec())),
         )?;
-        // Required after an async call before the next one; the sync path did
-        // this implicitly.
-        crate::block_on::block_on(typed.post_return_async(&mut self.store))?;
+        // NO `post_return_async` — wasmtime 46 deprecates it as "no longer needs
+        // to be called; this function has no effect". It was required once,
+        // between an async call and the next one, and the runtime now handles it.
+        // `execute` stays callable many times on one instance either way, which
+        // is what Decision 31 requires.
         Ok(result)
     }
 

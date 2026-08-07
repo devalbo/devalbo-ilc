@@ -12,35 +12,59 @@ name = "dlc-platform-embedded"
 version = "0.1.0"
 edition = "2021"
 
+# TWO PROFILES OF ONE CRATE, which is what makes Phase 2 a port rather than a
+# rewrite (see the note above).
+#
+#   default (`std`)  the laptop harness: `wasmtime-wasi` for the big host,
+#                    `cranelift` so a plain .wasm can be compiled on the spot.
+#   `--no-default-features`  what the badge and the QEMU harness build: no OS, no
+#                    compiler, and `minimal.rs` as the only host.
+#
+# The split is enforced by the compiler rather than by discipline: `host.rs` is
+# the only std-bound module and is `#[cfg(feature = "std")]`, so anything that
+# drifts into it stops building for the board.
+[features]
+default = ["std"]
+std = ["dep:wasmtime-wasi", "wasmtime/std", "wasmtime/cranelift", "bytes/std"]
+
 [dependencies]
 # `pulley` is the interpreter backend — the whole reason this tier can run a
 # COMPONENT at all rather than a bare core module. `component-model` is what makes it an ILC
 # engine rather than a bare module.
+#
+# `cranelift` is NOT here: it arrives with `std` above. A no_std Wasmtime has no
+# compiler, so on the badge the component must already be AOT `.cwasm`.
 wasmtime = { version = "=46.0.1", default-features = false, features = [
     "runtime",
     "component-model",
     "pulley",
-    "cranelift",
 ] }
-wasmtime-wasi = "=46.0.1"
+wasmtime-wasi = { version = "=46.0.1", optional = true }
 # The wasi:io/{error,poll,streams} implementation as TRAITS, so the badge does
 # not hand-write 15 stream functions. no_std-capable — verified for thumbv8m.
 wasmtime-wasi-io = { version = "=46.0.1", default-features = false }
 bytes = { version = "1", default-features = false }
 async-trait = "0.1"
 
+# Every bin is a LAPTOP tool — they read files, print, and take argv, none of
+# which a badge has. `required-features` is what stops `cargo build` from trying
+# to build them for a bare-metal target and burying the real error.
 [[bin]]
 name = "pulley-probe"
 path = "src/bin/pulley_probe.rs"
+required-features = ["std"]
 
 [[bin]]
 name = "precompile"
 path = "src/bin/precompile.rs"
+required-features = ["std"]
 
 [[bin]]
 name = "minimal-host"
 path = "src/bin/minimal_host.rs"
+required-features = ["std"]
 
 [[bin]]
 name = "run-component"
 path = "src/bin/run_component.rs"
+required-features = ["std"]

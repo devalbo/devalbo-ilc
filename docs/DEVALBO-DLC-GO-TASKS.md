@@ -884,9 +884,48 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
       INTERPRETER's execution of our component, and sharing the hand-written host would test the harness
       instead of the guest. It runs the plain `.wasm` with `Config::target("pulley64")` rather than a
       `.cwasm`, so an AOT failure and an interpreter failure stay distinguishable.
-- [ ] **The PSRAM allocator** — the measured blocker. ~890 KB of `.cwasm` against 520 KB of SRAM, so the badge
-      cannot instantiate until PSRAM is mapped and an allocator sits on it. Everything else on the board is
-      proven ([`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md)).
+- [→] ~~**The PSRAM allocator** — the measured blocker. ~890 KB of `.cwasm` against 520 KB of SRAM, so the
+      badge cannot instantiate until PSRAM is mapped and an allocator sits on it.~~ **Demoted 2026-08-07: it
+      was never the blocker.** `Component::deserialize` *copies*; `deserialize_raw` takes externally-owned
+      memory the runtime only reads, so the artifact stays in flash — where XIP already makes it addressable
+      and where interpreted Pulley bytecode has no reason not to be. Measured in QEMU at the badge's real
+      SRAM size: **81 KB of heap, not 890 KB**, falsified by swapping the call back and watching it OOM.
+      Payload must be 16-byte aligned (`include_bytes!` promises 1). See
+      [`EMBEDDED-PLAN.md`](./EMBEDDED-PLAN.md) Phase 0c.
+- [🟡] **Measure instantiation** — the open RAM question, **attempted 2026-08-07 and blocked one step short of
+      the number.** Do this before any allocator work: it is what an allocator would have to be sized against.
+
+      **Got there:** `dlc-platform-embedded` now builds `--no-default-features` as `no_std` for
+      `thumbv7m-none-eabi` (a `std` feature gates `host.rs` and Cranelift; `CommandResult` moved to
+      `command.rs` so the portable host does not depend on the laptop one), and the QEMU harness *depends on
+      that crate* rather than reimplementing a linker — so what is measured is the host the badge will run.
+      `MinimalHost::from_precompiled` is the `deserialize_raw` entry point.
+
+      **Fixed on the way, and it was a real defect:** the no-virtual-memory settings existed as three separate
+      lists — runtime, AOT compiler, QEMU harness — kept in step by hand. Instantiation needs three more than
+      loading does (`memory_reservation`, `memory_guard_size`, `memory_reservation_for_growth`, all forced to
+      0 by `MallocMemory`), and adding them to one list made the other two reject the artifact
+      (`compiled with a memory reservation of '0' but '10485760' is expected`). Now one function,
+      `no_vm::no_virtual_memory`, shared with `precompile/` by `#[path]` include rather than by dependency —
+      because that crate deliberately omits wasmtime's `runtime` feature and a dependency edge would unify
+      features and drag it back in, breaking `pulley32` cross-compilation.
+
+      **Blocked on:** instantiation panics inside Wasmtime on the `no_std` build —
+      `traphandlers.rs:596: assertion failed: core::ptr::eq(head, self)`, the `CallThreadState` pop check.
+      **Isolated, not guessed:** the identical code path passes on the laptop (`minimal-host` runs hello's
+      `execute(10000)` green under `pulley64` with the same shared config), so it is `no_std`-specific rather
+      than a regression from the config work. Ruled out: the embedder TLS slot caching under LTO — making it
+      an `AtomicPtr` changed nothing. Prime suspect is wasmtime's `async` feature, which
+      `wasmtime-wasi-io` turns on and which brings fiber-based activation save/restore to a target with no
+      fiber backend. Next probe: whether a sync path off `wasmtime-wasi-io` exists, or what
+      `wasmtime/async` resolves to on `thumbv7m`.
+
+      Also measured incidentally: QEMU's MPS2 boards really do map a 16 MB window at `0x21000000` (probed at
+      both ends, not assumed), which is what makes a >3 MB heap available for the measurement at all.
+- [ ] **PSRAM, if instantiation says so.** Chip select is **GPIO8** (`rp2350/src/board.rs`) — the plan's
+      GPIO47 was a different Pimoroni board's pin. `embassy-rp`'s `psram` module is prior art (APS6404L,
+      detection, RAM-resident init) but is **git-only, not in the 0.10.0 release**, and belongs to a HAL this
+      firmware does not use — so it is a port or a HAL switch, not a dependency.
 - [ ] **A skeleton per embedded shape.** There are **three** shapes to template eventually — a Go host with a
       screen, a Go host without one, and a Rust `no_std` host running the component — all over **one**
       skeleton, since every tier speaks the same ABI (Decision 25). Until a tier has a slot it stays
