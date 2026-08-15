@@ -204,7 +204,7 @@ func save(s *tictactoev1.GameState) error {
 	if err != nil {
 		return err
 	}
-	return platform.WriteTree(platform.Root(), []platform.File{{Path: gameFile, Content: body}})
+	return platform.WriteTree(platform.FSRoot(), []platform.File{{Path: gameFile, Content: body}})
 }
 
 func emitStateChanged(s *tictactoev1.GameState) {

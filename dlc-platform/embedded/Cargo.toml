@@ -68,3 +68,18 @@ required-features = ["std"]
 name = "run-component"
 path = "src/bin/run_component.rs"
 required-features = ["std"]
+
+# The catalog WRITER, paired with `catalog.rs` which the badge reads. One crate
+# on purpose: a wire format whose two ends can be built separately is a format
+# that drifts.
+[[bin]]
+name = "payload-image"
+path = "src/bin/payload_image.rs"
+required-features = ["std"]
+
+# Dumps the synthetic volume so a real OS FAT driver can validate it — the check
+# unit tests structurally cannot make.
+[[bin]]
+name = "fat-dump"
+path = "src/bin/fat_dump.rs"
+required-features = ["std"]

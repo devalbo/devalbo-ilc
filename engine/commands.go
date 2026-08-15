@@ -451,7 +451,7 @@ func scaffold(req *dlcv1.NewRequest) (root string, files []platform.File, err er
 	if err != nil {
 		return "", nil, errors.New("new: " + err.Error())
 	}
-	dest := filepath.Join(platform.Root(), root)
+	dest := filepath.Join(platform.FSRoot(), root)
 	if platform.DirIsOccupied(dest) {
 		return "", nil, errors.New("new: " + req.Name + " already exists and is not empty")
 	}

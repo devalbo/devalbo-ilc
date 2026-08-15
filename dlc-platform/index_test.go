@@ -202,7 +202,7 @@ func TestExportingTheIndexDirectlyYieldsNothing(t *testing.T) {
 	if err := WriteFile(IndexDir+"/records", []byte("projection bytes")); err != nil {
 		t.Fatal(err)
 	}
-	tree, err := ReadTree(filepath.Join(Root(), IndexDir))
+	tree, err := ReadTree(filepath.Join(FSRoot(), IndexDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestOnlyThePlatformsIndexIsExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := ReadTree(Root())
+	tree, err := ReadTree(FSRoot())
 	if err != nil {
 		t.Fatal(err)
 	}

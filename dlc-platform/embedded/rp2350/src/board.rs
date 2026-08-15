@@ -36,6 +36,34 @@ pub const XTAL_HZ: u32 = 12_000_000;
 /// computed, because the QMI divisor is derived from the system clock.
 pub const SYS_CLK_HZ: u32 = 200_000_000;
 
+// --- the flash map ----------------------------------------------------------
+//
+// XIP maps flash at 0x10000000, so anything here is directly addressable and a
+// payload never has to be copied into RAM — the fact `deserialize_raw` turns
+// into "the artifact stays in flash" (EMBEDDED-PLAN Phase 0c).
+//
+// **THE SPLIT IS ENFORCED BY THE LINKER, not by this comment.** `memory.x`
+// declares FLASH as 1 MB rather than the board's 16, so firmware that grew into
+// the payload region would fail to link instead of overwriting an app. The two
+// files have to agree, and only one of them can produce an error — so if you
+// change either, change both.
+
+/// Where the firmware ends and the payload catalog begins: 4 MB into flash.
+///
+/// **4 MB rather than the 1 MB this started as, and the linker found the bug.**
+/// FLASH has to hold the firmware AND any BUILT-IN payload, because `BADGE_PAYLOAD`
+/// becomes `.rodata` — 189 KB of image plus hello's 869 KB overflowed a 1 MB cap
+/// by 360 KB. 4 MB clears a tictactoe-sized default (~2.2 MB) with room, and
+/// still leaves more region than the catalog will scan.
+pub const PAYLOAD_BASE: usize = 0x1040_0000;
+
+/// The rest of the 16 MB part. Nothing else may live here.
+///
+/// Ends exactly at 0x11000000, which is where the PSRAM window begins — so a
+/// scan that ran off the end of the catalog would leave flash entirely. It cannot:
+/// `catalog::scan` bounds-checks against this length.
+pub const PAYLOAD_LEN: usize = 12 * 1024 * 1024;
+
 // --- UART ------------------------------------------------------------------
 //
 // **This board declares NO default UART** (`MICROPY_HW_UART_NO_DEFAULT_PINS`),

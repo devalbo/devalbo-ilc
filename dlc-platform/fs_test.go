@@ -25,7 +25,7 @@ func TestReadWriteFile(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 	// Parent directories are created — an app should not have to mkdir first.
-	if _, err := os.Stat(filepath.Join(Root(), "notes")); err != nil {
+	if _, err := os.Stat(filepath.Join(FSRoot(), "notes")); err != nil {
 		t.Errorf("parent dir not created: %v", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestPerFileAPIRefusesEscape(t *testing.T) {
 		}
 	}
 	// Nothing escaped.
-	if _, err := os.Stat(filepath.Join(filepath.Dir(Root()), "escape.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(FSRoot()), "escape.json")); err == nil {
 		t.Error("a file escaped the root")
 	}
 }

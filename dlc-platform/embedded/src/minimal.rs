@@ -42,8 +42,14 @@ use crate::pulley::{pulley_engine, PulleyWidth};
 pub struct MinimalState {
     pub table: ResourceTable,
     pub events: Vec<(String, Vec<u8>)>,
-    /// Everything the guest wrote to stdout — the UART buffer, on a laptop.
-    pub stdout: Vec<u8>,
+    /// Everything the guest wrote to stdout.
+    ///
+    /// SHARED with the stream handed to the guest, rather than a plain `Vec` the
+    /// stream never touched — see `SharedBuffer` for the bug that was.
+    pub stdout: crate::uart::SharedBuffer,
+    /// What this tier tells the app about itself. See the `environment` impl for
+    /// why capability advertisement lives here rather than in a new capability.
+    pub environment: Vec<(String, String)>,
     /// A monotonic counter standing in for a hardware timer.
     ticks: u64,
     /// A deterministic PRNG standing in for the hardware RNG.
@@ -58,8 +64,10 @@ pub struct MinimalState {
 /// stdout: where a tier decides what "printing" physically means.
 impl crate::cli_bindings::wasi::cli::stdout::Host for MinimalState {
     fn get_stdout(&mut self) -> Resource<DynOutputStream> {
+        // A CLONE OF THE SHARED BUFFER, not a fresh one: the handle the guest
+        // gets must write where the host reads.
         self.table
-            .push(boxed(BufferSink::default()))
+            .push(boxed(self.stdout.clone()))
             .expect("the resource table is ours and unbounded")
     }
 }
@@ -83,11 +91,29 @@ impl crate::cli_bindings::wasi::cli::stdin::Host for MinimalState {
     }
 }
 
-/// No environment and no argv. A badge is not launched from a shell — its
-/// "arguments" are five buttons, which arrive as commands (§14), not as strings.
+/// No argv — but the environment is how a TIER ADVERTISES WHAT IT IS.
+///
+/// A badge is not launched from a shell, so there is no inherited environment to
+/// pass through and the table is whatever the host decides to say. That makes it
+/// the right place for capability advertisement, and the reason is D6: a fact the
+/// app needs does not justify a new capability when an interface the world
+/// ALREADY DECLARES can carry it. `wasi:cli/environment` is imported by every
+/// component here whether or not it is called, so this costs nothing.
+///
+/// **What belongs here is what the app cannot otherwise find out.** Every tier
+/// provides `wasi:cli/stdout` — it must, because TinyGo acquires it during
+/// `_initialize` — so its presence says nothing about whether anyone will ever
+/// SEE the bytes. On a badge with a screen they are read; piped to a buffer that
+/// is dropped, they are not. Only the host knows which, so only the host can say.
+///
+/// **Advertise what is true TODAY, not what is planned.** The badge's stdout
+/// reaches a UART, and it reaches a screen when Phase 3 wires the TFT — so the
+/// value changes then, and an app that adapts its output gets it right in both
+/// eras. Claiming `display` now would be the one kind of lie this interface makes
+/// expensive: silent, and believed.
 impl crate::cli_bindings::wasi::cli::environment::Host for MinimalState {
     fn get_environment(&mut self) -> Vec<(String, String)> {
-        Vec::new()
+        self.environment.clone()
     }
     fn get_arguments(&mut self) -> Vec<String> {
         Vec::new()
@@ -258,7 +284,9 @@ impl MinimalHost {
     pub fn new(component_bytes: &[u8], width: PulleyWidth) -> Result<Self> {
         let engine = pulley_engine(width)?;
         let component = Component::new(&engine, component_bytes)?;
-        Self::from_component(engine, component)
+        // No advertisement: a laptop harness is not a tier telling an app what it
+        // can do, and an empty environment is what these tools measured against.
+        Self::from_component(engine, component, &[])
     }
 
     /// Instantiate an AOT artifact **without moving it out of flash** — the badge's path.
@@ -279,15 +307,38 @@ impl MinimalHost {
     /// outlives the component as `deserialize_raw` requires. A `static` in flash
     /// satisfies the last two; `include_bytes!` alone does not satisfy alignment.
     pub unsafe fn from_precompiled(cwasm: &'static [u8], width: PulleyWidth) -> Result<Self> {
+        // SAFETY: forwarded to the caller by this function's own contract.
+        unsafe { Self::from_precompiled_advertising(cwasm, width, &[]) }
+    }
+
+    /// As [`Self::from_precompiled`], but telling the app what this tier is.
+    ///
+    /// The pairs become `wasi:cli/environment`, which is where a tier advertises
+    /// what it can actually do — see the `environment` impl above for why that is
+    /// the right vehicle rather than a new capability. An empty table is a host
+    /// that says nothing about itself, which is what the laptop harnesses want.
+    ///
+    /// # Safety
+    ///
+    /// Identical to [`Self::from_precompiled`].
+    pub unsafe fn from_precompiled_advertising(
+        cwasm: &'static [u8],
+        width: PulleyWidth,
+        environment: &[(&str, &str)],
+    ) -> Result<Self> {
         let engine = pulley_engine(width)?;
         // SAFETY: forwarded to the caller by this function's own contract.
         let component =
             unsafe { Component::deserialize_raw(&engine, core::ptr::NonNull::from(cwasm))? };
-        Self::from_component(engine, component)
+        Self::from_component(engine, component, environment)
     }
 
     /// Everything both paths share: the linker, and the one instantiation.
-    fn from_component(engine: Engine, component: Component) -> Result<Self> {
+    fn from_component(
+        engine: Engine,
+        component: Component,
+        environment: &[(&str, &str)],
+    ) -> Result<Self> {
         let mut linker: Linker<MinimalState> = Linker::new(&engine);
 
         // SHADOWING ON, and it is not laziness — it is the only order that works.
@@ -415,7 +466,14 @@ impl MinimalHost {
             |state| state,
         )?;
 
-        let mut store = Store::new(&engine, MinimalState::default());
+        let state = MinimalState {
+            environment: environment
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+            ..MinimalState::default()
+        };
+        let mut store = Store::new(&engine, state);
         let instance =
             crate::block_on::block_on(linker.instantiate_async(&mut store, &component))?;
         let execute = instance
@@ -441,5 +499,19 @@ impl MinimalHost {
 
     pub fn events(&mut self) -> Vec<(String, Vec<u8>)> {
         core::mem::take(&mut self.store.data_mut().events)
+    }
+
+    /// Everything the guest wrote to `wasi:cli/stdout`, drained.
+    ///
+    /// A THIRD CHANNEL, and worth naming as one: a command's return value is the
+    /// answer, `events` are what a slot renders, and this is what the guest
+    /// *printed* — TinyGo's `println`, a panic message, anything the engine emits
+    /// on its way. A host that drops it silently is the reason "it ran but said
+    /// nothing" is hard to debug on a board with one UART.
+    ///
+    /// Drained rather than borrowed so a caller can print after each command
+    /// without re-printing the last one.
+    pub fn stdout(&mut self) -> Vec<u8> {
+        self.store.data().stdout.take()
     }
 }

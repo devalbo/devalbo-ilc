@@ -364,6 +364,159 @@ engine but not yet load a component, so its regression value is potential rather
 What CI cannot check is the *host*: UART, the TFT, five buttons, the RTC. That stays a manual gate with a
 photograph, and the plan should say so rather than implying a robot arm.
 
+### D9 — The badge is a LOADER, and apps are data (2026-08-15)
+
+`include_bytes!` makes the firmware app-specific: a badge that runs hello and a badge that runs tictactoe
+become two builds of the same code, and swapping apps needs a toolchain. So the firmware reads a **well-known
+flash region** instead — a catalog of `.cwasm` payloads at `0x10400000`, scanned at boot.
+
+**What makes it affordable is Phase 0c's finding, reused.** `deserialize_raw` borrows memory it only reads, so
+a payload never has to be copied; on a chip whose flash is memory-mapped, a catalog entry is already a
+`&'static [u8]`. Enumerating twenty apps costs twenty slices, and nothing is read until one is chosen.
+
+**Adding an app needs no toolchain:** hold BOOT, tap RESET, drag a payload UF2 onto the drive. The bootloader
+writes each block to the address that block names, so the firmware is untouched — different sectors entirely.
+The one surprise worth writing down: **the BOOTSEL drive is not storage.** It is a synthetic FAT12 volume
+whose only real operation is parsing UF2 blocks, so a `.cwasm` dragged onto it is accepted by the Finder and
+discarded by the bootloader, silently.
+
+**Three flash-time modes, from two orthogonal variables** (`BADGE_PAYLOAD`, `BADGE_REGION`) rather than a
+mode enum that grows a case each time: an empty loader (the default), a built-in default the region can add
+to, or one app and nothing else.
+
+**Each payload carries its own entry method.** Decision 31 gives every component one export,
+`execute(u32, list<u8>)`, so running one means knowing which id to pass — an app's fact, not the firmware's.
+It rides in the catalog header, which is what lets a loader run apps it was never built for.
+
+**The format terminates on a bad magic rather than carrying an index**, because an index would have to be
+rewritten — and therefore erased — every time a payload is added. Erased flash reads as `0xFF`, which is not
+the magic, so a blank region is an empty catalog with no initialisation step.
+
+*Falsified:* the region base moved from `0x10100000` to `0x10400000` when a built-in payload turned out to
+live in `.rodata` **inside** FLASH (the linker caught it: 189 KB of firmware plus hello's 869 KB overflowed a
+1 MB cap by 360 KB). The Makefile kept writing payloads to the old address — which fails nothing and simply
+does not work — so the address is now read from `board.rs` rather than repeated.
+
+### D10 — TWO BADGE WORLDS, and `minimal` is a SIMULATION (2026-08-15)
+
+**Not two WIT worlds.** A world is an import/export set; forking one forks the artifact, which is the
+constraint §1 calls load-bearing. Both badge worlds instantiate the same `.cwasm` with the same imports and
+share `MinimalHost`. What differs is **which channel reaches a human**: `normal` shows the app's text,
+`minimal` shows one status colour.
+
+**`minimal` is the badge PRETENDING to be a poorer device**, and that is its purpose rather than a limitation.
+The Tufty has a screen and a UART, so this world is not what it can afford — it is a testbed for the question
+no rich tier can ask: *what can an ILC app still say when its host has almost no way to speak?* A sensor node
+or a keyfob is a real target for this architecture. Running the constraint on hardware that could have shown
+text is what keeps the failure legible — same binary, same events, and the serial log still there to show
+what the app tried to say.
+
+**Its capabilities are a strict PREFIX of `normal`'s, checked by a `const` assertion** rather than by
+convention, so "trim the normal world for size" means dropping capabilities off the end and landing on a world
+that already exists. A simulated floor is only useful if it is genuinely a subset.
+
+**Capability advertisement rides `wasi:cli/environment`** — an interface every component already imports, so
+D6's rule holds: no new capability for a fact an existing channel can carry. It exists because *presence
+proves nothing*: every world must provide `wasi:cli/stdout` (TinyGo acquires it during `_initialize` or the
+component never instantiates), so an app cannot infer from its existence whether anyone will read the bytes.
+`ILC_STDOUT=none` is the signal to emit an event instead.
+
+**The screen belongs to every world**; only the fidelity differs. `normal` should mirror stdout onto the TFT
+— a badge is worn, not tethered, and making the default experience depend on owning a serial adapter is
+wrong.
+
+**The driver exists as of 2026-08-15, and the lesson is about what NOT to write.** It was first hand-written:
+~300 lines of ST7789 command set, power-on sequence, MADCTL orientation bits and the colour-inversion quirk,
+derived from a datasheet and untestable without hardware — with the two values most likely to be wrong
+hand-guessed. **`mipidsi` already had all of it**, `models::ST7789` plus
+`interface::ParallelInterface`, maintained and run on real panels. There is no Tufty *2350* crate (checked:
+`pimoroni-tufty2040` is RP2040 and depends on `rp2040-hal`), but the generic stack covers this entirely.
+
+What stays ours is one trait impl, and only because of an accident of layout: `LCD_DB0..DB7` are
+**GPIO32..39**, bits 0..7 of the RP2350's high SIO bank, so a data byte is ONE register write where
+`Generic8BitBus` would drive eight pins individually. `OutputBus` is a one-method trait, so the fast path is
+kept and everything risky is inherited. **The general rule: hand-write the part that is genuinely this
+board's, and nothing else.**
+
+Still unverified on hardware, and now the guesses are narrow: `Orientation` and `ColorInversion`, both named
+at the call site so a mirrored or colour-inverted panel is a one-value edit rather than a bitmask to
+re-derive. A panel that fails to init is **not fatal** — the badge reports it over UART and carries on with
+the backlight, because a blank screen and a failed init look identical from the front.
+
+`ILC_STDOUT` stays `uart` until text is actually rendered on the panel, because an advertisement that runs
+ahead of the hardware is silent and believed.
+
+### D11 — The badge IS a USB drive: drag an app on, read its data off (2026-08-15)
+
+**What an app developer needs from this decision is in [`WORLD-CONSTRAINTS.md`](./WORLD-CONSTRAINTS.md)** —
+the per-world matrix, the naming rules, and the validators that exist versus the ones still worth building.
+
+The goal, stated as a user does: **plug the badge into a PC, drag a compiled app onto it, and test it — and
+see the files that app wrote.** Everything below is what that costs and what it changes.
+
+**The hard constraint, first, because it shapes the UX and cannot be engineered around.** A `no_std` Wasmtime
+has **no Cranelift** — that is what makes it fit — so the badge cannot compile a component. What gets dragged
+is a `pulley32` **`.cwasm`** from `dlc-precompile`, never a raw `.wasm`; a mismatched compiler fails at
+`deserialize_raw` with "compilation settings are not compatible". The AOT step stays on the dev machine. This
+is D1's "mechanically retargeted, not the same bytes" surfacing as something a user can feel.
+
+**This is NOT the BOOTSEL drive.** That volume is mask ROM, exists only in BOOTSEL mode, and its FAT12 is
+generated by the bootloader — we cannot add a directory to it. The badge enumerates **its own** USB
+mass-storage device while running normally. `rp235x-hal` has `usb::UsbBus` implementing `usb_device`'s trait,
+and `rom_data` has the flash-programming entry points, so both halves exist in the pinned toolchain.
+
+```
+/APPS/HELLO.CWASM     the payload catalog — drag one on to install it
+/DATA/HELLO/…         what the app wrote through wasi:filesystem
+/INFO.TXT             generated: region address, each payload's entry method
+```
+
+#### The format must be FAT — and that SUPERSEDES Phase 4's littlefs
+
+Phase 4 planned littlefs over the 16 MB flash, chosen for wear levelling and power-cut resilience. **A PC
+cannot read littlefs.** The moment "visible on a connected PC" became a requirement, the on-flash format
+stopped being a free choice: MSC exposes *blocks*, and the host OS supplies the filesystem driver, so the
+volume has to be something every OS already mounts. That is FAT.
+
+What is given up is real: littlefs is power-cut safe by design and FAT is not. What is gained is the entire
+point of the feature. Phase 4 is therefore **FAT, not littlefs**, and D5's RAM-backed filesystem becomes the
+step before it rather than the alternative to it.
+
+#### ONE WRITER AT A TIME, and this is the decision that keeps it from corrupting
+
+MSC is a **block** protocol: the host OS owns the FAT, caches aggressively, and writes back on its own
+schedule. If the firmware also writes — and it must, since apps persist through `wasi:filesystem` — the two
+corrupt each other. Not a race worth engineering around; a category error.
+
+**CircuitPython already solved this and is worth copying rather than rediscovering:** the filesystem is
+writable from exactly one side, decided **at boot**, and the other side is read-only. So the badge either
+lets the PC write (drag an app on, copy data off) or lets the app write (run and persist), and switching is a
+reset. That is a limitation a user can understand, which is the only kind worth having.
+
+#### The contiguity problem this reintroduces, and its escape hatch
+
+The catalog format guarantees each payload is one contiguous 16-byte-aligned run, which is exactly what
+`deserialize_raw` needs and why loading costs **81 KB rather than 890 KB** (Phase 0c). **A FAT written by a PC
+guarantees nothing of the sort** — the host may fragment a file across clusters.
+
+So loading grows a check: contiguous and aligned → borrow in place, as today; otherwise → copy into PSRAM.
+The badge has 8 MB and hello needs 890 KB, so the fallback is affordable, and it **degrades a property rather
+than failing**. Worth stating plainly because the 81 KB figure is quoted throughout this document and will
+silently stop being true for fragmented payloads. Large clusters make contiguity likely for a freshly written
+file on an empty volume; likely is not guaranteed, which is why the check exists rather than an assumption.
+
+#### Sequencing, and which half is dangerous
+
+**Read first.** A synthetic read-only FAT — generated on the fly from the catalog, directory entries pointing
+at the real payload offsets, the way the bootloader fakes its own drive — makes payloads identifiable, needs
+no flash-write path, and cannot corrupt anything. Payloads never move, so `deserialize_raw` keeps borrowing
+in place.
+
+**Write second, and deliberately.** Programming flash means running with **XIP disabled** — the same hazard
+class as `psram.rs`, which has itself never run on hardware. Doing both on a board that has not yet booted
+once would mean debugging a USB stack and a flash programmer through a single UART simultaneously. The
+existing UF2 drag already installs payloads via BOOTSEL, so nothing is blocked by waiting.
+
 ### D8 — RISC-V IS A REQUIREMENT, not a preference. Xtensa is out of scope.
 
 Pulley's requirement is that Wasmtime compiles for the Rust target, which decides the whole question:
@@ -516,7 +669,7 @@ component: deserialize FAILED: out of memory (failed to allocate 1594168 bytes)
 and tictactoe's is 2.21 MB, so **520 KB of SRAM can never hold either** — no amount of trimming the world
 changes an allocation that is by construction the artifact's size. The badge's 8 MB of PSRAM stops being
 "where the heap should probably live" and becomes the thing without which nothing runs, which promotes it
-from step 2 of the firmware to step 1.
+from the firmware's milestone 2 to its milestone 1.
 
 #### 🟢 WITHDRAWN 2026-08-07 — it was `deserialize` that was mandatory, not PSRAM
 
@@ -577,10 +730,36 @@ is cleared at the badge's pointer width.
 
 The constraining one: **PSRAM is required after all — for instantiation, not for loading.** 2.9 MB against
 520 KB of SRAM. So the original conclusion was right by accident and wrong in its reason, which matters,
-because the reason determines the fix: no amount of shrinking the *artifact* would have helped, and the
-2.9 MB is dominated by the guest's linear memory. That is a TinyGo build-time knob, so "does hello fit in
-SRAM" is not yet a closed question — it is now a question about the guest's heap size rather than about
-Wasmtime. Either way it fits comfortably in the badge's 8 MB.
+because the reason determines the fix: no amount of shrinking the *artifact* would have helped. It fits
+comfortably in the badge's 8 MB.
+
+#### Where the 2.9 MB goes — and why no build knob rescues it (2026-08-07)
+
+A total cannot distinguish the guest's heap from Wasmtime's own structures, and neither can the component
+API: a component instance exposes component-level exports, not the core module's `memory`. The allocator
+can. A pass-through `GlobalAlloc` recording the largest single request splits it, because `MallocMemory`
+backs linear memory with **one** `Vec` and nothing else here comes close:
+
+```
+largest single alloc: 2048 KB (guest linear memory) -> 863 KB is everything else
+```
+
+**The decisive number is 863 KB, not 2048.** Wasmtime's runtime structures alone — outside the guest's
+memory entirely — already exceed the RP2350's 520 KB. **So PSRAM is required no matter what the guest
+does**, and tuning TinyGo cannot change that. That closes the question this measurement was taken to answer.
+
+Two things worth knowing anyway, because they set how much PSRAM gets touched:
+
+- **hello's core module declares 2 pages — 128 KB.** The 2 MB is *growth* at instantiation, from TinyGo's
+  runtime initialising its GC heap, not a size baked into the artifact. Watching only `alloc` and not
+  `realloc` would have reported 128 KB and missed the entire thing.
+- **2048 KB is an upper bound on what the guest asked for.** `MallocMemory::grow_to` calls
+  `Vec::try_reserve`, which is *amortised* — it may allocate more than requested, and 128→2048 KB is exactly
+  the doubling sequence. The guest's real demand is somewhere in (1024, 2048] KB; `byte_len` tracks the true
+  size while `capacity` is what was paid for. On a memory-constrained target that policy can cost up to 2×.
+
+Neither is on the critical path now that 863 KB settles it, but both are the first places to look if the
+badge turns out to be tight.
 
 **The bug that blocked this is worth more than the number, and it is a VERSION bug, not a coding one.**
 `wasmtime-platform.h`'s TLS hooks changed shape between the wasmtime we started against and the one we pin:
@@ -702,6 +881,48 @@ debug from than a single 2.21 MB attempt that either works or does not.
 It also isolates the capability question cleanly: `hello` needs **no filesystem**, so it is the app that
 should run on a badge with no storage at all, while tictactoe is the one that proves D5's RAM backing.
 
+#### 🟡 Milestone 2 firmware BUILT, not yet flashed (2026-08-15)
+
+`rp2350/src/main.rs` now goes all the way: clocks, UART, PSRAM, payload discovery, `deserialize_raw`,
+instantiation through `MinimalHost`, one command, and the result over UART. It builds for every flash-time
+configuration (both worlds, loader and baked), and `make qemu` still passes unchanged at 81 KB / 2911 KB — the
+shared crate did not drift when the badge started using it.
+
+**Nothing here has run on hardware**, and the honest reading of that is: this is the same code QEMU exercises
+plus the parts QEMU cannot model — `psram.rs`, the real M33, the flash region, the backlight. `BRINGUP.md` is
+the procedure, and the ordering of the serial log is the diagnosis.
+
+Two things the firmware gained that are not about running a component, both because a board's only output may
+be one GPIO: it **names itself and its version** before anything can fail, and an empty loader **blinks**
+rather than halting dark — the one thing a single GPIO can say that neither on nor off can.
+
+### Phase 1c — `badge-selftest`, the first app, and it is a SMOKE TEST
+
+**The default world is `undefined`, and the first app written for it should prove the badge works** — run
+after the official apps are installed, to answer "is this board good?" before anyone debugs an app on it.
+
+Why an APP rather than more firmware: the firmware can only report what the firmware can see. A component
+exercises the boundary that actually matters — the advertisement, stdout, events, the absent filesystem —
+*from the guest side*, which is where a capability seam breaks. It is also the honest test of the loader:
+if a scaffolded app dragged onto a badge runs and reports, the whole path is proven.
+
+What it checks, all through the world's own channels:
+
+| | |
+| --- | --- |
+| the advertisement | `ILC_TIER`, `ILC_WORLD`, `ILC_STDOUT`, `ILC_STATUS` are present and consistent |
+| stdout | writes, and reports whether the world said anyone would read it |
+| events | emits one, so the badge has something to colour |
+| filesystem | attempts a write and reports the errno rather than failing — an absent capability is a result |
+| randomness | two calls differ |
+| clocks | monotonic advances; wall clock is reported, not trusted |
+
+It runs under `undefined`, so it gets the STRICTEST profile — which is the right default for a test whose
+job is to be believable everywhere.
+
+*Falsify:* run it against a firmware built with `BADGE_WORLD=minimal` and confirm it reports
+`ILC_STDOUT=none` and adapts, rather than printing into a void.
+
 ### Phase 2 — tictactoe on the badge, over serial, with no screen
 
 The Rust host: instantiate the real component, implement `wasi:cli/stdout` → UART, `wasi:random`,
@@ -721,11 +942,20 @@ buttons to `play`. Host parity gains a third column — same state in, three pro
 
 *Falsify:* the existing "decision probe" — a slot must not notice a win the engine did not report.
 
-### Phase 4 — persistence
+### Phase 4 — persistence, and it is FAT rather than littlefs (amended 2026-08-15)
 
-Swap the RAM filesystem for littlefs over the 16 MB flash. The board survives a power cycle.
+Swap the RAM filesystem for a real one over the 16 MB flash. The board survives a power cycle.
 
-**The app does not change.** If it does, D5 was wrong about what a capability is.
+**~~littlefs~~ → FAT, per D11.** littlefs was the right choice for a filesystem only the badge reads: wear
+levelling, and power-cut resilience by design. It is the wrong choice for one a **PC** reads, because no PC
+mounts littlefs — and "the files an app wrote are visible over USB" is now a requirement rather than a nicety.
+MSC exposes blocks and the host supplies the driver, so the format has to be one every OS already speaks.
+
+The cost is honest and worth restating wherever this is implemented: **FAT is not power-cut safe** and
+littlefs was. A badge yanked mid-write can produce a volume the PC has to repair.
+
+**The app does not change.** If it does, D5 was wrong about what a capability is — and that remains the
+thesis under test regardless of which filesystem sits underneath.
 
 ### Phase 5 — write it down
 

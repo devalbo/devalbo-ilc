@@ -40,8 +40,14 @@
 # WITH `--firmware`, also builds the two crates that CONSUME the library. A lib
 # that compiles is not the same as a firmware that links: an API change keeps the
 # lib green and breaks its callers, which is exactly how `PulleyWidth` went
-# missing once. Slower (a fresh wasmtime build per target), so `ci.sh full` runs
-# the fast half and `ci.sh all` adds this.
+# missing once. Slower (a fresh wasmtime build per target): `ci.sh full` runs the
+# lib half early and this half at the end, so a push that breaks a caller is red
+# on that push rather than in the next morning's cron.
+#
+# `REQUIRE_BADGE_PAYLOAD=1` makes the two built-in-payload modes MANDATORY rather
+# than skipped-if-absent. Set it wherever the coverage is claimed (`ci.sh all`)
+# and leave it unset on a machine that has cargo but not the toolchain that
+# produces `build/hello.pulley32.cwasm`.
 #
 # Its own script rather than an inline step because dlc-platform/embedded is a
 # separate crate tree with its own locks, outside the Go module's workspace.
@@ -69,11 +75,27 @@ try() { # try <label> <dir> <cargo args...>
 	fi
 }
 
+try_test() { # try_test <label> <dir> <cargo args...>
+	local label=$1 dir=$2
+	shift 2
+	echo "  $label"
+	if ! (cd "$dir" && cargo test --quiet "$@"); then
+		echo "  FAILED: $label" >&2
+		rc=1
+	fi
+}
+
 # --- the laptop profile ------------------------------------------------------
 # `--all-targets` so the bins are built too, not just the library. They are
 # `required-features = ["std"]`, so this is the only run that compiles them, and
 # they are how a human actually drives this crate.
 try "std profile, all targets (host)" . --all-targets
+
+# THE TESTS, which this script did not run for its entire existence — it built
+# and never tested, so the catalog format, the synthetic FAT volume, and the name
+# rules shared with the Go side were all covered by tests nothing executed. A
+# build proves it compiles; only this proves it is right.
+try_test "embedded unit tests (host)" . --lib
 
 # --- the board profile -------------------------------------------------------
 # `--lib`, because every bin here takes argv and reads files. The library is the
@@ -87,7 +109,46 @@ if [ "$want_firmware" = 1 ]; then
 	# Each carries its own .cargo/config.toml naming its target, so no --target
 	# here — passing one would override the crate's own choice.
 	try "qemu harness firmware (thumbv7m)" qemu-armv7m --release
-	try "badge bring-up firmware (thumbv8m)" rp2350 --release
+
+	# EVERY FLASH-TIME MODE, not just the default one.
+	#
+	# `build.rs` turns BADGE_PAYLOAD / BADGE_REGION / BADGE_WORLD into `cfg`s, so
+	# a mode nothing builds is a mode that ROTS — and one did: the built-in
+	# payload path stopped compiling when `Payload` gained a field, and nothing
+	# noticed because the default build cfg's that code out. Found by hand, which
+	# is the wrong way to find it.
+	#
+	# A real .cwasm is needed for the built-in modes; if it is not built yet, skip
+	# those rather than failing, because `make badge-cwasm` needs tinygo and this
+	# script is also run in environments that only have cargo.
+	try "badge firmware: empty loader (default)" rp2350 --release
+
+	# `../..` — this script cd'd to dlc-platform/embedded, so the repo root is two
+	# levels up. It said `../../..` until 2026-08-15, which resolved OUTSIDE the
+	# repo, so the file was never there and these two modes were skipped on every
+	# machine and every CI run since they were written. The skip is deliberate and
+	# the message is printed, which is the only reason it was ever noticeable — a
+	# silent one would have been invisible forever.
+	payload="$PWD/../../build/hello.pulley32.cwasm"
+	if [ -f "$payload" ]; then
+		BADGE_PAYLOAD="$payload" \
+			try "badge firmware: built-in payload + region" rp2350 --release
+		BADGE_PAYLOAD="$payload" BADGE_REGION=off \
+			try "badge firmware: built-in only, no region" rp2350 --release
+	elif [ -n "${REQUIRE_BADGE_PAYLOAD:-}" ]; then
+		# A SKIP IS NOT A PASS, WHEREVER COVERAGE IS CLAIMED. The path bug above
+		# survived because skipping was always acceptable — so the tier that says
+		# it builds every flash-time mode now refuses to build four of them and
+		# call it green. `ci.sh` sets this; a cargo-only machine does not, and
+		# still gets the skip below.
+		echo "  FAILED: built-in payload modes — no $payload (run \`make badge-cwasm\`)" >&2
+		rc=1
+	else
+		echo "  (skipping built-in payload modes — run \`make badge-cwasm\` first)"
+	fi
+
+	BADGE_WORLD=minimal try "badge firmware: minimal world" rp2350 --release
+	BADGE_BEAT_MS=700 try "badge firmware: watchable bring-up" rp2350 --release
 fi
 
 exit $rc

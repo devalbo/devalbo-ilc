@@ -1,0 +1,156 @@
+// badge-selftest — native CLI host (the native tier slot, Decision 34).
+//
+// Notice what is NOT here: no `switch args[0]`, no usage string, no flag
+// declarations. The command surface — which subcommands exist, what flags they
+// take, which are required, what the help says — is GENERATED from
+// commands.proto (Decision 29). Add an rpc and you get a subcommand; add a
+// request field and you get a flag, with its help from that field's own `help`
+// option.
+//
+// So the only things written here are the two that are genuinely this tier's:
+//
+//	Render  how a response is printed
+//	Fill    values the user should not have to type (a clock, an id)
+//
+// A SLOT RENDERS; IT NEVER DECIDES. What a command MEANS lives in engine/,
+// shared with the browser — which is why the terminal and a tab cannot disagree.
+// If you find yourself working something out in this file, it belongs in engine/.
+//
+// The engine is linked in-process (no wasm runtime in the run path), which is a
+// build seam and not a fork: the same engine package compiles to wasm for the
+// web tier.
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/devalbo/devalbo-ilc/dlc-platform"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/cli"
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
+	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
+
+	"github.com/you/badge-selftest/gen/go/dlcconfig"
+
+	_ "github.com/you/badge-selftest/engine" // importing the engine registers its commands
+	badge_selftestv1 "github.com/you/badge-selftest/gen/go/badge_selftest/v1"
+)
+
+func main() {
+	// GRANT the filesystem before anything touches it — the native equivalent of
+	// the WASI preopen a browser host installs before instantiating a component.
+	//
+	// `./.badge-selftest/`: project-local like git, so running in two projects keeps two
+	// stores, but CONFINED. That second half matters because `reset-fs` is an
+	// INHERITED verb you did not write, and with the bare working directory as
+	// root it would clear whatever folder the user happened to be standing in.
+	//
+	// Change this to "." if your app's output belongs to the USER rather than to
+	// the app — that is what `dlc` itself does, because `dlc new` has to scaffold
+	// where you are.
+	if err := platform.Boot(platform.BootOptions{
+		FSRoot:         platform.AppFSRoot(dlcconfig.Name),
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
+	}); err != nil {
+		os.Stderr.WriteString("badge-selftest: " + err.Error() + "\n")
+		os.Exit(2)
+	}
+	os.Exit(app(platform.Live, os.Stdout, os.Stderr, os.Stdin).Run(os.Args[1:]))
+}
+
+// app builds the command line. Every dependency is an argument, so the whole CLI
+// can be tested against a fake engine and a buffer — a slot is the one part of
+// an ILC app that parity cannot check, so it needs its own way to fail.
+func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cli.App {
+	return cli.App{
+		Name:  "badge-selftest",
+		Short: "badge-selftest — one engine, a terminal and a browser",
+
+		// This app's commands PLUS the platform's inherited verbs: version,
+		// export-fs, import-fs and reset-fs arrive with the platform's schema
+		// rather than being written here. Every ILC app gets them, and a bundle
+		// exported here imports anywhere else the app runs.
+		Commands: append(append([]clispec.Command{}, badge_selftestv1.AppServiceCLI...), ilcv1.PlatformServiceCLI...),
+
+		Port:   port,
+		Stdout: stdout,
+		Stderr: stderr,
+		Stdin:  stdin,
+
+		Render: map[uint32]cli.Renderer{
+			// THE SLOT, and it prints the TALLY ONLY — deliberately.
+			//
+			// TWO CHANNELS, ONE OF EACH. The engine streams its report to stdout,
+			// which is the only readable channel a host WITHOUT this app's schema
+			// has (the badge runs apps it was never built for). The return value
+			// is the structured answer, for hosts that do have the schema.
+			//
+			// A host should render one or the other. Printing `r.GetText()` here
+			// showed the whole report TWICE on the terminal — the streamed copy
+			// and the rendered one — which is what running it natively caught.
+			// So this adds what the stream cannot: the counts as data, on one
+			// line, for a script that wants an exit condition rather than prose.
+			badge_selftestv1.MethodSelfTest: render(func(out io.Writer, r *badge_selftestv1.SelfTestResponse) error {
+				_, err := fmt.Fprintf(out, "%d/%d checks passed\n", r.GetPassed(), r.GetChecks())
+				return err
+			}),
+
+			ilcv1.MethodVersion: render(func(out io.Writer, r *ilcv1.VersionResponse) error {
+				_, err := fmt.Fprintln(out, r.GetVersion())
+				return err
+			}),
+			ilcv1.MethodExportFs: render(func(out io.Writer, r *ilcv1.ExportFsResponse) error {
+				_, err := out.Write(r.GetBundle()) // the bundle IS the output
+				return err
+			}),
+			ilcv1.MethodImportFs: render(func(out io.Writer, r *ilcv1.ImportFsResponse) error {
+				for _, f := range r.GetFiles() {
+					if _, err := fmt.Fprintln(out, "  + "+f); err != nil {
+						return err
+					}
+				}
+				return nil
+			}),
+			// The derived index (§6.2). Call platform.SetIndexRebuilder in your
+			// engine to give this verb something to do.
+			ilcv1.MethodRebuildIndex: render(func(out io.Writer, r *ilcv1.RebuildIndexResponse) error {
+				_, err := fmt.Fprintf(out, "indexed %d entries\n", r.GetEntries())
+				return err
+			}),
+			ilcv1.MethodResetFs: render(func(out io.Writer, r *ilcv1.ResetFsResponse) error {
+				// The engine returns the TOP-LEVEL entries it removed, not a
+				// file count — `records/` is one entry holding many notes. This
+				// printed "removed 1 file(s)" after deleting two, which reads
+				// as though something survived. Name what was actually removed.
+				removed := r.GetRemoved()
+				if len(removed) == 0 {
+					_, err := fmt.Fprintln(out, "nothing to remove")
+					return err
+				}
+				for _, rm := range removed {
+					if _, err := fmt.Fprintln(out, "  - "+rm); err != nil {
+						return err
+					}
+				}
+				return nil
+			}),
+		},
+	}
+}
+
+// render adapts a typed printer to the byte-level Renderer, so each printer says
+// what it prints and nothing about decoding. Generics, not reflection — the same
+// reason the engine's typed handlers work under TinyGo.
+func render[T any, PT interface {
+	*T
+	UnmarshalVT([]byte) error
+}](print func(io.Writer, PT) error) cli.Renderer {
+	return func(out io.Writer, response []byte) error {
+		msg := PT(new(T))
+		if err := msg.UnmarshalVT(response); err != nil {
+			return err
+		}
+		return print(out, msg)
+	}
+}

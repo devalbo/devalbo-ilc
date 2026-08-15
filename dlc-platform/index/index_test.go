@@ -24,7 +24,7 @@ func inTempRoot(t *testing.T) string {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
-	if err := platform.SetRoot("."); err != nil {
+	if err := platform.SetFSRoot("."); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chdir(prev) })

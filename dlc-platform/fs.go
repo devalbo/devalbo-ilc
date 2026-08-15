@@ -132,17 +132,17 @@ func ReadTree(root string) (*bftNode, error) {
 
 // indexRoot is the one absolute path the tree reader refuses to descend into.
 //
-// Returns "" when no host has granted a root, rather than asking Root() and
+// Returns "" when no host has granted a root, rather than asking FSRoot() and
 // taking its panic. ReadTree is given the directory to read as an ARGUMENT and
 // has never needed the root before; making it panic on a tree it can perfectly
 // well read would be a new failure mode invented by an exclusion. Empty never
 // matches a real path, so the exclusion simply does not apply — which is right,
 // because with no root there is no platform-written index either.
 func indexRoot() string {
-	if !RootGranted() {
+	if !FSRootGranted() {
 		return ""
 	}
-	return filepath.Join(Root(), IndexDir)
+	return filepath.Join(FSRoot(), IndexDir)
 }
 
 func readInto(dir, prefix string, node *bftNode) error {
@@ -243,12 +243,12 @@ func DirIsOccupied(root string) bool {
 // that reached for `os` directly would be one `../` away from writing outside
 // its root.
 //
-// All paths are relative to the host-bound root (Root()), so an app never
+// All paths are relative to the host-bound root (FSRoot()), so an app never
 // composes an absolute path and never learns which tier it is on.
 
 // ReadFile reads one file under the root.
 func ReadFile(path string) ([]byte, error) {
-	full, err := SafeJoin(Root(), path)
+	full, err := SafeJoin(FSRoot(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ func ReadFile(path string) ([]byte, error) {
 
 // WriteFile writes one file under the root, creating parents.
 func WriteFile(path string, content []byte) error {
-	return WriteTree(Root(), []File{{Path: path, Content: content}})
+	return WriteTree(FSRoot(), []File{{Path: path, Content: content}})
 }
 
 // ListDir returns the entry names directly under path, sorted.
@@ -266,7 +266,7 @@ func WriteFile(path string, content []byte) error {
 // directory order differs between filesystems, and native-vs-wasm would diverge
 // on nothing more than that.
 func ListDir(path string) ([]string, error) {
-	full, err := SafeJoin(Root(), path)
+	full, err := SafeJoin(FSRoot(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func ListDir(path string) ([]string, error) {
 // do: classify the error with os.IsNotExist, which does not match TinyGo's WASI
 // errno. It re-stats instead, which is portable.
 func RemoveFile(path string) (bool, error) {
-	full, err := SafeJoin(Root(), path)
+	full, err := SafeJoin(FSRoot(), path)
 	if err != nil {
 		return false, err
 	}

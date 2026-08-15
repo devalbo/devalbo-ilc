@@ -11,21 +11,21 @@ package platform
 //
 // This is the whole filesystem "capability seam" — the logic above it is
 // identical across tiers, which is the point.
-func Root() string { return "/" }
+func FSRoot() string { return "/" }
 
-// SetRoot is a NO-OP here, and deliberately not an error.
+// SetFSRoot is a NO-OP here, and deliberately not an error.
 //
 // The grant already happened: the host installed a preopen before instantiating
 // the component, and the guest cannot rebind it afterwards (see worker.ts — the
 // engine snapshots its preopen, which is why `reset()` reloads the page). App
-// and host code calls SetRoot on both tiers so the startup sequence reads the
+// and host code calls SetFSRoot on both tiers so the startup sequence reads the
 // same everywhere; on this tier it is describing something already true.
-func SetRoot(string) error { return nil }
+func SetFSRoot(string) error { return nil }
 
-// AppRoot is the conventional per-app root. On this tier storage is already
+// AppFSRoot is the conventional per-app root. On this tier storage is already
 // app-private — one OPFS per origin — so the preopen IS the app's directory and
 // there is nothing to nest inside it.
-func AppRoot(string) string { return "/" }
+func AppFSRoot(string) string { return "/" }
 
-// RootGranted is always true: the preopen exists or the component did not load.
-func RootGranted() bool { return true }
+// FSRootGranted is always true: the preopen exists or the component did not load.
+func FSRootGranted() bool { return true }

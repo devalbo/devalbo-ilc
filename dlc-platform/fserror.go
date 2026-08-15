@@ -10,7 +10,7 @@ package platform
 //	native     export-fs: open app-default: no such file or directory
 //	component  export-fs: open /app-default: file does not exist
 //
-// Two divergences in one line. The PATH differs because `Root()` is a relative
+// Two divergences in one line. The PATH differs because `FSRoot()` is a relative
 // directory natively and `/` under WASI, and the joined path lands in the
 // message. The WORDING differs because Go's `os` and TinyGo's WASI runtime
 // phrase the same condition differently. So any command whose error wrapped an
@@ -67,6 +67,6 @@ func pathExists(rel string) bool {
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(Root(), clean))
+	_, err = os.Stat(filepath.Join(FSRoot(), clean))
 	return err == nil
 }

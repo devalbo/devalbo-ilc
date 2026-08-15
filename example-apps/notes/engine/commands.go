@@ -337,7 +337,7 @@ func writeRecord(r *notesv1.Record) error {
 	if err != nil {
 		return err
 	}
-	return platform.WriteTree(platform.Root(), []platform.File{{
+	return platform.WriteTree(platform.FSRoot(), []platform.File{{
 		Path:    filepath.Join(recordsDir, r.Id+".json"),
 		Content: body,
 	}})

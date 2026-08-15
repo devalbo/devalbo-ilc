@@ -31,7 +31,7 @@ func bootIn(t *testing.T, opts BootOptions) error {
 // force, capability verbs registered.
 func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 	if err := bootIn(t, BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
 		t.Fatalf("boot: %v", err)
@@ -42,7 +42,7 @@ func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 	if got := Env().GetFilesystem().GetKind(); got != ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD {
 		t.Fatalf("kind = %v, want CWD", got)
 	}
-	if !RootGranted() {
+	if !FSRootGranted() {
 		t.Fatal("Boot did not grant the root")
 	}
 }
@@ -51,7 +51,7 @@ func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 // not invent one on its behalf — the whole point of the safe default.
 func TestBootDefaultsToNoIsolationClaim(t *testing.T) {
 	if err := bootIn(t, BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
 		t.Fatalf("boot: %v", err)
@@ -68,7 +68,7 @@ func TestBootDefaultsToNoIsolationClaim(t *testing.T) {
 // host would use.
 func TestBootCarriesAnIsolationClaim(t *testing.T) {
 	if err := bootIn(t, BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
 		Isolation:      ilcv1.Isolation_ISOLATION_PER_USER,
 	}); err != nil {
@@ -81,7 +81,7 @@ func TestBootCarriesAnIsolationClaim(t *testing.T) {
 
 // A root is GRANTED, never assumed (§3·5). Boot refusing an empty one keeps
 // that rule at the entry point every host now goes through, rather than
-// relying on Root() panicking later, somewhere that does not name the cause.
+// relying on FSRoot() panicking later, somewhere that does not name the cause.
 func TestBootRefusesAnUngrantedRoot(t *testing.T) {
 	err := bootIn(t, BootOptions{FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
 	if err == nil {
@@ -96,7 +96,7 @@ func TestBootRefusesAnUngrantedRoot(t *testing.T) {
 // host that has not said — not a cue for the platform to infer one from the
 // path, which would be a guess wearing a fact's clothes.
 func TestBootRefusesAnUnsetFilesystemKind(t *testing.T) {
-	err := bootIn(t, BootOptions{Root: "."})
+	err := bootIn(t, BootOptions{FSRoot: "."})
 	if err == nil {
 		t.Fatal("Boot accepted an unset filesystem kind")
 	}
@@ -114,7 +114,7 @@ func TestBootRefusesAnUnsetFilesystemKind(t *testing.T) {
 func TestBootInstallsTheSinkBeforeSendingTheManifest(t *testing.T) {
 	seenWhileBooting := false
 	err := bootIn(t, BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 		Sink:           func(string, []byte) { seenWhileBooting = true },
 	})
@@ -138,7 +138,7 @@ func TestBootInstallsTheSinkBeforeSendingTheManifest(t *testing.T) {
 // import, so Boot says that instead.
 func TestBootWithNothingRegisteredExplainsWhy(t *testing.T) {
 	cleanEnv(t) // no RegisterDiscovered: the engine package was never imported
-	err := Boot(BootOptions{Root: ".", FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	err := Boot(BootOptions{FSRoot: ".", FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
 	if err == nil {
 		t.Fatal("Boot succeeded with an empty registry")
 	}
@@ -172,7 +172,7 @@ func TestBootWithoutAFilesystem(t *testing.T) {
 // itself, and any precedence rule would hide that at the cheapest moment to see
 // it.
 func TestBootRefusesAFilesystemBothWays(t *testing.T) {
-	err := bootIn(t, BootOptions{NoFilesystem: true, Root: "."})
+	err := bootIn(t, BootOptions{NoFilesystem: true, FSRoot: "."})
 	if err == nil {
 		t.Fatal("Boot accepted NoFilesystem together with a granted root")
 	}

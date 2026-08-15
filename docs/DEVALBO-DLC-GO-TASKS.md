@@ -922,10 +922,28 @@ can share one tier. Adding a tier is a table row plus a `templates/component-mod
 
       Also measured incidentally: QEMU's MPS2 boards really do map a 16 MB window at `0x21000000` (probed at
       both ends, not assumed), which is what makes a >3 MB heap available for the measurement at all.
-- [ ] **PSRAM, if instantiation says so.** Chip select is **GPIO8** (`rp2350/src/board.rs`) — the plan's
-      GPIO47 was a different Pimoroni board's pin. `embassy-rp`'s `psram` module is prior art (APS6404L,
-      detection, RAM-resident init) but is **git-only, not in the 0.10.0 release**, and belongs to a HAL this
-      firmware does not use — so it is a port or a HAL switch, not a dependency.
+- [🟡] **PSRAM — driver WRITTEN 2026-08-07, untested on hardware.** `rp2350/src/psram.rs`: QMI CS1, APS6404L
+      detect (KGD `0x5D`) + size decode, reset/QPI-enable, M1 timing and quad read/write (`0xEB`/`0x38`),
+      `XIP_CTRL.WRITABLE_M1`. The heap moves onto it in `main.rs`, falling back to 64 KB of SRAM — enough to
+      *report* a failure, not to instantiate.
+      **Raw MMIO in RAM-resident functions**, because direct mode turns XIP off and a call into flash in that
+      window is an unprintable hard fault. Verified statically (`llvm-nm`: `detect` at `0x20000000`,
+      `configure` at `0x20000076`, both inside `.data`) — the one assumption whose failure has no symptom.
+      `XIP_CS1n` is **F9 on GPIO8**, from the pico-SDK's own RP2350 function table; the PAC's shared funcsel
+      enum calls 9 "GPCK", which is right for most pins and wrong for this one. RP2350 pads also come out of
+      reset **isolated**, and code ported from RP2040 will be missing that clear.
+      *First hardware run should print* `psram: 8 MiB at 0x11000000`. `kgd=0x00`/`0xff` means nothing drove
+      the bus — wrong CS pin or no part fitted.
+- [x] **PSRAM — instantiation said so, 2026-08-07, and the question is closed.** Splitting the 2911 KB with a
+      tracking allocator: **2048 KB guest linear memory, 863 KB everything else.** The 863 KB of Wasmtime
+      structures *alone* exceeds the RP2350's 520 KB, so no TinyGo build knob rescues this and the driver is
+      genuinely required. (Two secondary facts if the badge turns out tight: hello's module declares only 2
+      pages, so the 2 MB is TinyGo's GC growing at init; and `MallocMemory::grow_to` uses `Vec::try_reserve`,
+      which is amortised, so 2048 KB is an upper bound on what the guest actually asked for.)
+      Chip select is **GPIO8** (`rp2350/src/board.rs`) — the plan's GPIO47 was a different Pimoroni board's
+      pin. `embassy-rp`'s `psram` module is prior art (APS6404L, detection, RAM-resident init) but is
+      **git-only, not in the 0.10.0 release**, and belongs to a HAL this firmware does not use — so it is a
+      port or a HAL switch, not a dependency.
 - [ ] **A skeleton per embedded shape.** There are **three** shapes to template eventually — a Go host with a
       screen, a Go host without one, and a Rust `no_std` host running the component — all over **one**
       skeleton, since every tier speaks the same ABI (Decision 25). Until a tier has a slot it stays

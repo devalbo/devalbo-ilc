@@ -1,11 +1,13 @@
-# STEP 1 BRING-UP FIRMWARE for the Pimoroni Tufty 2350 (RP2350B).
+# BRING-UP FIRMWARE for the Pimoroni Tufty 2350 (RP2350B).
 #
-# One question at a time (docs/EMBEDDED-PLAN.md Phase 0):
+# One question at a time (docs/EMBEDDED-PLAN.md Phase 0). These are MILESTONES,
+# never "steps" — BRINGUP.md reserves that word for what a human does, and
+# "stage" for the checks the firmware runs:
 #
-#   step 1  does Wasmtime no_std + Pulley + component-model LINK, and does the
-#           board boot with a PSRAM-backed allocator and a working UART?
-#   step 2  can Pulley instantiate a TRIVIAL component here?
-#   step 3  can it run tictactoe's 2.21 MB .cwasm?
+#   milestone 1  does Wasmtime no_std + Pulley + component-model LINK, and does
+#                the board boot with a PSRAM-backed allocator and a working UART?
+#   milestone 2  can Pulley instantiate a TRIVIAL component here?
+#   milestone 3  can it run tictactoe's 2.21 MB .cwasm?
 #
 # Separate crate from `dlc-platform-embedded` because that one builds for the
 # HOST (std, Phase 1's harness) and this one is bare metal. Same source will be
@@ -29,6 +31,15 @@ panic-halt = "1"
 # memory — so the heap is the 8 MB of PSRAM. See src/main.rs.
 embedded-alloc = "0.6"
 
+# --- the inherited host (EMBEDDED-PLAN D3) -----------------------------------
+# The SAME crate the QEMU harness and the laptop tools build, minus `std`:
+# `minimal.rs` satisfies every import a component declares, and `catalog.rs` is
+# the payload-region format. Depending on it rather than copying it is the whole
+# point of the split — a fix to the WASI shim reaches the board, the emulator and
+# the laptop at once, and the RAM figures measured under QEMU describe the code
+# that actually ships here.
+dlc-platform-embedded = { path = "..", default-features = false }
+
 # --- the runtime under test --------------------------------------------------
 # `default-features = false` is what makes this no_std at all. `pulley` is the
 # interpreter (no JIT on this chip); `component-model` is the whole reason this
@@ -47,6 +58,8 @@ wasmtime = { version = "=46.0.1", default-features = false, features = [
 # so the badge does not hand-write 15 stream functions. `default-features =
 # false` is what makes it no_std; its default is std, like wasmtime's.
 wasmtime-wasi-io = { version = "=46.0.1", default-features = false }
+embedded-graphics = "0.8.2"
+mipidsi = "0.10.0"
 
 [profile.release]
 # `panic = abort` because unwinding needs machinery this target does not have.

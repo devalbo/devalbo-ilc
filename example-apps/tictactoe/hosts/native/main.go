@@ -35,7 +35,7 @@ func main() {
 	// two stores, but CONFINED — which matters because `reset-fs` is inherited
 	// and would otherwise clear whatever directory you happened to be in.
 	if err := platform.Boot(platform.BootOptions{
-		Root:           platform.AppRoot(dlcconfig.Name),
+		FSRoot:         platform.AppFSRoot(dlcconfig.Name),
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
 	}); err != nil {
 		os.Stderr.WriteString("tictactoe: " + err.Error() + "\n")

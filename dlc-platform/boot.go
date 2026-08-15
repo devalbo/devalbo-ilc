@@ -39,15 +39,15 @@ import (
 // version would exist natively and be missing in a browser tab, where no Go host
 // runs at all.
 type BootOptions struct {
-	// Root is the filesystem root being GRANTED (§3·5). Required — there is no
+	// FSRoot is the filesystem root being GRANTED (§3·5). Required — there is no
 	// "wherever you happen to be standing" default, because reset-fs is
 	// inherited and a wrong root makes it delete a user's directory.
 	//
-	// Use platform.AppRoot(name) for the ./.<app>/ convention, or "." for an app
+	// Use platform.AppFSRoot(name) for the ./.<app>/ convention, or "." for an app
 	// whose data IS the user's project (dlc).
-	Root string
+	FSRoot string
 
-	// FilesystemKind describes what Root actually is, for an app deciding what
+	// FilesystemKind describes what FSRoot actually is, for an app deciding what
 	// to cache. Required when a root is granted: the host is the only party that
 	// knows, and guessing from the path would be inference dressed as fact.
 	FilesystemKind ilcv1.FilesystemKind
@@ -77,20 +77,20 @@ type BootOptions struct {
 
 	// NoFilesystem declares that this host has NOTHING TO GRANT.
 	//
-	// Not a convenience. Root's error message has always ended "…or say so
+	// Not a convenience. FSRoot's error message has always ended "…or say so
 	// explicitly", and until now there was no way to say so — so a host with no
 	// storage could not boot at all, and one that lied with a fake root got a
 	// manifest claiming a filesystem was PRESENT. The keyboard tier (RP2040, no
 	// flash filesystem) is the first host for which that is simply the truth.
 	//
 	// A SEPARATE FIELD RATHER THAN AN EMPTY ROOT, because those are different
-	// claims and only one of them is safe to infer. An empty Root is far more
+	// claims and only one of them is safe to infer. An empty FSRoot is far more
 	// often a host that forgot to set it than a host that has no storage, and
 	// reading the first as the second would turn a bug into a silently
 	// degraded app — every filesystem verb quietly missing, which looks like a
 	// platform fault from inside the app.
 	//
-	// It contradicts Root and FilesystemKind, and contradictions are refused
+	// It contradicts FSRoot and FilesystemKind, and contradictions are refused
 	// below rather than resolved by precedence: whichever way a precedence rule
 	// fell, half the callers who hit it would be surprised.
 	NoFilesystem bool
@@ -112,21 +112,21 @@ func Boot(opts BootOptions) error {
 		// Refuse the contradiction instead of picking a winner. A host that sets
 		// both has two beliefs about itself and needs to lose one; guessing which
 		// would hide the confusion at exactly the moment it is cheapest to see.
-		if opts.Root != "" {
+		if opts.FSRoot != "" {
 			return errors.New("boot: NoFilesystem is set but a root was granted — a host has storage or it does not")
 		}
 		if opts.FilesystemKind != ilcv1.FilesystemKind_FILESYSTEM_KIND_UNSPECIFIED {
 			return errors.New("boot: NoFilesystem is set but a filesystem kind was given — there is nothing for it to describe")
 		}
 	} else {
-		if opts.Root == "" {
-			return errors.New("boot: no filesystem root — grant one (see platform.AppRoot), or set NoFilesystem if this host has no storage")
+		if opts.FSRoot == "" {
+			return errors.New("boot: no filesystem root — grant one (see platform.AppFSRoot), or set NoFilesystem if this host has no storage")
 		}
 		if opts.FilesystemKind == ilcv1.FilesystemKind_FILESYSTEM_KIND_UNSPECIFIED {
 			return errors.New("boot: filesystem kind unset — the host is the only party that knows what its root is")
 		}
 
-		if err := SetRoot(opts.Root); err != nil {
+		if err := SetFSRoot(opts.FSRoot); err != nil {
 			return err
 		}
 	}

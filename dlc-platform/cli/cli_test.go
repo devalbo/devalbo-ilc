@@ -541,7 +541,7 @@ func runAgainstLiveEngine(t *testing.T, fsAvailability ilcv1.Availability, args 
 	// registerBlock skips what is already there and syncCapabilityVerbs removes
 	// what should not be.
 	platform.RegisterDiscovered()
-	if err := platform.SetRoot(t.TempDir()); err != nil {
+	if err := platform.SetFSRoot(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	// A DISTINCT revision per call, and this is not bookkeeping: an unchanged

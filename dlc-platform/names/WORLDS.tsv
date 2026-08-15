@@ -1,0 +1,54 @@
+# THE WORLD REGISTRY — the shared vocabulary, and the only copy of it.
+#
+# Explained for app developers in docs/WORLD-CONSTRAINTS.md. That page describes
+# this file; this file defines the rules. If they disagree, the page is the bug.
+#
+# A "world" is a host slot an app can run in. Go (CLI + browser engine), Rust
+# (the badge) and JS all need to name the same set, so the set lives here and
+# each implementation is tested against it — the same arrangement as VECTORS.tsv,
+# and for the same reason: a vocabulary that exists three times drifts.
+#
+# FORMAT: <id> <TAB> <name-profile> <TAB> <notes>
+#
+# `name-profile` is which filesystem rules apply (see VECTORS.tsv). A WORLD is a
+# host slot; a PROFILE is a rule set. They are not the same axis — several worlds
+# share the portable profile, which is the point of having one.
+#
+# ---------------------------------------------------------------------------
+# THE TWO NON-WORLDS, and they are different in a way that matters
+# ---------------------------------------------------------------------------
+#
+# `undefined`  Nobody said. The app declared no world and the host asked for
+#              none. This is the DEFAULT and the common case: an app that runs
+#              everywhere has no reason to name a world. Resolves to the portable
+#              profile, which is the strictest, so the default is the safe one.
+#
+# `unknown`    A world was named, and THIS BUILD DOES NOT RECOGNISE IT. Not the
+#              same as undefined: something was said and could not be understood.
+#              It happens when an app or payload built against a newer registry
+#              meets an older host — which the badge's payload region makes
+#              routine, since payloads outlive the firmware that reads them.
+#
+#              FAIL CLOSED. An unrecognised world gets the portable profile (the
+#              strictest available) and a host that was ASKED for that world must
+#              refuse to run rather than substitute one. Guessing is how an app
+#              written for a richer world silently loses its output.
+#
+undefined	portable	nobody declared a world; the default, and the strict one
+unknown	portable	declared but unrecognised — fail closed, do not substitute
+
+# ---------------------------------------------------------------------------
+# The real worlds
+# ---------------------------------------------------------------------------
+#
+# `native` and `browser` both run the Go engine, so they share an implementation
+# and still differ as slots: one has a terminal and a real filesystem, the other
+# has a DOM and OPFS.
+native	portable	CLI / desktop; a terminal and a real filesystem
+browser	portable	a DOM slot and OPFS
+
+# The badge's two worlds are the same component and the same imports — they are
+# not two WIT worlds (EMBEDDED-PLAN D10). They differ in what reaches a human,
+# and `badge-minimal` is a SIMULATION of a device with only a status LED.
+badge-normal	fat	RP2350: shows the app's text; FAT over USB
+badge-minimal	fat	RP2350: one status colour, no text; FAT over USB

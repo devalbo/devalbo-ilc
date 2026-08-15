@@ -7,6 +7,12 @@
 #   2. make `devbox` available
 #   3. provide the system libraries headless Chromium needs (B3 only)
 #   4. run `./scripts/ci.sh full`   (or `fast`, or `all`)
+#
+# Everything between (2) and (4) is CACHING, which is an environment concern and
+# so belongs here rather than in the suites. See docs/CI-CACHE-PLAN.md — and its
+# Part 0 in particular: caching may make work CHEAPER and may never make coverage
+# SMALLER. There is deliberately no `paths:` filter and no job-level skipping in
+# this file, because the failures this repo actually has are cross-tier.
 name: ci
 
 on:
@@ -48,9 +54,115 @@ jobs:
     steps:
       - uses: actions/checkout@v5 # Node 24 runtime (v4 warns: Node 20 deprecated on runners)
 
+      # DEVBOX CACHES THE TOOLCHAIN ITSELF — the nix store, i.e. the go, tinygo,
+      # rustup, node, qemu and picotool binaries. That is the whole of what
+      # devbox can cache: `devbox cache` is explicitly "commands to interact with
+      # nix cache", and its `--to` uploads nix packages to a binary cache. Build
+      # OUTPUTS are outside its remit, which is what everything below covers.
       - uses: jetify-com/devbox-install-action@v0.15.0
         with:
           enable-cache: "true"
+
+      # WHERE THE CACHES LIVE IS DECLARED IN devbox.json, not discovered here.
+      #
+      # `env` there points GOCACHE, GOMODCACHE, CARGO_HOME, npm_config_cache and
+      # PLAYWRIGHT_BROWSERS_PATH at $PWD/.devbox/cache/*, so a laptop and a runner
+      # have the same layout and this file can name the paths instead of asking
+      # five tools what they decided. One source of truth, and it is the one the
+      # build already obeys.
+      #
+      # TINYGO IS THE EXCEPTION and therefore the only query left: it takes its
+      # cache from Go's os.UserCacheDir() and ignores GOCACHE and XDG_CACHE_HOME
+      # — verified, not assumed. Hard-coding it would fail silently, because
+      # `actions/cache` archives an empty directory and reports success.
+      - name: read cache paths from devbox
+        id: paths
+        run: |
+          echo "tinygo=$(devbox run -q -- tinygo env GOCACHE | tr -d '\"')" 2>/dev/null >> "$GITHUB_OUTPUT"
+          # PROPAGATE the declared browser path to every LATER step, including the
+          # ones that run outside devbox. The playwright install below is one of
+          # those — `--with-deps` needs root, so it is the adapter's job — and
+          # without this it would download browsers to Playwright's own default
+          # while the cache and the suite both use devbox's path. Nothing would
+          # fail; the cache would simply never hit and the suite would re-download
+          # inside the timed run. Read from devbox rather than repeated here, so
+          # devbox.json stays the only place the path is written.
+          echo "PLAYWRIGHT_BROWSERS_PATH=$(devbox run -q -- sh -c 'echo $PLAYWRIGHT_BROWSERS_PATH')" 2>/dev/null >> "$GITHUB_ENV"
+
+      # SEPARATE ENTRIES WITH PER-TOOL KEYS, deliberately — not one cache of
+      # .devbox/cache/. Go's cache should turn over when go.sum moves and npm's
+      # when package-lock.json does; merging them under one key would evict
+      # everything whenever any single lockfile changed, which is worse than
+      # having no cache for the ones that did not.
+      - name: cache go
+        uses: actions/cache@v4
+        with:
+          path: |
+            .devbox/cache/go-build
+            .devbox/cache/go-mod
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      - name: cache tinygo
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.paths.outputs.tinygo }}
+          key: tinygo-${{ runner.os }}-${{ hashFiles('devbox.lock', '**/go.sum') }}
+          restore-keys: tinygo-${{ runner.os }}-
+
+      # Cargo DEPENDENCY SOURCES only — deliberately not target/.
+      #
+      # The five crates under dlc-platform/embedded/ hold ~18 GB of target
+      # directories (11G, 3.5G, 1.5G, 1.0G, 911M) against a ~10 GB repository
+      # budget, so caching them naively cannot work, and pruning them needs a JS
+      # action that cannot see devbox's toolchain. The registry is 414 MB and is
+      # pure download cost, so it is the part worth taking now.
+      #
+      # Cargo.lock is scoped to the embedded crates on purpose: `**/Cargo.lock`
+      # also matches the rustup toolchain sources under .devbox/, which would let
+      # installed content feed a cache key.
+      - name: cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            .devbox/cache/cargo/registry
+            .devbox/cache/cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('dlc-platform/embedded/**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: cache npm
+        uses: actions/cache@v4
+        with:
+          path: .devbox/cache/npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      # Must precede the install step below, or it caches nothing that step has
+      # not already paid to download.
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: pw-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: pw-${{ runner.os }}-
+
+      # WHAT DEVBOX'S init_hook BUILDS, as opposed to what nix ships: devbox.json
+      # `go install`s wit-bindgen-go and protoc-gen-go-lite into .devbox/gobin and
+      # `npm i -g`s jco and protoc-gen-es-lite into .devbox/npm-global.
+      #
+      # `.devbox/virtenv/rustup` is deliberately NOT here: it measures 2.1 GB, a
+      # fifth of the repository cache budget for one entry, and it is a download
+      # rather than a build. Re-fetching is likely cheaper than moving it in and
+      # out every run — likely, not proven, so it is a claim to check against the
+      # runner's timings.
+      - name: cache devbox-installed generators
+        uses: actions/cache@v4
+        with:
+          path: |
+            .devbox/gobin
+            .devbox/npm-global
+          key: devboxgen-${{ runner.os }}-${{ hashFiles('devbox.lock') }}
+          restore-keys: devboxgen-${{ runner.os }}-
 
       # Playwright downloads Chromium itself, but a bare Linux runner lacks the
       # shared libraries it needs to launch. `--with-deps` needs root, so it is

@@ -63,7 +63,7 @@ func main() {
 	// user rather than to itself should do the same; one that keeps a private
 	// store (notes, tictactoe) should not.
 	if err := platform.Boot(platform.BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
 		os.Stderr.WriteString("dlc: " + err.Error() + "\n")

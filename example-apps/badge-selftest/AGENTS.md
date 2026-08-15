@@ -1,0 +1,80 @@
+# AGENTS.md — rules for working on badge-selftest
+
+For anyone (human or agent) changing this project. These are the constraints that are **not** visible from
+reading the code — each exists because breaking it fails somewhere far from the cause.
+
+badge-selftest is an **ILC** app: business logic lives once, in `engine/`, and every tier drives it through
+one command boundary. The framework rules below come from the ILC platform this project depends on.
+
+---
+
+## 1. Where code goes
+
+| Directory | Holds | Never holds |
+| --- | --- | --- |
+| `engine/` | **all** business logic — what a command *means* | platform APIs, argv parsing, UI |
+| `hosts/native/` | this tier's slot: how a response PRINTS. The command surface is generated from the .proto | decisions about what a command means; a hand-written `switch` over subcommands |
+| `hosts/web/` | the browser UI — form state → request | business logic |
+| `cmd/engine-component/` | six lines wiring the wasm exports | anything at all |
+
+If you find yourself deciding something in a host or the UI, it belongs in `engine/`. That is the whole
+point: the terminal and the browser cannot disagree, because neither one decides.
+
+## 2. Method ids
+
+**Yours start at 10000.** 1–9999 is reserved for ILC itself, including capabilities it has not shipped yet.
+
+**Never write an id in Go or TypeScript** — they are generated into `*.registry.pb.go` and
+`*.registry.pb.ts`. Add an rpc to `proto/badge_selftest/v1/commands.proto`, run `make gen`, and the constant
+appears. Hand-writing one is how an id ends up living in two places that silently disagree.
+
+**To hold an id for a command you have not built yet, reserve it in the `.proto`:**
+
+```proto
+service AppService {
+  option (devalbo.options.v1.reserved_method_id) = 10005;
+}
+```
+
+A comment is a hope; this is checked — the generator fails the build if an rpc claims a reserved id.
+(Proto's own `reserved` keyword covers field numbers only, not custom-option values.)
+
+**Changing an id is a breaking change.** It *is* the wire. `buf breaking` cannot see it, so
+`proto/method-ids.lock` is the only guard — commit it. Re-bless deliberately with
+`DLC_ID_LOCK_UPDATE=1 make gen`.
+
+## 3. The engine must stay portable
+
+It compiles natively **and** to wasm, so:
+
+- **Reflection-free**: no `encoding/json`, no `text/template`, no `reflect`. Generics are fine.
+- **Never `os.WriteFile` a caller-supplied path** — use `platform.SafeJoin` / `platform.WriteTree`, so
+  path containment is inherited rather than re-implemented.
+- **Traps already paid for**, do not re-introduce:
+  - `os.IsNotExist` does **not** match TinyGo's WASI errno
+  - `os.RemoveAll` fails under wasip2 even on a plain file — walk with `ReadDir` + `os.Remove`
+  - WASI has no working directory; anchor paths at `platform.FSRoot()`
+
+**Depend on the platform, never copy it.** Copied code is frozen here forever and stops receiving fixes.
+
+## 4. Build order
+
+```bash
+make gen && go mod tidy     # codegen FIRST — engine/ imports generated code, so
+                            # `go mod tidy` alone fails with a confusing
+                            # "unrecognized import path .../gen/go/..."
+make verify                 # build + run the CLI
+make build-web              # wasm component + web assets
+cd hosts/web && npm test     # the browser test that ships with this project
+```
+
+**`dlc` is a required build tool.** `dlc build web` supplies the WIT world from `dlc` itself, so this
+project carries none and cannot be stranded on a stale one.
+
+**`gen/` is generated and not committed. `proto/method-ids.lock` is committed** — it is a wire contract.
+
+## 5. Testing
+
+The two tiers must agree. `go test ./engine/` proves the logic; `cd hosts/web && npm test` proves the same
+engine answers in a browser. **If you change a command, both should still pass without either being
+edited** — if a test needed a tier-specific tweak, logic probably leaked out of `engine/`.

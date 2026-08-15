@@ -37,6 +37,69 @@ impl ByteSink for BufferSink {
     }
 }
 
+/// A buffer the STREAM writes and the HOST reads — the fix for a bug that made
+/// app output unreachable.
+///
+/// **WHAT WAS WRONG.** `get_stdout` handed the guest a fresh `BufferSink`, which
+/// the resource table owned and dropped when the handle closed. Everything the
+/// app printed went into it and nowhere else, so `MinimalHost::stdout()` always
+/// returned empty and the badge could never show an app's output — while
+/// advertising `ILC_STDOUT=display`. Nothing failed; the text simply did not
+/// exist. Found by running an app that prints, which `hello` effectively did not.
+///
+/// **Why a lock at all on a single-core firmware.** `ByteSink` requires `Send`,
+/// so `Rc<RefCell<..>>` is not available, and the honest alternative to a lock is
+/// an `UnsafeCell` with a comment asking everyone to be careful. This is a few
+/// instructions and cannot be got wrong later: an interrupt handler that starts
+/// logging finds a lock rather than a data race.
+#[derive(Clone, Default)]
+pub struct SharedBuffer {
+    inner: alloc::rc::Rc<Shared>,
+}
+
+#[derive(Default)]
+struct Shared {
+    locked: core::sync::atomic::AtomicBool,
+    data: core::cell::UnsafeCell<Vec<u8>>,
+}
+
+// SAFETY: every access goes through `with`, which spins on `locked` and so gives
+// exclusive access for the duration of the closure. `Rc` is not itself atomic,
+// but this host is single-threaded by construction — `block_on` polls on one
+// core with no executor and no preemption — and the lock is what keeps a future
+// interrupt-time writer from tearing the buffer.
+unsafe impl Send for SharedBuffer {}
+unsafe impl Sync for SharedBuffer {}
+
+impl SharedBuffer {
+    fn with<R>(&self, f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
+        use core::sync::atomic::Ordering;
+        while self
+            .inner
+            .locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        // SAFETY: the lock above is held for exactly this scope.
+        let result = f(unsafe { &mut *self.inner.data.get() });
+        self.inner.locked.store(false, Ordering::Release);
+        result
+    }
+
+    /// Take everything written so far, leaving the buffer empty.
+    pub fn take(&self) -> Vec<u8> {
+        self.with(core::mem::take)
+    }
+}
+
+impl ByteSink for SharedBuffer {
+    fn write(&mut self, bytes: &[u8]) {
+        self.with(|buffer| buffer.extend_from_slice(bytes));
+    }
+}
+
 /// An ILC output stream over any byte sink.
 pub struct SinkStream<S: ByteSink>(pub S);
 

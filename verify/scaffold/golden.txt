@@ -3,7 +3,7 @@
 # every user gets — review it like source.
 # path                                              bytes  sha256
 .gitignore                                            145  5865828890494c26
-AGENTS.md                                            3931  eb524f7772665b8c
+AGENTS.md                                            3933  22c217e779111c3b
 Makefile                                             1696  16b2b6b50d826c3f
 README.md                                            1867  11d2a460986f28e8
 cmd/engine-component/main.go                          803  c1c88a6dd5485a45
@@ -12,7 +12,7 @@ dlc.toml                                             1691  6899dc4901184b3a
 engine/commands.go                                   2026  184d65daec41beee
 engine/commands_test.go                               776  2c81312f6b196d71
 go.mod                                                764  ba4570940bc76fd0
-hosts/native/main.go                                 5672  7e915a513995fa19
+hosts/native/main.go                                 5676  2dd669f3cbf94163
 hosts/web/commands.html                               793  e8a9ac3548976c8f
 hosts/web/files.html                                  802  144c2f1bd5c2752d
 hosts/web/index.html                                 1150  09e1f94ed0aef63d

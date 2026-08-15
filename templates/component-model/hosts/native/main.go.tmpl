@@ -50,7 +50,7 @@ func main() {
 	// the app — that is what `dlc` itself does, because `dlc new` has to scaffold
 	// where you are.
 	if err := platform.Boot(platform.BootOptions{
-		Root:           platform.AppRoot(dlcconfig.Name),
+		FSRoot:           platform.AppFSRoot(dlcconfig.Name),
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
 	}); err != nil {
 		os.Stderr.WriteString("{{.ProjectName}}: " + err.Error() + "\n")

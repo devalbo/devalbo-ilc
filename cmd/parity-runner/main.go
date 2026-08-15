@@ -188,10 +188,10 @@ var fixtures = []struct {
 func main() {
 	// GRANT the root, as any host must. The parity harness runs this binary in a
 	// scratch directory it has already created, so "." IS the grant here — but
-	// it has to be said, because `Root()` panics without one rather than
+	// it has to be said, because `FSRoot()` panics without one rather than
 	// defaulting to the working directory. That default is what let `reset-fs`
 	// clear a user's files.
-	if err := platform.SetRoot("."); err != nil {
+	if err := platform.SetFSRoot("."); err != nil {
 		fmt.Fprintln(os.Stderr, "parity-runner:", err)
 		os.Exit(2)
 	}

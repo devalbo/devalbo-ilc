@@ -12,6 +12,24 @@
     "qemu@latest",
     "picotool@2.2.0-a4"
   ],
+  "env": {
+    "//": "WHERE THE TOOL CACHES LIVE — declared here so devbox is the single source of truth, and CI does not have to ask each tool at runtime. The layout is then identical on a laptop and on a runner, and .github/workflows/ci.yml caches these paths by name instead of resolving them.",
+
+    "GOCACHE": "$PWD/.devbox/cache/go-build",
+    "GOMODCACHE": "$PWD/.devbox/cache/go-mod",
+
+    "//cargo": "CARGO_HOME moves the registry (414 MB) and git checkouts into the repo. Note it also becomes where `cargo install` puts binaries: anything already in ~/.cargo/bin keeps working and stays on PATH, but new installs made inside this project land in .devbox/cache/cargo/bin and will not be.",
+    "CARGO_HOME": "$PWD/.devbox/cache/cargo",
+
+    "//npm": "npm reads npm_config_cache; NPM_CONFIG_PREFIX below is a different thing (where -g packages go).",
+    "npm_config_cache": "$PWD/.devbox/cache/npm",
+
+    "//playwright": "Declared rather than defaulted, so the browser download and the CI cache agree by construction.",
+    "PLAYWRIGHT_BROWSERS_PATH": "$PWD/.devbox/cache/ms-playwright",
+
+    "//tinygo": "TINYGO IS NOT HERE, AND IT CANNOT BE. It takes its cache from Go's os.UserCacheDir() and ignores GOCACHE and XDG_CACHE_HOME — verified, not assumed: `GOCACHE=/tmp/x tinygo env GOCACHE` still answers ~/Library/Caches/tinygo. So it stays global and CI resolves it with `tinygo env GOCACHE`, which is the one query the workflow still makes."
+  },
+
   "shell": {
     "init_hook": [
       "export GOBIN=\"$PWD/.devbox/gobin\"",

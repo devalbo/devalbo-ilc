@@ -71,7 +71,7 @@ func inTempRoot(t *testing.T) string {
 	// biting exactly where it should: a caller that skips the manifest gets a
 	// half-registered engine, and a test is a caller like any other.
 	if err := platform.Boot(platform.BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
 		t.Fatal(err)

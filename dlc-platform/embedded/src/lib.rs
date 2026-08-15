@@ -18,10 +18,15 @@
 extern crate alloc;
 
 pub mod block_on;
+pub mod catalog;
 pub mod cli_bindings;
 pub mod command;
+pub mod fatview;
 pub mod no_vm;
 pub mod minimal;
+pub mod names;
+#[rustfmt::skip]
+mod names_gen;
 pub mod uart;
 pub mod pulley;
 

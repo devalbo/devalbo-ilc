@@ -220,7 +220,7 @@ inferred from whichever host was read last.
 ```
 1. guest init()   platform.RegisterCore(); app.RegisterCore()   ← version + SetEnvironment only
 2. host main()    platform.SetVersion(dlcconfig.Version)
-3. host           platform.SetRoot(platform.AppRoot(name))      ← the §3·5 grant
+3. host           platform.SetFSRoot(platform.AppFSRoot(name))      ← the §3·5 grant
 4. host           subscribe(sink)                               ← before anything can emit
 5. host           Execute(2, Environment{…})                    ← D4 / D7
      └─ engine    Env() answers; capability verbs register

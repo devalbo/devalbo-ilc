@@ -1,0 +1,79 @@
+# THE PORTABLE NAME PROFILE — the shared truth, and the only copy of it.
+#
+# Explained for app developers in docs/WORLD-CONSTRAINTS.md. That page describes
+# this file; this file defines the rules. If they disagree, the page is the bug.
+#
+# WHY A FILE RATHER THAN A LIBRARY. Apps are Go (TinyGo -> wasm), the badge host
+# is Rust, the browser host is JS. No library spans those, so "shared validator"
+# has to mean one SPECIFICATION with implementations that are checked against it —
+# the same shape as this repo's golden parity vectors, and for the same reason:
+# two validators that agree today drift silently, and the drift shows up as an app
+# that writes a file one tier can read and another cannot.
+#
+# Every implementation MUST have a test that reads this file and asserts every
+# row. A new rule is added HERE first; the implementations then go red until they
+# agree. See dlc-platform/embedded/src/names.rs and dlc-platform/names.go.
+#
+# FORMAT: <path> <TAB> <verdict>
+# verdict is `ok`, or the error kind:
+#   empty | too-long | illegal-character | reserved-traversal
+#   reserved-device | bad-edge | bad-structure
+#
+# THE RULES, in one sentence each:
+#   lowercase a-z, 0-9, '-', '_', '.'      — because FAT is case-insensitive and POSIX is not
+#   relative, '/'-separated                 — because a tier decides where an app's files live
+#   no '.' or '..'                          — reserved for traversal everywhere
+#   no Windows device names                 — the badge's files get read on a PC
+#   no leading '.'/'-', no trailing '.'/'-' — Windows silently strips some of these
+
+# --- ordinary names, which must keep working ------------------------------
+hello	ok
+a	ok
+save.json	ok
+board-state	ok
+x_9.dat	ok
+logs/day-1.txt	ok
+a/b/c/d.txt	ok
+console	ok
+hello.pulley32	ok
+2026-08-15.log	ok
+
+# --- case: the rule with the worst failure mode ---------------------------
+# On POSIX these are two files; on FAT they are one. An app that creates both
+# works on a laptop and silently loses data on a badge.
+Save.json	illegal-character
+HELLO	illegal-character
+mixedCase	illegal-character
+
+# --- characters that do not survive every tier ----------------------------
+my save.json	illegal-character
+café.txt	illegal-character
+what?.txt	illegal-character
+star*.txt	illegal-character
+a:b	illegal-character
+semi;colon	illegal-character
+
+# --- traversal and structure ----------------------------------------------
+.	reserved-traversal
+..	reserved-traversal
+a/../b	reserved-traversal
+/etc/passwd	bad-structure
+a\b	bad-structure
+a//b	bad-structure
+a/	bad-structure
+
+# --- edges a host would silently rewrite ----------------------------------
+save.	bad-edge
+.hidden	bad-edge
+-flag	bad-edge
+trailing-	bad-edge
+
+# --- Windows device names, extension or not -------------------------------
+con	reserved-device
+nul	reserved-device
+com1.txt	reserved-device
+lpt9	reserved-device
+aux	reserved-device
+
+# --- empty ------------------------------------------------------------------
+	empty

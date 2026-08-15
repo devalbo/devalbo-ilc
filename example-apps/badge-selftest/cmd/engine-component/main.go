@@ -1,0 +1,19 @@
+//go:build tinygo
+
+// Wasip2 component entrypoint for badge-selftest — the artifact the badge runs.
+//
+// It is this short because the WIT glue is app-agnostic and belongs to the ILC
+// platform: dispatch is by method_id into one registry, so nothing here needs to
+// know which commands exist. Importing the two packages is the whole job.
+//
+// Build it with `dlc build rp2350` (never tinygo directly): the WIT world lives
+// in dlc, not in this project, so a world change reaches you on the next build.
+package main
+
+import (
+	_ "github.com/you/badge-selftest/engine" // registers this app's commands
+
+	_ "github.com/devalbo/devalbo-ilc/dlc-platform/wasm" // wires the WIT exports
+)
+
+func main() {}

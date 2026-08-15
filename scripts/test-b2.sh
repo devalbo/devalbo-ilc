@@ -16,6 +16,11 @@ cd "$(dirname "$0")/.." || exit 2
 if [ -t 1 ]; then G=$'\033[32m'; R=$'\033[31m'; Z=$'\033[0m'; else G=''; R=''; Z=''; fi
 
 fail=0
+# SAME REASON AS ci.sh's: B2 is 410s of a 583s `full` run — 70% of every push —
+# and which of the eight checks that is was unknown, because most of them build
+# wasm and any one of them could have been most of it. A summary of the slowest,
+# so the answer is in the output rather than in someone's stopwatch.
+timings=()
 # Sanity check, not a tree audit. The self-test injects a `//go:build tinygo`
 # probe; a survivor silently changes what later checks compile, on one tier only.
 # One `ls` is enough to turn that into a named failure.
@@ -23,13 +28,15 @@ tree_clean() { [ -z "$(ls engine/zz_*.go 2>/dev/null)" ]; }
 
 run_check() { # id  label  command...
 	local id="$1" label="$2"; shift 2
+	local started=$SECONDS
 	printf "%s — %s:\n" "$id" "$label"
 	tree_clean || { printf "  ${R}✗${Z} stray engine/zz_*.go BEFORE %s — delete it\n" "$id"; exit 2; }
 	if "$@"; then
-		printf "  ${G}✓${Z} pass\n\n"
+		printf "  ${G}✓${Z} pass (%ss)\n\n" "$((SECONDS - started))"
 	else
-		printf "  ${R}✗${Z} FAILED\n\n"; fail=$((fail+1))
+		printf "  ${R}✗${Z} FAILED (%ss)\n\n" "$((SECONDS - started))"; fail=$((fail+1))
 	fi
+	timings+=("$((SECONDS - started)) $id $label")
 	tree_clean || { printf "  ${R}✗${Z} %s left engine/zz_*.go behind\n" "$id"; exit 2; }
 }
 
@@ -51,6 +58,10 @@ run_check "T-B2.6" "platform gen is committed and current (consumers cannot run 
 # who installed the package.
 run_check "T-B2.7" "@devalbo/dlc-web ships what it advertises" ./scripts/verify-npm-package.sh
 
+echo "-------------------------------------------------"
+printf "%s total, slowest checks:\n" "${SECONDS}s"
+printf '%s\n' "${timings[@]}" | sort -rn | head -5 |
+	while read -r took rest; do printf "  %5ss  %s\n" "$took" "$rest"; done
 echo "-------------------------------------------------"
 if [ "$fail" -eq 0 ]; then
 	echo "→ B2 GREEN (engine boundary verified: correctness · parity · falsification)"

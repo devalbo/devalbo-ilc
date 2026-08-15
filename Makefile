@@ -60,6 +60,24 @@ scaffold-golden: ## re-bless the §11 golden FS snapshot after a deliberate temp
 	go run ./cmd/scaffold-golden > verify/scaffold/golden.txt
 	@echo "re-blessed verify/scaffold/golden.txt — review the diff"
 
+.PHONY: gen-names
+gen-names: ## regenerate the name-rule tables into Go and Rust from names/RULES.json
+	# ONE SPEC, TWO LANGUAGES. Apps are Go and the badge host is Rust, so the rules
+	# used to be written twice and VECTORS.tsv existed to DETECT the drift between
+	# them. Generating both removes the drift instead. Edit names/RULES.json (or
+	# WORLDS.tsv), run this, and commit the generated files.
+	@go run ./cmd/gen-names
+
+.PHONY: verify-names
+verify-names: ## fail if the generated name tables are stale, or the two implementations disagree
+	# THE GUARD THAT MAKES CODEGEN WORTH ANYTHING. Without it, someone edits a
+	# generated file by hand and the single source quietly becomes a third copy.
+	@go run ./cmd/gen-names -check
+	# ...and the vectors still run, because codegen makes the two implementations
+	# IDENTICAL and cannot make them CORRECT. Different question, still worth asking.
+	@cd dlc-platform && go test . -run 'TestName|TestCollision|TestWorld|TestUndefined' >/dev/null && echo "  go name rules agree with the shared vectors"
+	@cd dlc-platform/embedded && cargo test -q --lib names 2>/dev/null | tail -1
+
 .PHONY: verify-scaffold-golden
 verify-scaffold-golden: ## §11: `dlc new` emits exactly the tree we meant
 	@go run ./cmd/scaffold-golden -check
@@ -99,12 +117,66 @@ qemu: ## run the embedded tier on an emulated 32-bit ARM core and print its RAM 
 		-semihosting-config enable=on,target=native \
 		-kernel dlc-platform/embedded/qemu-armv7m/target/thumbv7m-none-eabi/release/dlc-qemu-armv7m
 
+.PHONY: badge-cwasm
+badge-cwasm: ## AOT-compile hello for the badge (gitignored; regenerate freely)
+	# The SAME artifact the QEMU harness runs — one payload, two places that load
+	# it — so a hardware failure cannot be the bytes.
+	@test -f example-apps/hello/build/engine.component.wasm \
+		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
+	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
+		CWASM_OUT=build/hello.pulley32.cwasm
+
+.PHONY: hello-component
+hello-component: ## hello's wasm component — what the badge payload is AOT-compiled from
+	# `dlc build web` is what produces it, so this needs the dlc BINARY on PATH —
+	# the same idiom verify-example-apps-web.sh uses, in a temp dir so it cannot
+	# leave an executable at the repo root (AGENTS.md §6).
+	#
+	# ITS OWN TARGET because two callers want it and only one of them is the web
+	# tier: `ci.sh full` gets this component as a side effect of B3, while an
+	# embedded-only CI slice runs no browser at all and would otherwise have
+	# nothing to AOT. A side effect that is load-bearing should be nameable.
+	@BIN="$$(mktemp -d)"; trap 'rm -rf "$$BIN"' EXIT; \
+		go build -buildvcs=false -o "$$BIN/dlc" $(HOST_SRC) \
+		&& PATH="$$BIN:$$PATH" $(MAKE) -C example-apps/hello build-web
+
 .PHONY: badge-uf2
-badge-uf2: ## build the badge bring-up firmware and convert it to a flashable .uf2
+badge-uf2: ## build the badge firmware (an empty loader by default) as a flashable .uf2
+	# THE DEFAULT IS AN EMPTY LOADER: app-agnostic firmware that runs whatever has
+	# been dragged onto the payload region and shows what comes back. Nothing is
+	# baked in unless asked for, so adding an app does not mean rebuilding
+	# firmware — which is the whole point of the region.
+	#
+	# WHAT IT CAN RUN is a FLASH-TIME choice (rp2350/build.rs):
+	#
+	#   make badge-uf2                                     empty loader        (default)
+	#   make badge-uf2 BADGE_PAYLOAD=$$PWD/build/x.cwasm   that app baked in, region still scanned
+	#   make badge-uf2 BADGE_PAYLOAD=... BADGE_REGION=off  that app and nothing else
+	#
+	# WHICH WORLD is the other flash-time choice (rp2350/src/world.rs). Same
+	# component, same imports, same .cwasm — they differ in what reaches a human,
+	# and minimal is a strict subset of normal:
+	#
+	#   make badge-uf2                      normal  — shows the app's text  (default)
+	#   make badge-uf2 BADGE_WORLD=minimal  minimal — one status colour, no text
+	#
+	# HOW FAST IT BOOTS is the third. The bring-up narrates itself on the screen;
+	# BADGE_BEAT_MS is how long each stage lingers. Zero (the default) is normal
+	# boot — the stages still appear, at machine speed. Use a beat for a FIRST
+	# bring-up, where being able to read which check failed is the whole point:
+	#
+	#   make badge-uf2                      boot as fast as the board can  (default)
+	#   make badge-uf2 BADGE_BEAT_MS=700    watchable — ~10s, readable per stage
+	#
 	# picotool, NOT elf2uf2-rs — because it tags the UF2 family and elf2uf2-rs got
 	# it wrong: it emitted family `rp2040` from RP2350 firmware, which would have
 	# been flashed at a Tufty 2350 with nothing in the build to explain the result.
-	cd dlc-platform/embedded/rp2350 && cargo build --release
+	cd dlc-platform/embedded/rp2350 && \
+		BADGE_PAYLOAD="$(BADGE_PAYLOAD)" \
+		BADGE_REGION="$(BADGE_REGION)" \
+		BADGE_WORLD="$(BADGE_WORLD)" \
+		BADGE_BEAT_MS="$(BADGE_BEAT_MS)" \
+		cargo build --release
 	@mkdir -p build
 	@cp dlc-platform/embedded/rp2350/target/thumbv8m.main-none-eabihf/release/dlc-rp2350-bringup build/badge-bringup.elf
 	picotool uf2 convert build/badge-bringup.elf build/badge-bringup.uf2
@@ -116,6 +188,57 @@ badge-uf2: ## build the badge bring-up firmware and convert it to a flashable .u
 		picotool info build/badge-bringup.uf2 | head -3; exit 1; }
 	@ls -l build/badge-bringup.uf2 | awk '{print "  flashable: "$$5" bytes"}'
 
+
+.PHONY: badge-payload
+badge-payload: ## pack payloads into a UF2 you can DRAG onto the badge's BOOTSEL drive
+	# THE POINT: adding an app to a badge should not need a toolchain. Hold BOOT,
+	# tap RESET, drag the .uf2 onto the RP2350 drive, reset. The bootloader writes
+	# each block to the address that block names — 0x10100000 and up, which is the
+	# payload region — so the FIRMWARE IS UNTOUCHED. Different sectors entirely.
+	#
+	# IT MUST BE A UF2, and this is the one thing that surprises people: the
+	# BOOTSEL drive is a synthetic FAT12 volume, not storage. Its only real
+	# operation is parsing UF2 blocks. A .cwasm dragged onto it is accepted by the
+	# Finder and discarded by the bootloader, silently, with no error anywhere.
+	#
+	#   make badge-payload                                    just hello
+	#   make badge-payload PAYLOADS="hello=build/hello.pulley32.cwasm ttt=build/ttt.pulley32.cwasm"
+	#
+	# ONE IMAGE, ALL PAYLOADS. The catalog terminates on a bad magic rather than
+	# carrying an index, so images append cleanly — but a SECOND drag has to know
+	# the offset the first one ended at, and nothing on the badge tells you that.
+	# Packing them together sidesteps the bookkeeping; OFFSET is there for when you
+	# genuinely want to add one without rewriting the rest.
+	@$(if $(PAYLOADS),,$(MAKE) badge-cwasm)
+	# `--manifest-path` rather than `cd`, so the tool runs with the REPO ROOT as
+	# its working directory and a relative path in PAYLOADS means what the person
+	# typing it meant. Previously this cd'd into dlc-platform/embedded first, so
+	# the README's own documented command —
+	#   make badge-payload PAYLOADS="hello=build/hello.pulley32.cwasm"
+	# — resolved against the wrong directory and died with a bare ENOENT naming
+	# no file. Absolute paths worked, which is exactly why it survived: every
+	# invocation in this Makefile passes $(PWD).
+	cargo run -q --manifest-path dlc-platform/embedded/Cargo.toml --bin payload-image -- \
+		build/badge-payload.bin \
+		$(or $(PAYLOADS),hello=build/hello.pulley32.cwasm)
+	# THE ADDRESS COMES FROM board.rs, and it is read rather than repeated for a
+	# reason this target already got wrong once: the base moved from 0x10100000 to
+	# 0x10400000 when a built-in payload turned out to live in FLASH, this line did
+	# not, and a payload written 3 MB below where the firmware scans produces a
+	# badge that reports "no payloads" with the file sitting right there. Nothing
+	# fails; it just does not work.
+	#
+	# `--family data` because this is NOT executable code — it is bytes at an
+	# address. Tagging it as an RP2350 image would invite the bootloader to treat
+	# a payload as firmware.
+	@base=$$(sed -n 's/^pub const PAYLOAD_BASE: usize = \(0x[0-9A-Fa-f_]*\);/\1/p' \
+		dlc-platform/embedded/rp2350/src/board.rs | tr -d _); \
+	test -n "$$base" || { echo "  x could not read PAYLOAD_BASE from board.rs"; exit 1; }; \
+	offset=$(or $(OFFSET),$$base); \
+	echo "picotool uf2 convert build/badge-payload.bin -t bin -o $$offset --family data build/badge-payload.uf2"; \
+	picotool uf2 convert build/badge-payload.bin -t bin \
+		-o $$offset --family data build/badge-payload.uf2; \
+	ls -l build/badge-payload.uf2 | awk -v o=$$offset '{print "  draggable: "$$5" bytes -> "o}'
 
 .PHONY: embedded-cwasm
 embedded-cwasm: ## AOT a loose component — the escape hatch under `dlc build <tier>`

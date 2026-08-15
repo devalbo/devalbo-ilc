@@ -110,7 +110,7 @@ func snapshot() ([]byte, error) {
 	// unknown method_id 100` — which is what this tool started reporting the
 	// moment discovery landed. Every in-process caller is a host.
 	if err := platform.Boot(platform.BootOptions{
-		Root:           ".",
+		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
 		return nil, err

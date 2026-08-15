@@ -360,13 +360,13 @@ func removeRecursive(path string) error {
 // whole root. Exported because app commands need the same containment.
 func ResolveUnder(prefix string) (string, error) {
 	if prefix == "" {
-		return Root(), nil
+		return FSRoot(), nil
 	}
 	clean, err := SafeJoin("", prefix)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(Root(), clean), nil
+	return filepath.Join(FSRoot(), clean), nil
 }
 
 // emitDataChanged announces that the filesystem moved under a prefix.

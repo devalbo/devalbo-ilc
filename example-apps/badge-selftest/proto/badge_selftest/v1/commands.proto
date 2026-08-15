@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package badge_selftest.v1;
+
+option go_package = "github.com/you/badge-selftest/gen/go/badge_selftest/v1;badge_selftestv1";
+
+import "devalbo/options/v1/options.proto";
+
+// badge-selftest — does this host actually work?
+//
+// THE FIRST APP WRITTEN FOR THE UNDEFINED WORLD, and the point of it is that it
+// is an APP rather than more firmware. Firmware can only report what firmware
+// can see; a component exercises the capability seam FROM THE GUEST SIDE, which
+// is where that seam actually breaks. It is also the honest test of the loader:
+// if a scaffolded app dragged onto a badge runs and reports, the whole path is
+// proven end to end.
+//
+// METHOD IDS — two permanent bands, and yours is the second:
+//
+//	    1 –  9999   ILC itself
+//	10000 +         YOURS
+service AppService {
+  // Check every capability this host claims, and report what was actually found.
+  rpc SelfTest(SelfTestRequest) returns (SelfTestResponse) {
+    option (devalbo.options.v1.method_id) = 10000;
+  }
+}
+
+message SelfTestRequest {
+  // Skip the checks that write. A host may be mounted read-only elsewhere
+  // (the badge's USB volume is single-writer), and a self-test that corrupts
+  // what it is testing is worse than no self-test.
+  bool read_only = 1 [
+    (devalbo.options.v1.help) = "skip checks that write",
+    (devalbo.options.v1.short) = "r"
+  ];
+}
+
+message SelfTestResponse {
+  // The human-readable report. Deliberately the whole answer rather than a
+  // struct: it is rendered on a 40-column badge screen, printed to a terminal,
+  // and dropped into a DOM, and every tier can show a string.
+  string text = 1;
+  // How many checks ran, and how many passed. A count is what a caller can act
+  // on without parsing prose.
+  uint32 checks = 2;
+  uint32 passed = 3;
+}

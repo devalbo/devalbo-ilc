@@ -14,10 +14,49 @@ use panic_semihosting as _;
 use core::fmt::Write;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::{debug, hio};
+use core::alloc::{GlobalAlloc, Layout};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use embedded_alloc::LlffHeap as Heap;
 
-#[global_allocator]
 static HEAP: Heap = Heap::empty();
+
+/// A pass-through allocator that remembers the BIGGEST single request.
+///
+/// WHY, and it is the only way to ask this question here. After
+/// `deserialize_raw`, ~2.8 MB of the cost is instantiation — but "guest linear
+/// memory" and "Wasmtime's own structures" are indistinguishable in a total.
+/// The component API cannot help: a component instance exposes component-level
+/// exports, not the core module's `memory`, so there is nothing to read a size
+/// from. The allocator sees what neither can show: Wasmtime's `MallocMemory`
+/// backs linear memory with a single `Vec`, so the guest's heap appears as one
+/// large allocation and nothing else here comes close.
+///
+/// Diagnostic scaffolding, not a feature — but cheap enough to leave, and the
+/// next person asking "where did the RAM go" would otherwise rebuild it.
+struct Tracking;
+
+static PEAK_ALLOC: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for Tracking {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        PEAK_ALLOC.fetch_max(layout.size(), Ordering::Relaxed);
+        unsafe { HEAP.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { HEAP.dealloc(ptr, layout) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // GROWTH LIVES HERE, not in `alloc`. The guest's memory starts at the 2
+        // pages its core module declares and grows by `memory.grow`, which is a
+        // `Vec` realloc — so watching only `alloc` would report 128 KB and miss
+        // the entire thing being measured.
+        PEAK_ALLOC.fetch_max(new_size, Ordering::Relaxed);
+        unsafe { HEAP.realloc(ptr, layout, new_size) }
+    }
+}
+
+#[global_allocator]
+static ALLOC: Tracking = Tracking;
 
 /// The FALLBACK heap, used only if the PSRAM window below is not there.
 ///
@@ -128,11 +167,35 @@ fn measure_instantiation(out: &mut impl Write, payload: &'static [u8]) {
     match host.execute(10000, &[]) {
         Ok(r) => {
             let _ = writeln!(out, "execute(10000): success={}", r.success);
+            // STDOUT, not `output`. A command's return value is PROTOBUF, and
+            // rendering it needs the app's schema — which no generic host has.
+            // `hello` looked readable only because its encoded response happened
+            // to be valid UTF-8 (leading field tag 0x0a reads as a newline, which
+            // is where that stray blank line came from); an app with a numeric
+            // field printed nothing at all. Found by running badge-selftest here.
+            let printed = host.stdout();
+            if let Ok(s) = core::str::from_utf8(&printed) {
+                if !s.is_empty() {
+                    let _ = writeln!(out, "stdout:\n{s}");
+                }
+            }
             if let Ok(s) = core::str::from_utf8(&r.output) {
-                let _ = writeln!(out, "output: {s}");
+                if !s.is_empty() {
+                    let _ = writeln!(out, "output(raw): {s}");
+                }
             }
             let peak = HEAP.used() - before;
             let _ = writeln!(out, "heap after execute: {} KB", peak / 1024);
+            // THE SPLIT the total cannot show: the largest single request is the
+            // guest's linear memory, because MallocMemory backs it with one Vec.
+            // Everything else Wasmtime allocates here is orders smaller.
+            let biggest = PEAK_ALLOC.load(Ordering::Relaxed);
+            let _ = writeln!(
+                out,
+                "largest single alloc: {} KB (guest linear memory) -> {} KB is everything else",
+                biggest / 1024,
+                peak.saturating_sub(biggest) / 1024
+            );
             // THE VERDICT, computed. What matters is not whether this run passed
             // but whether the badge has the RAM, and that is one comparison —
             // stated here so it cannot quietly stop being checked.

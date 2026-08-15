@@ -53,7 +53,7 @@ It compiles natively **and** to wasm, so:
 - **Traps already paid for**, do not re-introduce:
   - `os.IsNotExist` does **not** match TinyGo's WASI errno
   - `os.RemoveAll` fails under wasip2 even on a plain file — walk with `ReadDir` + `os.Remove`
-  - WASI has no working directory; anchor paths at `platform.Root()`
+  - WASI has no working directory; anchor paths at `platform.FSRoot()`
 
 **Depend on the platform, never copy it.** Copied code is frozen here forever and stops receiving fixes.
 

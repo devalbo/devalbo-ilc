@@ -26,9 +26,9 @@ func inTempRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// GRANT the root, as a host does. There is no implicit "wherever you are
-	// standing" any more: `Root()` panics without a grant, because falling back
+	// standing" any more: `FSRoot()` panics without a grant, because falling back
 	// to the cwd is what let `reset-fs` clear a user's directory.
-	if err := platform.SetRoot("."); err != nil {
+	if err := platform.SetFSRoot("."); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(prev) })

@@ -62,10 +62,22 @@ not merely bloat, it fails to build. Generics are fine and are how the typed-han
 **Never `os.WriteFile` a caller-supplied path.** Use `platform.SafeJoin` / `platform.WriteTree`, so path
 containment is inherited rather than re-implemented per command.
 
+**"Root" is always QUALIFIED — there is more than one.** Two unrelated roots already exist in this codebase,
+and an unqualified `Root` reads as whichever one you happened to be thinking about:
+
+| name | what it is |
+| --- | --- |
+| `platform.FSRoot()`, `SetFSRoot`, `AppFSRoot`, `BootOptions.FSRoot` | **the filesystem root granted to the engine** (§3·5) |
+| `TierSpec.Root` in `dlc.toml` | **a tier's host-code directory**, e.g. `hosts/native` |
+
+Renamed 2026-08-15, before the collision cost anything — the two were already one keyword apart in files that
+import each other. A third root (a URL root, a resource-table root, a display origin) should be qualified the
+same way rather than claiming the bare word.
+
 **Portability traps already paid for** — do not re-introduce:
 - `os.IsNotExist` / `errors.Is(err, fs.ErrNotExist)` do **not** match TinyGo's WASI errno
 - `os.RemoveAll` fails under wasip2 (errno 52) even on a plain file — walk with `ReadDir` + `os.Remove`
-- WASI has no working directory; anchor paths at `platform.Root()` — which a host must GRANT (§3·5)
+- WASI has no working directory; anchor paths at `platform.FSRoot()` — which a host must GRANT (§3·5)
 
 ## 3. The platform boundary
 
@@ -137,7 +149,7 @@ author writes it — and with the working directory as root it recursively clear
 run in. It deleted a bundle during development; in a user's home directory it is data loss from a command
 the app never opted into. A default here fails as destruction, not as an error.
 
-**The convention is `./.<app>/`** (`platform.AppRoot(dlcconfig.Name)`) — project-local like git, so two
+**The convention is `./.<app>/`** (`platform.AppFSRoot(dlcconfig.Name)`) — project-local like git, so two
 projects keep two stores, but confined, so `reset-fs` can only ever clear the app's own subtree.
 **`dlc` overrides to `"."`** because its data IS the user's project: `dlc new` must scaffold where you are
 standing. The rule generalises — an app whose output belongs to the *user* takes `"."`; one that keeps a
@@ -393,6 +405,26 @@ check, break something on purpose and confirm it goes red.
 
 **Prefer invariants to exhaustive lists.** Pinning every scaffold path made three consecutive template
 additions look like regressions. Assert what must be true.
+
+**A TEST THAT CI DOES NOT RUN IS A COMMENT.** The default position when writing a check is that it becomes a
+REGRESSION DETECTOR — wired into `./scripts/ci.sh` in the same change that creates it, not "later". A test
+added to a tree CI does not walk gives the worst outcome available: the reassurance of coverage with none of
+it, and it stays green through the exact regression it was written for.
+
+This is a rule because it keeps happening, in the same shape, and the checks that went dark were load-bearing
+each time:
+
+| when | what silently never ran |
+| --- | --- |
+| `hosts/` was vetted but not tested | the `dlc.toml` slot gate |
+| `dlc-platform` is a separate module, so `./...` never reached it | dispatch, path containment, BFT, the environment manifest — six test files |
+| `cmd/` was vetted but not tested | the codegen guard keeping the Go and Rust name rules from drifting |
+| `check-embedded.sh` built and never tested | the catalog format, the synthetic FAT volume, the shared name spec — 32 tests |
+
+**So: when you add a check, do three things in the same commit.** Write it; break the thing on purpose and
+watch it go red; then confirm CI actually executes it — by running `./scripts/ci.sh` and finding your check
+in the output, not by assuming the tree is covered. A `go vet` list and a `go test` list over the same tree
+must be THE SAME LIST, and a `cargo build` step is not a `cargo test` step.
 
 **`./scripts/ci.sh full` is what CI runs and what you run.** Nothing in the suites may know about a CI
 provider; `.github/workflows/ci.yml` is a thin adapter.

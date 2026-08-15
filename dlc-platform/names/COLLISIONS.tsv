@@ -1,0 +1,49 @@
+# SET-LEVEL COLLISIONS — names that are each legal and still cannot coexist.
+#
+# Explained for app developers in docs/WORLD-CONSTRAINTS.md. That page describes
+# this file; this file defines the rules. If they disagree, the page is the bug.
+#
+# WHY A SEPARATE FILE FROM VECTORS.tsv. Those rows judge ONE name. These judge a
+# SET, and the difference is the whole point: every name below is individually
+# fine. The bug only exists in the relationship between two of them, which is
+# invisible to any per-name check no matter how strict.
+#
+# The host does not report these. One file becomes the other, or shadows it in a
+# listing — so this is found by a person wondering where their save went.
+#
+# FORMAT: <space-separated names> <TAB> <verdict>
+# verdict is `ok`, or how the first colliding pair collides:
+#   case-fold   — identical once case is folded; one file on FAT/Windows/macOS
+#   short-name  — identical once truncated to a FAT 8.3 short name
+#
+# CASE ORDER MATTERS: when a pair collides both ways, `case-fold` is reported,
+# because "these differ only in case" is the more useful thing to be told.
+
+# --- distinct names, which must keep working ------------------------------
+hello tictactoe notes	ok
+only	ok
+abcdefg1 abcdefg2	ok
+save.json board.json	ok
+a b c d e f g	ok
+
+# --- 8.3 truncation: LIVE, not hypothetical -------------------------------
+# The badge renders a catalog name as its first EIGHT characters, so these
+# appear on the USB volume as one file and the second is unreachable.
+board-state-1 board-state-2	short-name
+abcdefgh1 abcdefgh2	short-name
+hello-world-alpha hello-world-beta	short-name
+
+# --- sanitisation CREATING a collision ------------------------------------
+# Two different legal names becoming one short name because the bytes that
+# distinguished them were replaced. This is why a validator must call the
+# renderer's own truncation rather than compare the original strings.
+a.b a_b	short-name
+
+# --- case folding ----------------------------------------------------------
+# Cannot arise under the portable profile, which forbids uppercase. This is the
+# trade an app makes by declaring the narrower `posix` world.
+save.json Save.json	case-fold
+readme README	case-fold
+
+# --- the pair is what gets named, not the set -----------------------------
+alpha beta board-state-1 gamma board-state-2	short-name
