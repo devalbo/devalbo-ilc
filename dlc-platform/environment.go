@@ -110,9 +110,69 @@ func applyEnvironment(next *ilcv1.Environment) (bool, error) {
 		return false, nil
 	}
 	env = next
+	// AFTER the swap, so a watcher reading Env() sees the new manifest rather
+	// than the one being replaced. A watcher that saw the old value would be
+	// worse than no watcher: it would act confidently on stale data.
+	notifyEnvironmentChanged()
 	return true, nil
+}
+
+// ---------------------------------------------------------------------------
+// Being told, rather than having to ask again
+// ---------------------------------------------------------------------------
+//
+// The manifest was always dynamic — `revision` exists precisely so a host can
+// re-send one — but until now the only thing that reacted was capability
+// registration, inside the platform. An APP could not find out. It could poll
+// Env() and would get a fresh answer, but nothing told it WHEN to look, so a
+// long-running command that laid out its output for 12 rows kept drawing to 12
+// rows after the world took four of them back.
+//
+// So: an app registers, the engine calls back on change. This is the push half
+// of what Env() already provides as pull, and between them an app never has to
+// guess.
+//
+// WHY BOTH, rather than picking one. They answer different questions. Polling
+// suits code that is about to draw and wants the number it will draw with — it
+// is a cached field read, so asking every frame costs nothing. Notification
+// suits code that must DO something when the answer changes: recompute a
+// layout, drop a cache, redraw. An app with only polling busy-checks or goes
+// stale; an app with only callbacks has to mirror the state itself, and that
+// mirror is a second copy that can disagree.
+
+// envWatchers are called after a manifest actually changes.
+var envWatchers []func()
+
+// OnEnvironmentChange registers fn to run whenever a NEW manifest takes effect.
+//
+// Fires only on actual change — a host re-sending the revision already in force
+// calls nothing, the same rule applyEnvironment applies to registration. Does
+// NOT fire for the manifest already in force at the time of registration: an app
+// that has just started should read Env() directly, which it can do
+// synchronously and cheaply, rather than depending on a callback that may never
+// come because nothing has changed yet.
+//
+// Callbacks run in registration order, synchronously, inside the SetEnvironment
+// command. Keep them short and do not call back into the platform's command
+// dispatch from one — the surface is being rebuilt underneath you.
+//
+// There is no deregistration, deliberately: registration happens in init(), the
+// app lives as long as the engine, and an Unregister would need handles that
+// exist only to support a case nobody has.
+func OnEnvironmentChange(fn func()) {
+	if fn == nil {
+		return
+	}
+	envWatchers = append(envWatchers, fn)
+}
+
+// notifyEnvironmentChanged runs the watchers. Called only when something changed.
+func notifyEnvironmentChanged() {
+	for _, fn := range envWatchers {
+		fn()
+	}
 }
 
 // resetEnvironment returns to the unset state. Tests only — a host has no reason
 // to un-know what it can do.
-func resetEnvironment() { env = nil }
+func resetEnvironment() { env = nil; envWatchers = nil }

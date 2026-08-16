@@ -70,13 +70,21 @@ func inTempRoot(t *testing.T) string {
 	// 100". That is the mandatory ordering in docs/ENVIRONMENT-PLAN.md §2.5
 	// biting exactly where it should: a caller that skips the manifest gets a
 	// half-registered engine, and a test is a caller like any other.
+	// RESTORE THE DIRECTORY FIRST. This used to be registered after Boot, so a
+	// Boot failure left the whole process chdir'd into a temp dir and every
+	// later test in the package failed on paths that were fine — which is how
+	// one missing field surfaced as fourteen unrelated failures.
+	t.Cleanup(func() { os.Chdir(prev) })
 	if err := platform.Boot(platform.BootOptions{
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+		// NONE: this is a test harness, and nothing it prints is read by a
+		// person. Declared rather than left unset because Boot refuses a host
+		// that has not said — there is no safe guess.
+		TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chdir(prev) })
 	return root
 }
 

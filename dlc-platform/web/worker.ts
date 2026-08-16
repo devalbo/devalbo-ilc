@@ -26,6 +26,7 @@ import {
 } from "@bytecodealliance/preview2-shim/filesystem";
 import {
   encodeSetEnvironment,
+  TEXT_OUTLET_DISPLAY,
   probeOPFS,
   FILESYSTEM_KIND_OPFS,
   METHOD_SET_ENVIRONMENT,
@@ -165,6 +166,14 @@ async function boot(): Promise<EngineModule> {
       filesystem: hasFilesystem
         ? { available: true, kind: FILESYSTEM_KIND_OPFS }
         : { available: false },
+      // A browser host renders command output into the DOM, so text DOES reach a
+      // person — and an app cannot work that out for itself, because every tier
+      // provides `wasi:cli/stdout` and its presence proves nothing.
+      //
+      // No cols or rows: the pane is CSS-sized and scrolls, so there is no
+      // character budget to report. Unmeasured is the honest answer and the app
+      // reads it as "wrap however you like" — which for a browser is true.
+      textOut: { outlet: TEXT_OUTLET_DISPLAY },
     }),
   );
   if (!res.success) {
@@ -299,6 +308,10 @@ const api = {
         filesystem: hasFilesystem
           ? { available: true, kind: FILESYSTEM_KIND_OPFS }
           : { available: false },
+        // Re-stated on every re-send. A manifest is the WHOLE picture, not a
+        // patch: omitting it here would tell the engine this host had stopped
+        // being able to show text, and the app would silently stop printing.
+        textOut: { outlet: TEXT_OUTLET_DISPLAY },
       }),
     );
     const events = duringCommand;

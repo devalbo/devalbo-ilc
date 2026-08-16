@@ -1,0 +1,41 @@
+# A FIRMWARE THAT ONLY LOOKS AT THE PANEL.
+#
+# WHY IT EXISTS. The bring-up firmware links Wasmtime: ~90s to build, ~1.1 MB to
+# flash, and every one of those seconds sits between a display hypothesis and the
+# answer to it. Chasing a dark ST7789 through that loop is most of a minute of
+# noise per question, and the questions are cheap ones.
+#
+# This crate has no Wasmtime, no PSRAM, no payload region, no component. It puts
+# the panel up, tries things, and says what it did over USB. Seconds per cycle.
+#
+# It is DELIBERATELY a separate crate rather than a second `[[bin]]`: sharing the
+# manifest would drag the whole dependency graph in, which is the thing being
+# escaped.
+[package]
+name = "dlc-display-probe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rp235x-hal = { version = "0.3", features = ["critical-section-impl", "rt"] }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+embedded-hal = "1"
+panic-halt = "1"
+
+# The panel, and the same versions the badge firmware uses — a probe that
+# disagreed with the thing it is probing would be worse than no probe.
+mipidsi = "0.10.0"
+embedded-graphics = "0.8.2"
+
+# The log channel. A device with no console is a device you debug by rebuilding
+# it, and that is the whole reason this crate exists.
+usb-device = "0.3"
+usbd-serial = "0.2"
+
+[profile.release]
+panic = "abort"
+# opt-level 2 rather than "s": this is never flashed alongside anything, and
+# build speed matters more than 40 KB here.
+opt-level = 2
+lto = false

@@ -21,6 +21,16 @@
 /// numbers are individually plausible and only one is this board.
 pub const PSRAM_CS: u8 = 8;
 
+/// **PSRAM IS PRESENT AND WORKS — measured 2026-08-16**, before any of our code
+/// ran on the board: Pimoroni's MicroPython reported `gc.mem_free()` of
+/// **8,159,840 bytes**, which 520 KB of SRAM cannot supply. So the part is
+/// fitted, its QMI init succeeds, and 8 MB is addressable.
+///
+/// Worth stating because it splits a failure that would otherwise be ambiguous:
+/// if `psram::init` reports NOT FOUND, the driver is wrong — not the board, not
+/// the chip select, not a missing part.
+pub const PSRAM_BYTES: usize = 8 * 1024 * 1024;
+
 /// The crystal, in Hz. **12 MHz, confirmed by absence.**
 ///
 /// Neither board header overrides `XOSC_HZ`, and the pico-SDK's default is 12 MHz
@@ -29,12 +39,19 @@ pub const PSRAM_CS: u8 = 8;
 /// source file, and only one of them is worth trusting.
 pub const XTAL_HZ: u32 = 12_000_000;
 
-/// The system clock Pimoroni's own firmware runs at: `SYS_CLK_HZ (200000000)`.
+/// The system clock the shipped firmware actually runs at: **250 MHz, measured
+/// on the board 2026-08-16** — `machine.freq()` over the MicroPython REPL.
 ///
-/// The plan quotes the RP2350's 250 MHz maximum; this board's shipped firmware
-/// chooses 200. Nothing here depends on it yet — it matters when PSRAM timing is
-/// computed, because the QMI divisor is derived from the system clock.
-pub const SYS_CLK_HZ: u32 = 200_000_000;
+/// The header file says `SYS_CLK_HZ (200000000)` and this constant said 200 MHz
+/// on that basis. The running firmware disagrees, and the running firmware wins:
+/// a header default can be overridden at boot, which is evidently what happens.
+///
+/// It matters when PSRAM timing is computed, because the QMI divisor derives
+/// from the system clock — so a value 25% low would ask the PSRAM to run faster
+/// than intended. Nothing reads this yet; `psram::init` takes the live clock
+/// from `clocks.system_clock.freq()` rather than this constant, which is the
+/// safer arrangement and the reason the discrepancy was harmless.
+pub const SYS_CLK_HZ: u32 = 250_000_000;
 
 // --- the flash map ----------------------------------------------------------
 //
@@ -82,6 +99,17 @@ pub const UART_TX: u8 = 0;
 pub const UART_RX: u8 = 1;
 
 // --- buttons (§14: a host maps native input to a command) -------------------
+//
+// **ACTIVE-LOW, with internal pull-ups. Measured, and it contradicted what this
+// firmware assumed.** Pimoroni's MicroPython configures them
+// `Pin(GPIO7, mode=IN, pull=PULL_UP)`, and sampling on the board gave `1` at
+// idle and `0` with A held. Our menu had them as active-HIGH with pull-downs,
+// which would have read every button as permanently pressed — the menu would
+// have confirmed instantly and launched before anyone saw it.
+//
+// The technique generalises: the shipped firmware is a working reference for the
+// same hardware and can be interrogated over its USB REPL, which is faster and
+// more trustworthy than a pinout diagram.
 pub const BUTTON_DOWN: u8 = 6;
 pub const BUTTON_A: u8 = 7;
 pub const BUTTON_B: u8 = 9;
@@ -113,4 +141,18 @@ pub const RTC_ALARM: u8 = 13;
 pub const VBUS_DETECT: u8 = 12;
 pub const VBAT_SENSE: u8 = 40;
 pub const POWER_EN: u8 = 41;
+
+/// **POWER_EN GATES THE DISPLAY. Measured 2026-08-16, and it cost most of a day.**
+///
+/// Pimoroni's board header calls this "I2C power for talking to RTC", which is
+/// why it was skipped: a comment said it was about the RTC, so it was not about
+/// the panel. Toggling it under their own firmware settles it — the screen goes
+/// blank when this drops and returns when it is restored.
+///
+/// Without it the controller is unpowered, which is indistinguishable from a
+/// broken driver on a write-only bus: four different init sequences all reported
+/// success, `RDDID` answered `00 00 00 00`, and every pin measured good. They
+/// were good. There was simply nothing on the other end.
+///
+/// **Assert this before touching the panel**, and leave it asserted.
 pub const LIGHT_SENSE: u8 = 43;

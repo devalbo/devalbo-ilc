@@ -25,6 +25,12 @@ export const FILESYSTEM_KIND_OPFS = 3;
 export const ISOLATION_SHARED = 1;
 export const ISOLATION_PER_USER = 2;
 
+/** devalbo.ilc.v1.TextOutlet */
+export const TEXT_OUTLET_NONE = 1;
+export const TEXT_OUTLET_UART = 2;
+export const TEXT_OUTLET_DISPLAY = 3;
+export const TEXT_OUTLET_TERMINAL = 4;
+
 /** `SetEnvironment` — the core-lifecycle block, id 2. */
 export const METHOD_SET_ENVIRONMENT = 2;
 
@@ -44,6 +50,31 @@ export interface Manifest {
      * to say stays silent rather than promising privacy it cannot provide.
      */
     isolation?: number;
+  };
+  /**
+   * Where the app's printed text lands, and how much room it has RIGHT NOW.
+   *
+   * Omitted means no claim, which leaves the engine falling back to its startup
+   * key and `CanShowText` failing open — the behaviour every host had before
+   * this field existed. A browser host that renders output into the DOM should
+   * say DISPLAY, because an app cannot tell from inside: every tier provides
+   * `wasi:cli/stdout`, so its presence proves nothing.
+   *
+   * THIS IS THE PART THAT MOVES. Cols and rows are an ALLOCATION, not a
+   * capability — a host that gives the app half a pane and then reclaims it
+   * re-sends the manifest with a bumped revision, and the engine notifies the
+   * app. Everything else in a manifest is settled at startup.
+   */
+  textOut?: {
+    outlet: number;
+    /**
+     * Zero or omitted means UNMEASURED, never "no room". An app reads unknown as
+     * "wrap however you like"; a confidently wrong number would have it format
+     * against a budget that does not exist, so a host that has not measured must
+     * stay silent rather than guess.
+     */
+    cols?: number;
+    rows?: number;
   };
 }
 
@@ -85,6 +116,28 @@ export function encodeSetEnvironment(m: Manifest): Uint8Array {
   appendTag(env, 2, WIRE_BYTES); // Environment.filesystem
   appendVarint(env, BigInt(fs.length));
   env.push(...fs);
+
+  if (m.textOut !== undefined) {
+    const to: number[] = [];
+    // No availability field: `outlet` already carries all three states, and a
+    // second encoding of one fact is what this message exists to remove. Field 1
+    // is reserved in the proto.
+    appendTag(to, 2, WIRE_VARINT); // TextOut.outlet
+    appendVarint(to, BigInt(m.textOut.outlet));
+    // Zero is the proto default and encodes to nothing, which is exactly right:
+    // absent and zero both mean UNMEASURED, so there is one spelling on the wire.
+    if (m.textOut.cols) {
+      appendTag(to, 3, WIRE_VARINT); // TextOut.cols
+      appendVarint(to, BigInt(m.textOut.cols));
+    }
+    if (m.textOut.rows) {
+      appendTag(to, 4, WIRE_VARINT); // TextOut.rows
+      appendVarint(to, BigInt(m.textOut.rows));
+    }
+    appendTag(env, 4, WIRE_BYTES); // Environment.text_out
+    appendVarint(env, BigInt(to.length));
+    env.push(...to);
+  }
 
   const req: number[] = [];
   appendTag(req, 1, WIRE_BYTES); // SetEnvironmentRequest.environment

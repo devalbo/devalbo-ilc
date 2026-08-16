@@ -52,6 +52,19 @@ func main() {
 	if err := platform.Boot(platform.BootOptions{
 		FSRoot:         platform.AppFSRoot(dlcconfig.Name),
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
+		// WHERE TEXT GOES, declared rather than assumed. Every tier provides
+		// `wasi:cli/stdout`, so an app cannot tell from the inside whether
+		// printing reaches anyone — a badge with no screen looks identical to
+		// this. Saying TERMINAL lets an app print prose confidently instead of
+		// relying on CanShowText failing open.
+		//
+		// Cols and Rows are left UNMEASURED (zero). Go has no portable way to ask
+		// a terminal its size, and a guessed 80 would be worse than no answer: an
+		// app reads zero as "wrap however you like" and a wrong number as a
+		// budget to format against. A host that DOES measure — a TUI, or one
+		// willing to take an ioctl dependency — sets them here and re-sends the
+		// manifest with a bumped revision on SIGWINCH.
+		TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_TERMINAL,
 	}); err != nil {
 		os.Stderr.WriteString("hello: " + err.Error() + "\n")
 		os.Exit(2)
@@ -79,9 +92,11 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 		Stdin:  stdin,
 
 		Render: map[uint32]cli.Renderer{
-			hellov1.MethodGreet: render(func(out io.Writer, r *hellov1.GreetResponse) error {
-				_, err := fmt.Fprintln(out, r.GetText())
-				return err
+			// Prints nothing: the engine streamed this text already, and a host
+			// that renders it too shows it twice. Engine prints prose for tiers
+			// that cannot decode; hosts render structure for tiers that can.
+			hellov1.MethodGreet: render(func(_ io.Writer, _ *hellov1.GreetResponse) error {
+				return nil
 			}),
 
 			ilcv1.MethodVersion: render(func(out io.Writer, r *ilcv1.VersionResponse) error {

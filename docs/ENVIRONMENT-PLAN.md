@@ -472,6 +472,63 @@ only TypeScript had changed — both went red. An empty result is not a passing 
 - **No capability NEGOTIATION.** The host states facts; the engine does not request or refuse them.
 - **No inherited degradation policy.** D10 — the platform reports, the app decides.
 
+### D12 — Capability and allocation are different questions, and only one of them moves
+
+`ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` went into `wasi:cli/environment` first, and that was wrong for one of
+the two things they described.
+
+| | question | changes? |
+| --- | --- | --- |
+| **capability** | can this tier show text at all, and at most how much? | settled for the session |
+| **allocation** | how much has the app got RIGHT NOW? | yes |
+
+The wasi environment is read ONCE, during `_initialize`, before any command runs. An app cannot re-read
+it. So a budget announced there is frozen at the value it held before the app existed, and the moment a
+world reclaims screen — a menu, an alert, a notification band — the keys are stale with no way to correct
+them. The app keeps formatting for rows it no longer has.
+
+So allocation moved into the manifest as `TextOut`, and both halves an app needs fell out of machinery
+that already existed:
+
+- **poll** — `platform.Env().GetTextOut()` reads the cached manifest. No import, no round trip.
+- **notify** — `platform.OnEnvironmentChange` fires after the swap, only on a real change.
+
+Convenience accessors over that (`TextOutlet`, `TextCols`, `TextRows`) were written and then deleted the
+same day. Two had no caller, and the third re-spelled an enum as a string — a second vocabulary for
+something the proto already names, and one the compiler cannot exhaust, so a tier added later would fall
+silently into a default branch. `CanShowText` stays because it is a DECISION every app makes rather than a
+field read. When something actually formats against cols and rows, an accessor encoding the
+zero-unless-PRESENT rule earns its place; until then it is a branch nothing tests (D6).
+
+No new capability, which is the D6 test this had to pass. `revision` was already there; `applyEnvironment`
+already detected change — it just only told the platform, never the app.
+
+**One source, not two.** The wasi keys are no longer read by anything in the platform. Embedded worlds
+still set them, because they are what shows up in a boot log, but a second source is a second thing that
+can go stale — which is the bug this decision exists to remove, not to relocate.
+
+**`TextOutlet` is REQUIRED in `BootOptions`**, on the same rule as `FilesystemKind`: the host is the only
+party that knows, and there is no safe guess. The two plausible defaults fail in opposite directions —
+assume a terminal and a badge with no screen formats output nobody sees; assume none and a CLI goes
+silent. Neither is recoverable from inside the app, because every tier provides `wasi:cli/stdout` and its
+presence proves nothing.
+
+### D13 — A world may DISCARD printed bytes; it may never REFUSE them
+
+Printing is the one channel an app can use on every tier, and it stays that way only if the write always
+succeeds. A tier with no screen, no UART and nowhere to put the bytes must still accept them: a failing
+write would make `fmt.Println` something an app had to guard, on a tier it cannot identify from the
+inside.
+
+What a world does afterwards is its own business — but it must still TAKE the bytes. The badge got this
+half wrong: the minimal world never drained its sink, so writes succeeded and accumulated until the
+allocator gave out, on the one world with no screen to notice. Discarding is a decision; forgetting is a
+leak.
+
+A world that wants an app to skip the work says so in the manifest (`TEXT_OUTLET_NONE`), and the app may
+then choose not to format. That is ADVICE the app is free to ignore, and the difference is the point:
+advice cannot break anyone, a failing write can. An app that ignores good advice is its author's problem.
+
 ---
 
 ## 6. Definition of done

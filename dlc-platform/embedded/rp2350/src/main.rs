@@ -40,6 +40,9 @@ mod board;
 mod console;
 mod display;
 mod menu;
+mod cs;
+mod siobus;
+mod usblog;
 mod payload;
 mod platform;
 mod psram;
@@ -48,6 +51,7 @@ mod world;
 
 use world::{Status, WORLD};
 
+use dlc_platform_embedded::manifest;
 use dlc_platform_embedded::minimal::MinimalHost;
 use dlc_platform_embedded::pulley::PulleyWidth;
 
@@ -64,6 +68,44 @@ use hal::Clock;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+
+/// The bring-up log, kept so it can be served over USB after the run.
+///
+/// A `static mut` behind a single-threaded firmware with no interrupts touching
+/// it. It has to outlive the borrow the report holds, and it must survive into
+/// `rest()`, which is where the USB polling happens.
+static mut LOG: usblog::LogBuffer = usblog::LogBuffer::new();
+
+/// The USB clock token, handed from `main` to `serve_log`.
+///
+/// A static rather than a parameter because `rest()` has four call sites and the
+/// token is only needed at the very last one; threading it through every early
+/// exit would put USB plumbing in the middle of the bring-up flow, which is the
+/// opposite of what this is for.
+static mut USB_CLOCK: Option<hal::clocks::UsbClock> = None;
+
+/// WHAT THE DATA BUS ACTUALLY DOES, measured rather than assumed.
+///
+/// Everything about the display is downstream of one unverified fact: whether
+/// writing GPIO32..39 through SIO changes the pads. Four flash cycles went on
+/// init sequences and timing while this stayed untested, so it is now the first
+/// thing the firmware reports.
+///
+/// Writes a pattern, reads the pad INPUT register back — `gpio_hi_in` is the
+/// state of the pin itself, not the value we asked for, so a pad that is
+/// isolated, mis-multiplexed or not output-enabled shows up as a mismatch.
+fn probe_data_bus() -> (u32, u32) {
+    let sio = unsafe { &*hal::pac::SIO::ptr() };
+    const MASK: u32 = 0xFF;
+    sio.gpio_hi_out_clr().write(|w| unsafe { w.bits(MASK) });
+    sio.gpio_hi_out_set().write(|w| unsafe { w.bits(0xA5) });
+    cortex_m::asm::delay(1000);
+    let high = sio.gpio_hi_in().read().bits() & MASK;
+    sio.gpio_hi_out_clr().write(|w| unsafe { w.bits(MASK) });
+    cortex_m::asm::delay(1000);
+    let low = sio.gpio_hi_in().read().bits() & MASK;
+    (high, low)
+}
 
 /// The backlight on GPIO26 — the badge's status light until the TFT has a driver.
 type Backlight = hal::gpio::Pin<
@@ -92,9 +134,19 @@ fn show(backlight: &mut Backlight, screen: &mut Option<display::Display>, status
     if let Some(panel) = screen.as_mut() {
         panel.fill(status.rgb565());
     }
-    // The backlight still matters: a filled panel with the backlight off is a
-    // black screen, and it is what makes the blink in `rest` visible.
-    let _ = if status.backlight_on() {
+    // THE BACKLIGHT IS A STATUS CHANNEL ONLY WHEN IT IS THE ONLY CHANNEL.
+    //
+    // This read `if status.backlight_on()` for every case, which meant the very
+    // first call — `show(.., Status::Broken)` before the narration — turned the
+    // backlight OFF and left the whole bring-up drawn onto an unlit screen. On
+    // real hardware that looked exactly like a display that does not work.
+    //
+    // The encoding was written when there was no driver and one GPIO was all the
+    // badge had. There is a panel now, status is the COLOUR, and the backlight's
+    // only job is to make that visible.
+    let _ = if screen.is_some() {
+        backlight.set_high()
+    } else if status.backlight_on() {
         backlight.set_high()
     } else {
         backlight.set_low()
@@ -115,11 +167,17 @@ fn rest(
     sys_hz: u32,
 ) -> ! {
     use embedded_hal::digital::OutputPin;
+    let has_screen = screen.is_some();
     show(backlight, screen, status);
-    if !status.blinks() {
-        loop {
-            cortex_m::asm::wfi();
-        }
+    // BLINK ONLY WITHOUT A SCREEN. A lit panel showing a status colour and a
+    // verdict already says "alive, and here is why"; blinking it would strobe
+    // the one thing worth reading. Blind, the blink is the only way to tell
+    // "waiting" from "never booted", so it stays.
+    if has_screen || !status.blinks() {
+        // SERVE THE LOG rather than sleeping. `wfi` here is what made four
+        // flash cycles necessary: the badge knew exactly what happened and had
+        // no way to say it.
+        serve_log()
     }
     // A short flash about once a second: unmistakably deliberate, and dim enough
     // not to drain a LiPo sitting on a desk.
@@ -128,6 +186,105 @@ fn rest(
         cortex_m::asm::delay(sys_hz / 16);
         let _ = backlight.set_low();
         cortex_m::asm::delay(sys_hz);
+    }
+}
+
+/// Idle forever, offering the bring-up log over USB CDC.
+///
+/// WHY IT RUNS AT THE END rather than throughout: USB needs polling to
+/// enumerate, and the bring-up is a straight line that must not stall waiting
+/// for a host that may never attach. Buffering during the run and serving after
+/// means nothing blocks, and a host that connects late still gets the whole log
+/// — including the part written before it plugged in, which is the part that
+/// matters.
+///
+/// Never returns. The badge has finished; this is its afterlife.
+fn serve_log() -> ! {
+    // The peripherals were taken at boot, so steal them. Sound because main has
+    // finished with everything this touches and nothing else runs.
+    let pac = unsafe { hal::pac::Peripherals::steal() };
+    // SAFETY: set once in main before any of this runs, single core.
+    let Some(usb_clock) = (unsafe { core::ptr::addr_of_mut!(USB_CLOCK).replace(None) }) else {
+        // No clock token means main never got that far; nothing to serve with.
+        loop {
+            cortex_m::asm::wfi();
+        }
+    };
+    let mut resets = pac.RESETS;
+    let usb = hal::usb::UsbBus::new(pac.USB, pac.USB_DPRAM, usb_clock, true, &mut resets);
+    let bus = usb_device::bus::UsbBusAllocator::new(usb);
+    let mut serial = usbd_serial::SerialPort::new(&bus);
+    let mut device = usb_device::device::UsbDeviceBuilder::new(
+        &bus,
+        usb_device::device::UsbVidPid(0x2e8a, 0x000a),
+    )
+    .strings(&[usb_device::device::StringDescriptors::default()
+        .manufacturer("devalbo")
+        .product("DLC badge bring-up")
+        .serial_number("ilc")])
+    .unwrap()
+    .device_class(usbd_serial::USB_CLASS_CDC)
+    .build();
+
+    // SAFETY: single core, no interrupts, and main has released its borrow.
+    let log: &usblog::LogBuffer = unsafe { &*core::ptr::addr_of!(LOG) };
+    // SAY SO IF THE LOG DID NOT FIT.
+    //
+    // `LogBuffer` records truncation and, until now, nothing ever asked — the
+    // getter was dead code the compiler warned about. Deleting it would have
+    // been the smaller change and the wrong one: the field is written on every
+    // overflow, so the log was already silently dropping its tail, and a boot
+    // log that stops mid-sentence reads as a HANG rather than a full buffer.
+    // That is the most expensive thing a diagnostic can do — send someone
+    // debugging a freeze that never happened.
+    //
+    // SENT ALONGSIDE THE BODY, not appended to it: the buffer being full is
+    // precisely what truncation means, so writing the notice into it is the one
+    // operation guaranteed to be dropped. It leads because a reader needs to
+    // know before they start trusting what follows.
+    let notice: &[u8] = if log.truncated() {
+        b"(log truncated -- later lines were dropped)\r\n"
+    } else {
+        b""
+    };
+    let bytes = log.as_bytes();
+    let mut sent = 0usize;
+    let mut idle_since_open = 0u32;
+
+    loop {
+        // POLL, THEN WRITE REGARDLESS. `poll` reports whether there was USB
+        // ACTIVITY, not whether the port is usable — gating the write on it
+        // meant an idle host (the normal case: a terminal that only reads) never
+        // triggered a single byte.
+        device.poll(&mut [&mut serial]);
+        // Drain anything the host types; a terminal opening the port often
+        // sends nothing, but an unread RX buffer stalls some stacks.
+        let mut discard = [0u8; 64];
+        let _ = serial.read(&mut discard);
+
+        // One cursor over two slices, so the repeat-on-idle logic below stays a
+        // single `sent = 0` rather than two counters that can disagree.
+        let total = notice.len() + bytes.len();
+        if sent < total {
+            let chunk = if sent < notice.len() {
+                &notice[sent..]
+            } else {
+                &bytes[sent - notice.len()..]
+            };
+            match serial.write(chunk) {
+                Ok(n) => sent += n,
+                Err(usbd_serial::UsbError::WouldBlock) => {}
+                Err(_) => {}
+            }
+        } else {
+            // REPEAT THE LOG once a host has had it, so attaching a terminal
+            // after the fact still shows something rather than an empty port.
+            idle_since_open = idle_since_open.saturating_add(1);
+            if idle_since_open > 2_000_000 {
+                sent = 0;
+                idle_since_open = 0;
+            }
+        }
     }
 }
 
@@ -212,6 +369,22 @@ fn main() -> ! {
     // one. Created here rather than inside the driver because it is a peripheral
     // the rest of the firmware may want.
     let mut timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
+
+    // POWER THE PANEL. GPIO41 gates the display's rail — verified by toggling it
+    // under Pimoroni's firmware and watching the screen blank and return. Their
+    // header calls it "I2C power for talking to RTC", which is what kept it out
+    // of this firmware and cost a day of chasing an unpowered controller.
+    //
+    // FIRST, and before any display work: everything after this assumes there is
+    // something on the other end of the bus.
+    use embedded_hal::digital::OutputPin as _;
+    let mut power_en = pins.gpio41.into_push_pull_output();
+    let _ = power_en.set_high();
+    // Give the rail time to come up before the panel is addressed.
+    cortex_m::asm::delay(10_000_000);
+    // Hand the USB clock over AFTER the last borrow of `clocks` — taking the
+    // field partially moves it, and the timer above still needs the whole thing.
+    unsafe { USB_CLOCK = Some(clocks.usb_clock) };
     let screen = display::Display::new(
         pins.gpio27.into_push_pull_output().into_dyn_pin(),
         pins.gpio28.into_push_pull_output().into_dyn_pin(),
@@ -231,9 +404,13 @@ fn main() -> ! {
     );
     // A screen that does not come up is NOT fatal: the badge still has a UART
     // and a backlight, and saying so is more useful than halting.
-    let mut screen = match screen {
-        Ok(panel) => Some(panel),
-        Err(_) => None,
+    let (mut screen, screen_err) = match screen {
+        Ok(panel) => (Some(panel), ""),
+        // KEEP THE REASON. Discarding it is what made a configuration mistake
+        // look like dead hardware for a whole session: the badge blinked with a
+        // blank screen, which is indistinguishable from a panel that is not
+        // wired, while the actual answer was `InvalidDisplaySize`.
+        Err(display::DisplayError(why)) => (None, why),
     };
     // Captured before the report borrows `screen`, so stage 2 can report on the
     // very thing it is drawing to.
@@ -246,11 +423,15 @@ fn main() -> ! {
     // before it runs, so a hang shows the name of what it hung in — and the ones
     // QEMU cannot model are marked `*`, because those are the only checks that
     // carry information `make qemu` has not already given us.
+    // SAFETY: single core, no interrupt touches LOG, and this is the only borrow
+    // taken for the report's lifetime.
+    let log: &mut usblog::LogBuffer = unsafe { &mut *core::ptr::addr_of_mut!(LOG) };
+    let mut sink = usblog::Tee(&mut uart, log);
     let mut report = report::Report::new(
-        &mut uart,
+        &mut sink,
         &mut screen,
         sys_hz,
-        format_args!("ILC {} [{}]", env!("CARGO_PKG_VERSION"), WORLD.name()),
+        format_args!("DLC {} [{}]", env!("CARGO_PKG_VERSION"), WORLD.name()),
     );
 
     // 1 — THE CRYSTAL, and it is hardware-only for a non-obvious reason: the UART
@@ -268,11 +449,24 @@ fn main() -> ! {
     // 2 — THE PANEL. An 8-bit parallel ST7789 on a bit-banged bus: QEMU models no
     // RP2350 peripherals, so nothing about this has ever executed. If you are
     // reading this stage ON the badge, it passed.
+    // THE MEASUREMENT THAT SHOULD HAVE COME FIRST. Everything about the display
+    // is downstream of whether writing GPIO32..39 changes the pads, and four
+    // flash cycles went on init sequences and timing while that stayed untested.
+    {
+        let stage = report.stage(report::Scope::HardwareOnly, format_args!("data bus 32-39"));
+        let (high, low) = probe_data_bus();
+        if high == 0xA5 && low == 0x00 {
+            stage.ok(format_args!("A5/00"));
+        } else {
+            stage.fail(format_args!("wrote A5/00 got {high:02x}/{low:02x}"));
+        }
+    }
+
     let stage = report.stage(report::Scope::HardwareOnly, format_args!("display ST7789"));
     if screen_ok {
         stage.ok(format_args!("320x240 parallel"));
     } else {
-        stage.fail(format_args!("init failed — UART only"));
+        stage.fail(format_args!("init failed: {screen_err}"));
     }
 
     // 3 — PSRAM. The single most likely thing to fail: register-level code that
@@ -359,9 +553,11 @@ fn main() -> ! {
     // not a menu, it is a delay. It always times out and runs the highlighted
     // entry, so a badge nobody is touching still boots.
     let mut buttons = menu::Buttons {
-        up: pins.gpio11.into_pull_down_input(),
-        down: pins.gpio6.into_pull_down_input(),
-        a: pins.gpio7.into_pull_down_input(),
+        // PULL-UP, not pull-down: the buttons short to ground (measured against
+        // Pimoroni's own firmware on the board — see menu.rs).
+        up: pins.gpio11.into_pull_up_input(),
+        down: pins.gpio6.into_pull_up_input(),
+        a: pins.gpio7.into_pull_up_input(),
     };
     let choice = report.with_screen_and_log(|screen, log| {
         menu::choose(&available, screen, &mut buttons, sys_hz, log)
@@ -442,6 +638,54 @@ fn main() -> ! {
 
     // 6 — RUN IT. Also proven in QEMU, and it is still the claim the whole tier
     // rests on: the same engine, the same bytes, executing on this chip.
+    // 5b — STATE THE FACTS, before the app runs.
+    //
+    // The wasi keys set at instantiation are FROZEN: an app reads them once
+    // during `_initialize` and can never re-read them. They are the bootstrap.
+    // The manifest is the correctable half — revision-stamped and re-sendable —
+    // so an app can poll it (`platform.Env()`) and be told when it changes
+    // (`platform.OnEnvironmentChange`).
+    //
+    // TODAY THE TWO AGREE, because this world has one app, one layout, and the
+    // budget is fixed at flash time. Sending it anyway is what makes the numbers
+    // CORRECTABLE rather than a promise this world cannot keep: the day it takes
+    // rows back for a menu, it re-sends with revision 2 and the app finds out.
+    //
+    // A REFUSED MANIFEST IS FATAL, and deliberately so. Every command after it
+    // would run against an engine that does not know what this world can show —
+    // the app would format for a screen it cannot see, or stay silent on one it
+    // can. Continuing would produce a badge that looks like it works and
+    // quietly does the wrong thing, which is the failure this whole tier is
+    // built to make impossible.
+    {
+        let text = WORLD.can(world::Capability::Text);
+        let outlet = if text {
+            manifest::TEXT_OUTLET_DISPLAY
+        } else {
+            // The minimal world simulates a device with a status LED and nothing
+            // else. NONE is a CLAIM — it tells an app not to spend heap
+            // formatting prose nobody will read — and it is the honest one here.
+            manifest::TEXT_OUTLET_NONE
+        };
+        // With no text outlet there is no budget to describe. Zero reads as
+        // unmeasured, which is the only sensible answer when the question does
+        // not apply.
+        let (cols, rows) = if text {
+            (console::APP_COLS as u64, console::APP_ROWS as u64)
+        } else {
+            (0, 0)
+        };
+        let env = manifest::encode(1, outlet, cols, rows);
+        let stage = report.stage(report::Scope::Emulated, format_args!("manifest"));
+        match host.execute(manifest::METHOD_SET_ENVIRONMENT, env.as_bytes()) {
+            Ok(r) if r.success => stage.ok(format_args!("{cols}x{rows} {}", world::text_sink())),
+            Ok(r) => {
+                stage.fail(format_args!("engine refused: {}", r.error.as_deref().unwrap_or("no reason")));
+            }
+            Err(_) => stage.fail(format_args!("not delivered")),
+        }
+    }
+
     let method = selected.entry_method;
     // The app's text, held for the last frame. A fixed buffer because this is
     // still the pre-menu world of "do not allocate what you can put on the stack",
@@ -459,6 +703,23 @@ fn main() -> ! {
             // TEXT IS A CAPABILITY, and the minimal world does not have it. The
             // report itself is firmware diagnostics and keeps going either way;
             // what is gated is the APP's output.
+            // DRAIN UNCONDITIONALLY, RENDER CONDITIONALLY.
+            //
+            // The guest's write ALWAYS succeeds — `SinkStream::write` returns
+            // Ok on every world, because a world with no screen must not turn
+            // an app's `fmt.Println` into a trap. What a world chooses to do
+            // with the bytes afterwards is its own business.
+            //
+            // But it must still TAKE them. Leaving them in the buffer because
+            // this world has no outlet makes the sink unbounded: an app that
+            // prints in a loop grows the heap until the allocator gives out,
+            // and on the minimal world — the one simulating a device with a
+            // single LED — nobody would be watching to see it happen.
+            //
+            // So the read is outside the capability check and only the
+            // rendering is inside it. Discarding is a decision; forgetting is
+            // a leak.
+            let printed = host.stdout();
             if WORLD.can(world::Capability::Text) {
                 // STDOUT IS THE READABLE CHANNEL, and `result.output` is not.
                 //
@@ -473,7 +734,6 @@ fn main() -> ! {
                 // So the badge shows what the app PRINTED. That is also what
                 // `ILC_STDOUT=display` promises, so the advertisement and the
                 // behaviour are now the same statement.
-                let printed = host.stdout();
                 if let Ok(text) = core::str::from_utf8(&printed) {
                     if !text.is_empty() {
                         // Held for the FINAL frame: the report is about to be
@@ -508,9 +768,32 @@ fn main() -> ! {
     // close. `minimal` falls through to `rest`, which floods the panel: that
     // world has no text capability, and showing text anyway would make the
     // advertisement a lie.
-    if WORLD.can(world::Capability::Text) && output_len > 0 {
+    // THE FINAL FRAME ALWAYS SAYS SOMETHING.
+    //
+    // This used to require `output_len > 0`, so an app that returns a typed
+    // response without PRINTING — which is most of them, and hello in particular
+    // — fell through to `rest()`, which floods the panel with the status colour
+    // and erases the report the user just watched. A solid green screen carrying
+    // no information is a worse outcome than the report it replaced.
+    //
+    // The badge cannot render `result.output`: it is protobuf, and decoding it
+    // needs the app's schema, which a loader running apps it was never built for
+    // does not have. So when the app prints nothing, the HOST says what it knows
+    // — which app, which method, and what it cost.
+    if WORLD.can(world::Capability::Text) {
         if let Some(panel) = screen.as_mut() {
-            let text = core::str::from_utf8(&output[..output_len]).unwrap_or("");
+            let mut summary = usblog::LogBuffer::new();
+            let text = if output_len > 0 {
+                core::str::from_utf8(&output[..output_len]).unwrap_or("")
+            } else {
+                use core::fmt::Write;
+                let _ = writeln!(summary, "execute {method}: success");
+                let _ = writeln!(summary, "{} KB heap", (HEAP.used() - before) / 1024);
+                let _ = writeln!(summary);
+                let _ = writeln!(summary, "(app returned a typed response;");
+                let _ = writeln!(summary, " it printed nothing to stdout)");
+                core::str::from_utf8(summary.as_bytes()).unwrap_or("")
+            };
             console::render(panel, verdict, selected.name, text);
         }
         // The backlight still carries the status for a badge whose panel failed.

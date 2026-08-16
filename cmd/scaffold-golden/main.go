@@ -112,6 +112,10 @@ func snapshot() ([]byte, error) {
 	if err := platform.Boot(platform.BootOptions{
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+		// A golden generator writes files; nothing it prints is read by a person,
+		// and saying so keeps the generated output free of prose an app would
+		// only have formatted to throw away.
+		TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 	}); err != nil {
 		return nil, err
 	}

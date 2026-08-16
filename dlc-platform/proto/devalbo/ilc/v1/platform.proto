@@ -208,6 +208,73 @@ message Environment {
   // stale decoder silently reads the wrong fact.
   reserved 3;
   reserved "index";
+
+  // Where printed text lands, and how much room the app has RIGHT NOW.
+  //
+  // THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
+  // when the host starts; this one is an ALLOCATION, and a world that takes
+  // screen back for an alert or a menu changes it mid-session. That is exactly
+  // why it belongs here rather than in `wasi:cli/environment`: the wasi env is
+  // read once during `_initialize` and can never be re-read, so an allocation
+  // announced there is frozen at the value it had before the app ever ran.
+  //
+  // Putting it in the manifest gets both halves for free, because the manifest
+  // already has them. POLL: `platform.Env()` is a cached synchronous read, no
+  // import, no round trip. NOTIFY: the host re-sends with a bumped revision and
+  // the engine fires registered callbacks. Neither needed a new capability,
+  // which is the D6 test this had to pass.
+  //
+  // The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
+  // They stay as the startup bootstrap for a tier that cannot push a manifest at
+  // all — today's badge is exactly that — and an app reads them only when this
+  // field is UNSPECIFIED.
+  TextOut text_out = 4;
+}
+
+// Where an app's printed text actually goes.
+//
+// **Presence of stdout proves nothing**, which is why this exists. Every tier
+// PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
+// component whose stdout is missing never instantiates — so an app learns
+// nothing by checking whether it is there. Only the host knows whether the bytes
+// reach a person.
+enum TextOutlet {
+  TEXT_OUTLET_UNSPECIFIED = 0; // nobody said; FAILS OPEN, see below
+  TEXT_OUTLET_NONE = 1;        // printing reaches no one
+  TEXT_OUTLET_UART = 2;        // a serial console someone may be watching
+  TEXT_OUTLET_DISPLAY = 3;     // a screen the host renders text onto
+  TEXT_OUTLET_TERMINAL = 4;    // an ordinary stdout
+}
+
+// The app's text budget, as of the enclosing manifest's `revision`.
+message TextOut {
+  // 1 held an `Availability` for a day, and it was a SECOND WAY TO SAY WHAT
+  // `outlet` ALREADY SAYS. Filesystem needs the enum because a root can be
+  // absent, present, or undeclared with nothing else to read; here all three
+  // states live in `outlet` — UNSPECIFIED is "nobody said", NONE is "somebody
+  // said no", and anything else is a live outlet.
+  //
+  // Two encodings of one fact is the bug this whole message exists to remove
+  // (D12), and it had already grown its own rule: readers were meant to treat
+  // cols/rows as unknown unless availability was PRESENT, so a host that set a
+  // budget and forgot the enum would have it silently ignored. Deleting the
+  // field deletes the rule rather than documenting it.
+  //
+  // Reserved rather than reused: giving an old number new semantics is how a
+  // stale decoder reads the wrong fact confidently.
+  reserved 1;
+  reserved "availability";
+
+  TextOutlet outlet = 2;
+
+  // The space the app HAS, not the space the tier could offer. Zero means
+  // unknown — a terminal whose width the host did not measure — and an app must
+  // read zero as "wrap however you like", never as "you have no room".
+  //
+  // A wrong non-zero number is worse than no number, so a host that does not
+  // know must send zero rather than guess 80.
+  uint32 cols = 3;
+  uint32 rows = 4;
 }
 
 message GetCommandSurfaceRequest {}

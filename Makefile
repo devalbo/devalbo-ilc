@@ -181,9 +181,53 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 		echo "  x wrong UF2 family — this will not boot; see rp2350/memory.x"; \
 		picotool info build/badge-bringup.uf2 | head -3; exit 1; }
 	@ls -l build/badge-bringup.uf2 | awk '{print "  flashable: "$$5" bytes"}'
+	@./scripts/record-hash.sh build/badge-bringup.uf2
 
+
+.PHONY: display-probe
+display-probe: ## a tiny firmware that ONLY tests the panel — seconds per cycle, not 90
+	# WHY A SECOND FIRMWARE. The bring-up image links Wasmtime: ~90s to build and
+	# ~1.1 MB to flash, all of it sitting between a display hypothesis and the
+	# answer. This has no Wasmtime, no PSRAM, no payload, no component — it puts
+	# the panel up, tries four init variants in turn, paints a different colour
+	# for each, and says what it did over USB.
+	#
+	# ONE FLASH ANSWERS FOUR QUESTIONS: watch the badge and note the FIRST colour
+	# you see. Red = our Tufty init. Green = same but non-inverted. Blue = stock
+	# mipidsi. Yellow = Tufty init in portrait.
+	cd dlc-platform/embedded/display-probe && cargo build --release
+	@mkdir -p build
+	@cp dlc-platform/embedded/display-probe/target/thumbv8m.main-none-eabihf/release/dlc-display-probe build/display-probe.elf
+	picotool uf2 convert build/display-probe.elf build/display-probe.uf2
+	@./scripts/record-hash.sh build/display-probe.uf2
+	@picotool info build/display-probe.uf2 | grep -q rp2350 || { \
+		echo "  x wrong UF2 family — this will not boot"; exit 1; }
+	@ls -l build/display-probe.uf2 | awk '{print "  flashable: "$$5" bytes"}'
 
 .PHONY: badge-payload
+.PHONY: flash-testing
+flash-testing: ## refresh flash-testing/ — the images you drag onto the badge
+	# A CONVENIENCE OVER THE THREE BUILDS, not a fourth way to produce anything.
+	# Each target below already records its own hash in build/CHECKSUMS.txt on the
+	# way out (scripts/record-hash.sh), so the ledger is correct whether you build
+	# one image or all three, and this just gathers them somewhere a person can
+	# drag from.
+	#
+	# WATCHABLE BY DEFAULT (`BADGE_BEAT_MS=700`): each bring-up stage lingers so a
+	# person can read it. That is what this directory is FOR — `make badge-uf2`
+	# alone is the fast build, for once the board is known good.
+	$(MAKE) badge-uf2 BADGE_BEAT_MS=700
+	$(MAKE) badge-payload
+	$(MAKE) display-probe
+	@mkdir -p flash-testing
+	@cp build/badge-bringup.uf2 build/badge-payload.uf2 build/display-probe.uf2 flash-testing/
+	# The factory image is dropped in by hand and is the way back from a bad
+	# flash, so it is hashed with the rest rather than left as the one file with
+	# no record.
+	@cd flash-testing && shasum -a 256 ./*.uf2 > CHECKSUMS.txt
+	@cat flash-testing/CHECKSUMS.txt
+	@echo "  flash-testing/ refreshed"
+
 badge-payload: ## pack payloads into a UF2 you can DRAG onto the badge's BOOTSEL drive
 	# THE POINT: adding an app to a badge should not need a toolchain. Hold BOOT,
 	# tap RESET, drag the .uf2 onto the RP2350 drive, reset. The bootloader writes
@@ -232,6 +276,7 @@ badge-payload: ## pack payloads into a UF2 you can DRAG onto the badge's BOOTSEL
 	echo "picotool uf2 convert build/badge-payload.bin -t bin -o $$offset --family data build/badge-payload.uf2"; \
 	picotool uf2 convert build/badge-payload.bin -t bin \
 		-o $$offset --family data build/badge-payload.uf2; \
+	./scripts/record-hash.sh build/badge-payload.uf2; \
 	ls -l build/badge-payload.uf2 | awk -v o=$$offset '{print "  draggable: "$$5" bytes -> "o}'
 
 .PHONY: embedded-cwasm

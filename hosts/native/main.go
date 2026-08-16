@@ -65,6 +65,16 @@ func main() {
 	if err := platform.Boot(platform.BootOptions{
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+		// WHERE TEXT GOES, declared rather than assumed. An app cannot work this
+		// out for itself: every tier provides `wasi:cli/stdout`, so its presence
+		// proves nothing and a badge with no screen looks identical from inside.
+		//
+		// Cols and Rows stay UNMEASURED (zero). Go has no portable way to ask a
+		// terminal its size, and a guessed 80 would be worse than no answer — an
+		// app reads zero as "wrap however you like" and a wrong number as a
+		// budget to format against. A host that measures sets them here and
+		// re-sends the manifest with a bumped revision on SIGWINCH.
+		TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_TERMINAL,
 	}); err != nil {
 		os.Stderr.WriteString("dlc: " + err.Error() + "\n")
 		os.Exit(2)

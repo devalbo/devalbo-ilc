@@ -167,3 +167,56 @@ impl InputStream for ClosedStream {
 pub fn boxed_input() -> DynInputStream {
     Box::new(ClosedStream)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A GUEST WRITE MUST NEVER FAIL, on any world.
+    ///
+    /// This is the invariant the whole text story rests on. A world may have no
+    /// screen, no UART and nowhere at all to put the bytes — the minimal world
+    /// simulates exactly that — but it must still ACCEPT them. An app's
+    /// `fmt.Println` is the one channel that works everywhere, and a tier that
+    /// turned it into an error would make printing a thing an app had to guard,
+    /// on a tier it cannot identify from the inside.
+    ///
+    /// Discarding is a world's decision to make. Failing is not.
+    ///
+    /// A world that WANTS an app to skip the work says so in the manifest
+    /// (`TEXT_OUTLET_NONE`), and an app may then choose not to format. That is
+    /// advice the app is free to ignore, and the difference matters: advice
+    /// cannot break anyone, a failing write can.
+    #[test]
+    fn writes_always_succeed_and_never_block() {
+        let mut stream = SinkStream(SharedBuffer::default());
+
+        assert!(stream.write(Bytes::from_static(b"hello")).is_ok());
+        assert!(stream.write(Bytes::from_static(b"")).is_ok(), "an empty write is still a write");
+        assert!(stream.flush().is_ok());
+        assert!(
+            stream.check_write().unwrap_or(0) > 0,
+            "a guest that is told it may write zero bytes will spin forever"
+        );
+
+        // And a big one: back-pressure must not appear as a short write either.
+        let big = vec![b'x'; 64 * 1024];
+        assert!(stream.write(Bytes::from(big)).is_ok());
+    }
+
+    /// Draining must actually empty the buffer.
+    ///
+    /// A world with no outlet still has to TAKE the bytes — leaving them because
+    /// nobody will read them makes the sink unbounded, and an app printing in a
+    /// loop then grows the heap until the allocator gives out. On a world with
+    /// no screen, nobody would see that happen.
+    #[test]
+    fn take_empties_the_buffer() {
+        let buffer = SharedBuffer::default();
+        let mut stream = SinkStream(buffer.clone());
+        let _ = stream.write(Bytes::from_static(b"discard me"));
+
+        assert_eq!(buffer.take(), b"discard me");
+        assert!(buffer.take().is_empty(), "a second take must not repeat the first");
+    }
+}

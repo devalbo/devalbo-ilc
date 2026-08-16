@@ -107,9 +107,14 @@ status channel.
 Raspberry Pi Pico procedure, and this board has a dedicated RESET button (`BUTTON_RESET`, GPIO14) that makes
 it unnecessary. Straight from Pimoroni's own README.
 
-Do not confuse the two drives. **`RP2350`** is the bootloader volume that accepts `.uf2` files. **`Tufty2350`**
-is a *different* disk that MicroPython exposes at normal runtime for editing `secrets.py` and apps — several
-guides blur them together, and dropping a `.uf2` on the wrong one does nothing useful.
+**`RP2350` is the bootloader volume, and on this board it is the only one.** Guides describe a second
+`Tufty2350` disk that MicroPython exposes at runtime for editing `secrets.py` — **the shipped build does not**,
+checked rather than repeated: with MicroPython `bw-1.27.0` running, the badge enumerates as
+`bDeviceClass = 239` with only `AppleUSBCDCCompositeDevice` bound, which is a serial port and no
+mass-storage interface at all.
+
+So `/Volumes` is empty until you press BOOT+RESET, and that is the expected state, not a fault. If a build
+does expose a runtime disk, it is still not the one that takes `.uf2` files.
 
 ## Get a signal back, and pick it before you flash
 
@@ -146,7 +151,7 @@ through the badge's own hand-written host, and runs one command — as six numbe
 on the UART at once:
 
 ```
-=== ILC badge bring-up ===
+=== DLC badge bring-up ===
 1. clocks / crystal (hardware-only) ... RP2350B @ 150000000 Hz [OK]
      firmware dlc-rp2350-bringup v0.1.0
 2. display ST7789 (hardware-only) ... 320x240 parallel [OK]
@@ -160,6 +165,7 @@ on the UART at once:
      ILC_WORLD=normal
      ILC_STDOUT=display
      ILC_STATUS=color
+5b. manifest ... 40x12 display [OK]
 6. execute 10000 ... success [OK]
      stdout: hello, world — from hello
      peak heap 2911 KB
@@ -177,12 +183,23 @@ take" and "is this the build I meant" stay separate questions.
 and the backlight **blinks**, which is the one thing a single GPIO can say that neither on nor off can: code is
 running. A board that never booted is dark; a board waiting for a payload flashes.
 
-**`ILC_*` is capability advertisement**, delivered through `wasi:cli/environment` because it is an interface
-every component already imports — no new capability needed. It tells the app what this tier can actually do.
-`ILC_STDOUT=display` says where printed bytes physically go; on the minimal world it reads `none`, which is the
-signal for an app to emit an event instead of formatting text nobody will see. It said `uart` until the panel
-genuinely rendered text and **not a day before** — an advertisement that runs ahead of the hardware is silent
-and believed.
+**`ILC_*` is the STARTUP BOOTSTRAP**, delivered through `wasi:cli/environment` because it is an interface
+every component already imports — no new capability needed. It is what shows up in a boot log, and it is all
+a world that cannot push a manifest would ever have.
+
+**Nothing in the platform reads it any more.** The wasi environment is read once, during `_initialize`, and can
+never be re-read — so it can state a capability but not an ALLOCATION, which moves the moment this world takes
+screen back for a menu. The authoritative source is the manifest (`SetEnvironment`, stage 5b above): it is
+revision-stamped and re-sendable, so an app can poll it (`platform.Env().GetTextOut()`) and be told when it changes
+(`platform.OnEnvironmentChange`). See docs/ENVIRONMENT-PLAN.md D12.
+
+The manifest is where `outlet=none` now lives on the minimal world — the signal for an app to emit an event
+instead of formatting text nobody will see. That is ADVICE: this world still accepts every byte an app writes
+and simply discards them, because a failing write would make `fmt.Println` a trap on a tier an app cannot
+identify from the inside (D13).
+
+`ILC_STDOUT` said `uart` until the panel genuinely rendered text and **not a day before** — an advertisement
+that runs ahead of the hardware is silent and believed.
 
 **Stage 3 failing with `kgd=0x00` or `0xff` means nothing drove the bus** — wrong CS pin, or no part fitted.
 Any other `kgd` means something answered but is not an APS6404L. On that path the heap falls back to 64 KB of

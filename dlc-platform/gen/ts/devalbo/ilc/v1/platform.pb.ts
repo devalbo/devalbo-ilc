@@ -132,6 +132,62 @@ export const Isolation_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Iso
 ]);
 
 /**
+ * Where an app's printed text actually goes.
+ *
+ * **Presence of stdout proves nothing**, which is why this exists. Every tier
+ * PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
+ * component whose stdout is missing never instantiates — so an app learns
+ * nothing by checking whether it is there. Only the host knows whether the bytes
+ * reach a person.
+ *
+ * @generated from enum devalbo.ilc.v1.TextOutlet
+ */
+export enum TextOutlet {
+  /**
+   * nobody said; FAILS OPEN, see below
+   *
+   * @generated from enum value: TEXT_OUTLET_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * printing reaches no one
+   *
+   * @generated from enum value: TEXT_OUTLET_NONE = 1;
+   */
+  NONE = 1,
+
+  /**
+   * a serial console someone may be watching
+   *
+   * @generated from enum value: TEXT_OUTLET_UART = 2;
+   */
+  UART = 2,
+
+  /**
+   * a screen the host renders text onto
+   *
+   * @generated from enum value: TEXT_OUTLET_DISPLAY = 3;
+   */
+  DISPLAY = 3,
+
+  /**
+   * an ordinary stdout
+   *
+   * @generated from enum value: TEXT_OUTLET_TERMINAL = 4;
+   */
+  TERMINAL = 4,
+}
+
+export const TextOutlet_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.TextOutlet", [
+  [0, "TEXT_OUTLET_UNSPECIFIED"],
+  [1, "TEXT_OUTLET_NONE"],
+  [2, "TEXT_OUTLET_UART"],
+  [3, "TEXT_OUTLET_DISPLAY"],
+  [4, "TEXT_OUTLET_TERMINAL"],
+]);
+
+/**
  * Filesystem export/import — the first-class platform primitive (§7.3). An
  * app's whole state is a filesystem tree, so one bundle moves it between the
  * terminal, the browser, and an embedded device.
@@ -296,6 +352,44 @@ export const Filesystem: MessageType<Filesystem> = /* @__PURE__ */ createMessage
 });
 
 /**
+ * The app's text budget, as of the enclosing manifest's `revision`.
+ *
+ * @generated from message devalbo.ilc.v1.TextOut
+ */
+export interface TextOut {
+  /**
+   * @generated from field: devalbo.ilc.v1.TextOutlet outlet = 2;
+   */
+  outlet?: TextOutlet;
+  /**
+   * The space the app HAS, not the space the tier could offer. Zero means
+   * unknown — a terminal whose width the host did not measure — and an app must
+   * read zero as "wrap however you like", never as "you have no room".
+   *
+   * A wrong non-zero number is worse than no number, so a host that does not
+   * know must send zero rather than guess 80.
+   *
+   * @generated from field: uint32 cols = 3;
+   */
+  cols?: number;
+  /**
+   * @generated from field: uint32 rows = 4;
+   */
+  rows?: number;
+
+};
+
+export const TextOut: MessageType<TextOut> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.TextOut",
+    fields: [
+        { no: 2, name: "outlet", kind: "enum", T: TextOutlet_Enum },
+        { no: 3, name: "cols", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 4, name: "rows", kind: "scalar", T: ScalarType.UINT32 },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * Environment is what the host can do, as of `revision`.
  *
  * Deliberately small (plan D6): a field here is a branch somewhere, and a
@@ -324,6 +418,30 @@ export interface Environment {
    * @generated from field: devalbo.ilc.v1.Filesystem filesystem = 2;
    */
   filesystem?: Filesystem;
+  /**
+   * Where printed text lands, and how much room the app has RIGHT NOW.
+   *
+   * THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
+   * when the host starts; this one is an ALLOCATION, and a world that takes
+   * screen back for an alert or a menu changes it mid-session. That is exactly
+   * why it belongs here rather than in `wasi:cli/environment`: the wasi env is
+   * read once during `_initialize` and can never be re-read, so an allocation
+   * announced there is frozen at the value it had before the app ever ran.
+   *
+   * Putting it in the manifest gets both halves for free, because the manifest
+   * already has them. POLL: `platform.Env()` is a cached synchronous read, no
+   * import, no round trip. NOTIFY: the host re-sends with a bumped revision and
+   * the engine fires registered callbacks. Neither needed a new capability,
+   * which is the D6 test this had to pass.
+   *
+   * The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
+   * They stay as the startup bootstrap for a tier that cannot push a manifest at
+   * all — today's badge is exactly that — and an app reads them only when this
+   * field is UNSPECIFIED.
+   *
+   * @generated from field: devalbo.ilc.v1.TextOut text_out = 4;
+   */
+  textOut?: TextOut;
 
 };
 
@@ -332,6 +450,7 @@ export const Environment: MessageType<Environment> = /* @__PURE__ */ createMessa
     fields: [
         { no: 1, name: "revision", kind: "scalar", T: ScalarType.UINT32 },
         { no: 2, name: "filesystem", kind: "message", T: () => Filesystem },
+        { no: 4, name: "text_out", kind: "message", T: () => TextOut },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

@@ -75,6 +75,41 @@ type BootOptions struct {
 	// which an app must not be able to detect (Decision 33).
 	Sink EventSink
 
+	// TextOutlet says where an app's printed text actually lands.
+	//
+	// WHY A HOST MUST SAY, when stdout is right there: every tier PROVIDES
+	// `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a component
+	// whose stdout is missing never instantiates — so an app learns nothing by
+	// checking whether it exists. Only the host knows whether the bytes reach a
+	// person, and a badge with no screen is indistinguishable from a terminal
+	// from the inside.
+	//
+	// REQUIRED, for the same reason FilesystemKind is: the host is the only
+	// party that knows, and there is no safe guess. A host with no outlet
+	// declares NONE — a claim that tells an app not to spend heap formatting
+	// prose nobody will read — and every other host declares what it has.
+	//
+	// Refused rather than defaulted, because the two plausible defaults fail in
+	// opposite directions. Assume TERMINAL and a badge with no screen silently
+	// formats output nobody sees; assume NONE and a terminal app goes silent.
+	// Neither is recoverable from inside the app, so the host must say.
+	TextOutlet ilcv1.TextOutlet
+
+	// TextCols and TextRows are the app's CURRENT text budget, in characters.
+	//
+	// ZERO MEANS UNMEASURED, not "no room". A host that does not know its own
+	// width must leave these zero rather than guess 80: an app reads zero as
+	// "wrap however you like", and a confidently wrong number would have it
+	// format for a screen that does not exist. Wrong is worse than unknown here,
+	// which is why there is no default.
+	//
+	// THIS IS THE FIELD THAT MOVES. Everything else in a manifest is settled when
+	// the host starts; a budget is an ALLOCATION, and a host that reclaims space
+	// mid-session — an alert, a menu, a terminal resize — re-sends the manifest
+	// with a bumped revision. Boot only sets the FIRST value.
+	TextCols uint32
+	TextRows uint32
+
 	// NoFilesystem declares that this host has NOTHING TO GRANT.
 	//
 	// Not a convenience. FSRoot's error message has always ended "…or say so
@@ -130,6 +165,10 @@ func Boot(opts BootOptions) error {
 			return err
 		}
 	}
+	if opts.TextOutlet == ilcv1.TextOutlet_TEXT_OUTLET_UNSPECIFIED {
+		return errors.New("boot: TextOutlet unset — the host is the only party that knows where printed text lands; use TEXT_OUTLET_NONE if it reaches nobody")
+	}
+
 	// Before the manifest: SetEnvironment may emit, and a sink installed
 	// afterwards would miss the first event with nothing to indicate it had.
 	if opts.Sink != nil {
@@ -149,10 +188,16 @@ func Boot(opts BootOptions) error {
 			Isolation:    opts.Isolation,
 		}
 	}
+	textOut := &ilcv1.TextOut{
+		Outlet: opts.TextOutlet,
+		Cols:   opts.TextCols,
+		Rows:   opts.TextRows,
+	}
 	body, err := (&ilcv1.SetEnvironmentRequest{
 		Environment: &ilcv1.Environment{
 			Revision:   1,
 			Filesystem: fs,
+			TextOut:    textOut,
 		},
 	}).MarshalVT()
 	if err != nil {

@@ -132,7 +132,19 @@ func handleSelfTest(req *badgeselftestv1.SelfTestRequest) (*badgeselftestv1.Self
 func checkAdvertisement() []check {
 	tier := os.Getenv("ILC_TIER")
 	world := os.Getenv("ILC_WORLD")
-	stdout := os.Getenv("ILC_STDOUT")
+
+	// THE OUTLET COMES FROM THE MANIFEST, not from `ILC_STDOUT`.
+	//
+	// The wasi key is still set by embedded worlds and still shows up in a boot
+	// log, but it is frozen at `_initialize` and nothing in the platform reads it
+	// any more. An allocation moves — a world that takes screen back for a menu
+	// corrects the manifest and cannot correct the key — so a self-test reading
+	// the key would report a value that was true before the app ever ran.
+	//
+	// Reading it the way an ordinary app does is also the more honest check: this
+	// exercises the path every other app depends on, rather than a debug surface
+	// only this one touches.
+	stdout := platform.Env().GetTextOut().GetOutlet().String()
 
 	// ABSENCE IS NOT A FAILURE, and an earlier version of this got that wrong —
 	// it reported FAIL on the native CLI, which advertises nothing because

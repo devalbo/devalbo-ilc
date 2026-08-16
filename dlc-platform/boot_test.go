@@ -31,6 +31,7 @@ func bootIn(t *testing.T, opts BootOptions) error {
 // force, capability verbs registered.
 func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 	if err := bootIn(t, BootOptions{
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
@@ -51,6 +52,7 @@ func TestBootRegistersDiscoveredVerbs(t *testing.T) {
 // not invent one on its behalf — the whole point of the safe default.
 func TestBootDefaultsToNoIsolationClaim(t *testing.T) {
 	if err := bootIn(t, BootOptions{
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	}); err != nil {
@@ -68,6 +70,7 @@ func TestBootDefaultsToNoIsolationClaim(t *testing.T) {
 // host would use.
 func TestBootCarriesAnIsolationClaim(t *testing.T) {
 	if err := bootIn(t, BootOptions{
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
 		Isolation:      ilcv1.Isolation_ISOLATION_PER_USER,
@@ -83,7 +86,7 @@ func TestBootCarriesAnIsolationClaim(t *testing.T) {
 // that rule at the entry point every host now goes through, rather than
 // relying on FSRoot() panicking later, somewhere that does not name the cause.
 func TestBootRefusesAnUngrantedRoot(t *testing.T) {
-	err := bootIn(t, BootOptions{FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	err := bootIn(t, BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
 	if err == nil {
 		t.Fatal("Boot accepted an empty root")
 	}
@@ -96,7 +99,7 @@ func TestBootRefusesAnUngrantedRoot(t *testing.T) {
 // host that has not said — not a cue for the platform to infer one from the
 // path, which would be a guess wearing a fact's clothes.
 func TestBootRefusesAnUnsetFilesystemKind(t *testing.T) {
-	err := bootIn(t, BootOptions{FSRoot: "."})
+	err := bootIn(t, BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, FSRoot: "."})
 	if err == nil {
 		t.Fatal("Boot accepted an unset filesystem kind")
 	}
@@ -114,6 +117,7 @@ func TestBootRefusesAnUnsetFilesystemKind(t *testing.T) {
 func TestBootInstallsTheSinkBeforeSendingTheManifest(t *testing.T) {
 	seenWhileBooting := false
 	err := bootIn(t, BootOptions{
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 		FSRoot:         ".",
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 		Sink:           func(string, []byte) { seenWhileBooting = true },
@@ -138,7 +142,7 @@ func TestBootInstallsTheSinkBeforeSendingTheManifest(t *testing.T) {
 // import, so Boot says that instead.
 func TestBootWithNothingRegisteredExplainsWhy(t *testing.T) {
 	cleanEnv(t) // no RegisterDiscovered: the engine package was never imported
-	err := Boot(BootOptions{FSRoot: ".", FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	err := Boot(BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, FSRoot: ".", FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
 	if err == nil {
 		t.Fatal("Boot succeeded with an empty registry")
 	}
@@ -154,7 +158,7 @@ func TestBootWithNothingRegisteredExplainsWhy(t *testing.T) {
 // filesystem at all, and until NoFilesystem existed such a host could not start:
 // Boot's own error told it to "say so explicitly" and gave it no way to.
 func TestBootWithoutAFilesystem(t *testing.T) {
-	if err := bootIn(t, BootOptions{NoFilesystem: true}); err != nil {
+	if err := bootIn(t, BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, NoFilesystem: true}); err != nil {
 		t.Fatalf("boot without a filesystem: %v", err)
 	}
 	if HasFilesystem() {
@@ -172,7 +176,7 @@ func TestBootWithoutAFilesystem(t *testing.T) {
 // itself, and any precedence rule would hide that at the cheapest moment to see
 // it.
 func TestBootRefusesAFilesystemBothWays(t *testing.T) {
-	err := bootIn(t, BootOptions{NoFilesystem: true, FSRoot: "."})
+	err := bootIn(t, BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, NoFilesystem: true, FSRoot: "."})
 	if err == nil {
 		t.Fatal("Boot accepted NoFilesystem together with a granted root")
 	}
@@ -181,6 +185,7 @@ func TestBootRefusesAFilesystemBothWays(t *testing.T) {
 	}
 
 	err = bootIn(t, BootOptions{
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_NONE,
 		NoFilesystem:   true,
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
 	})
@@ -197,11 +202,52 @@ func TestBootRefusesAFilesystemBothWays(t *testing.T) {
 // while offering nothing to say it with, which reads as a platform that lost an
 // argument with itself.
 func TestBootUngrantedRootNamesTheEscape(t *testing.T) {
-	err := bootIn(t, BootOptions{FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	err := bootIn(t, BootOptions{TextOutlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE, FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
 	if err == nil {
 		t.Fatal("Boot accepted an empty root")
 	}
 	if !strings.Contains(err.Error(), "NoFilesystem") {
 		t.Fatalf("error tells a storageless host nothing it can do: %q", err)
+	}
+}
+
+// TestBootRefusesAnUndeclaredOutlet guards the requirement itself.
+//
+// There is no safe default, which is why this is refused rather than filled in.
+// The two plausible guesses fail in opposite directions: assume a terminal and a
+// badge with no screen formats output nobody sees; assume none and a CLI goes
+// silent. Neither is recoverable from inside the app — it cannot tell, because
+// every tier provides `wasi:cli/stdout` — so the host has to say.
+func TestBootRefusesAnUndeclaredOutlet(t *testing.T) {
+	err := bootIn(t, BootOptions{FSRoot: ".", FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD})
+	if err == nil {
+		t.Fatal("boot must refuse a host that did not declare where text goes")
+	}
+	if !strings.Contains(err.Error(), "TextOutlet") {
+		t.Fatalf("the error must name the field: %v", err)
+	}
+}
+
+// TestBootCarriesTheTextBudget: the numbers a host measured must reach the app,
+// because they are what it formats against.
+func TestBootCarriesTheTextBudget(t *testing.T) {
+	if err := bootIn(t, BootOptions{
+		FSRoot:         ".",
+		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD,
+		TextOutlet:     ilcv1.TextOutlet_TEXT_OUTLET_TERMINAL,
+		TextCols:       100,
+		TextRows:       30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := Env().GetTextOut()
+	if got := out.GetOutlet(); got != ilcv1.TextOutlet_TEXT_OUTLET_TERMINAL {
+		t.Errorf("outlet: got %v want terminal", got)
+	}
+	if got, want := out.GetCols(), uint32(100); got != want {
+		t.Errorf("cols: got %d want %d", got, want)
+	}
+	if got, want := out.GetRows(), uint32(30); got != want {
+		t.Errorf("rows: got %d want %d", got, want)
 	}
 }

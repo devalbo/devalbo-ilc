@@ -36,12 +36,14 @@ fn main() {
     println!("cargo::rerun-if-env-changed=BADGE_REGION");
     println!("cargo::rerun-if-env-changed=BADGE_WORLD");
     println!("cargo::rerun-if-env-changed=BADGE_BEAT_MS");
+    println!("cargo::rerun-if-env-changed=BADGE_SCREEN");
 
     // Declared so that a typo in a `cfg` name is a warning rather than a branch
     // that quietly never compiles.
     println!("cargo::rustc-check-cfg=cfg(has_builtin_payload)");
     println!("cargo::rustc-check-cfg=cfg(payload_region)");
     println!("cargo::rustc-check-cfg=cfg(badge_world_minimal)");
+    println!("cargo::rustc-check-cfg=cfg(badge_screen_full)");
 
     // WHICH WORLD (see src/world.rs). Flash-time on purpose: the two differ only
     // in presentation, and a runtime switch would carry both onto a board that
@@ -52,6 +54,15 @@ fn main() {
         "minimal" => println!("cargo::rustc-cfg=badge_world_minimal"),
         "" | "normal" => {}
         other => panic!("BADGE_WORLD={other:?}: expected `normal` or `minimal`"),
+    }
+
+    // HOW THE PANEL IS SHARED between the world and the app (see world.rs).
+    // `split` keeps a band for the world; `full` gives the app everything and
+    // leaves the world with the backlight and the status colour.
+    match std::env::var("BADGE_SCREEN").unwrap_or_default().as_str() {
+        "full" => println!("cargo::rustc-cfg=badge_screen_full"),
+        "" | "split" => {}
+        other => panic!("BADGE_SCREEN={other:?}: expected `split` or `full`"),
     }
 
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));

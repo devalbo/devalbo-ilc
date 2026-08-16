@@ -82,3 +82,17 @@ build/
 # that produced them — so committing one would be committing a stale artifact.
 # Regenerate with: make qemu-payload
 *.cwasm
+
+# flash-testing/ — images you drag onto a badge, and their checksums.
+#
+# BUILD OUTPUTS OF ONE FIRMWARE REVISION, not artifacts. Committing them would
+# promise they match the source beside them, and nothing in a repo can keep that
+# promise: the firmware changes and the .uf2 does not, so a stale image flashes
+# perfectly and runs last week's code. That is the worst way to debug hardware —
+# you are testing a fix that is not on the board.
+#
+# `make flash-testing` rebuilds the images and CHECKSUMS.txt together, so the
+# two cannot disagree. The factory MicroPython image is dropped in by hand (it
+# is the way back from a bad flash) and is checksummed with the rest.
+flash-testing/*.uf2
+flash-testing/CHECKSUMS.txt

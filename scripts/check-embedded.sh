@@ -147,8 +147,26 @@ if [ "$want_firmware" = 1 ]; then
 		echo "  (skipping built-in payload modes — run \`make badge-cwasm\` first)"
 	fi
 
+	# THE BRING-UP PROBES. Not part of any shipped image — a separate firmware
+	# for finding out whether a peripheral works, and why not. It is here because
+	# a probe that stops compiling is discovered on the day something breaks and
+	# you reach for it, which is the worst possible moment. Cheap to keep green:
+	# it has no Wasmtime, so it builds in seconds.
+	try "device bring-up probe" display-probe --release
+
 	BADGE_WORLD=minimal try "badge firmware: minimal world" rp2350 --release
 	BADGE_BEAT_MS=700 try "badge firmware: watchable bring-up" rp2350 --release
+
+	# BADGE_SCREEN, which decides how much of the panel the app gets and is
+	# therefore the input to the `ILC_COLS`/`ILC_ROWS` the app formats against.
+	# `full` is the mode the default build never compiles: it changes a `match`
+	# on a cfg-selected const and const-asserts the result is a usable number, so
+	# a wrong band size is a BUILD error here and an unreadable screen otherwise.
+	BADGE_SCREEN=full try "badge firmware: full-screen app" rp2350 --release
+	# The combination, because the two knobs meet in one const expression and
+	# each alone leaves the other branch unbuilt.
+	BADGE_SCREEN=full BADGE_WORLD=minimal \
+		try "badge firmware: minimal world, full screen" rp2350 --release
 fi
 
 exit $rc

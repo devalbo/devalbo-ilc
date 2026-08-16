@@ -143,7 +143,7 @@ iterations.
 seconds and needs no serial adapter.
 
 ```
-ILC 0.1.0 [normal]
+DLC 0.1.0 [normal]
 
 1*  clocks / crystal              OK
 2*  display ST7789                OK
@@ -233,7 +233,7 @@ is the log's spelling of the screen's `*`.
 **Full success looks like this:**
 
 ```
-=== ILC badge bring-up ===
+=== DLC badge bring-up ===
 1. clocks / crystal (hardware-only) ... RP2350B @ 150000000 Hz [OK]
      firmware dlc-rp2350-bringup v0.1.0
 2. display ST7789 (hardware-only) ... 320x240 parallel [OK]
@@ -247,6 +247,7 @@ is the log's spelling of the screen's `*`.
      ILC_WORLD=normal
      ILC_STDOUT=display
      ILC_STATUS=color
+5b. manifest ... 40x12 display [OK]
 6. execute 10000 ... success [OK]
      stdout: hello, world — from hello
      peak heap 2911 KB

@@ -27,12 +27,21 @@
 //! never touches the region. A guard that assumes an earlier guard ran is not a
 //! guard.
 //!
-//! # Button polarity is an ASSUMPTION
+//! # Button polarity: ACTIVE-LOW, and this was measured on the board
 //!
-//! Pimoroni's boards drive these **active-HIGH** with external pull-downs, which
-//! is the opposite of the usual bare-metal reflex. It is unverified here — if the
-//! menu instantly selects, or never responds, this is the first thing to check
-//! and it is one `is_high` → `is_low`.
+//! An earlier revision asserted the opposite — "active-HIGH with external
+//! pull-downs" — and would have read every button as permanently held, so the
+//! menu would have confirmed instantly and launched slot 0 before anyone saw it.
+//!
+//! **Measured 2026-08-16, before this code ever ran**, by asking Pimoroni's own
+//! MicroPython on the device rather than reading a pinout: it configures the
+//! buttons `Pin(GPIO7, mode=IN, pull=PULL_UP)`, and sampling them gave `1` at
+//! idle and `0` with A held. So the buttons pull to ground and the pins want
+//! internal pull-UPs.
+//!
+//! Worth repeating as a technique: the shipped firmware is a working reference
+//! implementation for the same hardware, and it can be interrogated over the
+//! USB REPL in less time than it takes to find the schematic.
 
 use core::fmt::Write;
 
@@ -131,9 +140,12 @@ where
         cortex_m::asm::delay(sys_hz / 1000 * POLL_MS);
         elapsed += POLL_MS;
 
-        let up = buttons.up.is_high().unwrap_or(false);
-        let down = buttons.down.is_high().unwrap_or(false);
-        let confirm = buttons.a.is_high().unwrap_or(false);
+        // ACTIVE-LOW: pulled up, and a press shorts to ground. `unwrap_or(false)`
+        // stays "not pressed" on an error, which is the safe default here — a
+        // stuck read must not confirm a selection.
+        let up = buttons.up.is_low().unwrap_or(false);
+        let down = buttons.down.is_low().unwrap_or(false);
+        let confirm = buttons.a.is_low().unwrap_or(false);
 
         if confirm {
             // GUARD ONE. Refuse rather than launch; the highlight should never be

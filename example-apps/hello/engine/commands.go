@@ -11,6 +11,8 @@
 package engine
 
 import (
+	"fmt"
+
 	"github.com/devalbo/devalbo-ilc/dlc-platform"
 
 	"github.com/devalbo/devalbo-ilc/example-apps/hello/gen/go/dlcconfig"
@@ -46,5 +48,29 @@ func handleGreet(req *hellov1.GreetRequest) (*hellov1.GreetResponse, error) {
 	if name == "" {
 		name = "world"
 	}
-	return &hellov1.GreetResponse{Text: "hello, " + name + " — from hello"}, nil
+	text := "hello, " + name + " — from hello"
+
+	// ASK THE WORLD WHERE TEXT GOES, then defer to it.
+	//
+	// A typed response is protobuf, and decoding it needs THIS APP'S SCHEMA —
+	// which the CLI has compiled in and a badge running apps it was never built
+	// for does not. So on a constrained tier the return value is invisible and
+	// stdout is the only channel carrying anything a person can read.
+	//
+	// Learned on hardware: this app ran correctly on a badge and showed a blank
+	// screen, because it returned a response and printed nothing.
+	//
+	// `CanShowText` reads what the tier advertised. It FAILS OPEN, so an
+	// unadorned host still prints — and a tier that says "none" saves the app
+	// the heap of formatting output nobody will ever see.
+	if platform.CanShowText() {
+		fmt.Println(text)
+	}
+
+	// AND ALWAYS THE STATUS BYTES. This is the channel that survives when text
+	// does not: a tier with one LED can render it, and a tier with nothing
+	// discards it. Absence is a no-op, never an error.
+	platform.SetStatus(1, 0, 0)
+
+	return &hellov1.GreetResponse{Text: text}, nil
 }

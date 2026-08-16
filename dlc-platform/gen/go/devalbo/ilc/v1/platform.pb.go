@@ -144,6 +144,55 @@ func (x Isolation) String() string {
 	return strconv.Itoa(int(x))
 }
 
+// Where an app's printed text actually goes.
+//
+// **Presence of stdout proves nothing**, which is why this exists. Every tier
+// PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
+// component whose stdout is missing never instantiates — so an app learns
+// nothing by checking whether it is there. Only the host knows whether the bytes
+// reach a person.
+type TextOutlet int32
+
+const (
+	TextOutlet_TEXT_OUTLET_UNSPECIFIED TextOutlet = 0 // nobody said; FAILS OPEN, see below
+	TextOutlet_TEXT_OUTLET_NONE        TextOutlet = 1 // printing reaches no one
+	TextOutlet_TEXT_OUTLET_UART        TextOutlet = 2 // a serial console someone may be watching
+	TextOutlet_TEXT_OUTLET_DISPLAY     TextOutlet = 3 // a screen the host renders text onto
+	TextOutlet_TEXT_OUTLET_TERMINAL    TextOutlet = 4 // an ordinary stdout
+)
+
+// Enum value maps for TextOutlet.
+var (
+	TextOutlet_name = map[int32]string{
+		0: "TEXT_OUTLET_UNSPECIFIED",
+		1: "TEXT_OUTLET_NONE",
+		2: "TEXT_OUTLET_UART",
+		3: "TEXT_OUTLET_DISPLAY",
+		4: "TEXT_OUTLET_TERMINAL",
+	}
+	TextOutlet_value = map[string]int32{
+		"TEXT_OUTLET_UNSPECIFIED": 0,
+		"TEXT_OUTLET_NONE":        1,
+		"TEXT_OUTLET_UART":        2,
+		"TEXT_OUTLET_DISPLAY":     3,
+		"TEXT_OUTLET_TERMINAL":    4,
+	}
+)
+
+func (x TextOutlet) Enum() *TextOutlet {
+	p := new(TextOutlet)
+	*p = x
+	return p
+}
+
+func (x TextOutlet) String() string {
+	name, valid := TextOutlet_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 // Filesystem export/import — the first-class platform primitive (§7.3). An
 // app's whole state is a filesystem tree, so one bundle moves it between the
 // terminal, the browser, and an embedded device.
@@ -338,6 +387,26 @@ type Environment struct {
 	// still current.
 	Revision   uint32      `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
 	Filesystem *Filesystem `protobuf:"bytes,2,opt,name=filesystem,proto3" json:"filesystem,omitempty"`
+	// Where printed text lands, and how much room the app has RIGHT NOW.
+	//
+	// THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
+	// when the host starts; this one is an ALLOCATION, and a world that takes
+	// screen back for an alert or a menu changes it mid-session. That is exactly
+	// why it belongs here rather than in `wasi:cli/environment`: the wasi env is
+	// read once during `_initialize` and can never be re-read, so an allocation
+	// announced there is frozen at the value it had before the app ever ran.
+	//
+	// Putting it in the manifest gets both halves for free, because the manifest
+	// already has them. POLL: `platform.Env()` is a cached synchronous read, no
+	// import, no round trip. NOTIFY: the host re-sends with a bumped revision and
+	// the engine fires registered callbacks. Neither needed a new capability,
+	// which is the D6 test this had to pass.
+	//
+	// The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
+	// They stay as the startup bootstrap for a tier that cannot push a manifest at
+	// all — today's badge is exactly that — and an app reads them only when this
+	// field is UNSPECIFIED.
+	TextOut *TextOut `protobuf:"bytes,4,opt,name=text_out,json=textOut,proto3" json:"textOut,omitempty"`
 }
 
 func (x *Environment) Reset() {
@@ -358,6 +427,54 @@ func (x *Environment) GetFilesystem() *Filesystem {
 		return x.Filesystem
 	}
 	return nil
+}
+
+func (x *Environment) GetTextOut() *TextOut {
+	if x != nil {
+		return x.TextOut
+	}
+	return nil
+}
+
+// The app's text budget, as of the enclosing manifest's `revision`.
+type TextOut struct {
+	unknownFields []byte
+	Outlet        TextOutlet `protobuf:"varint,2,opt,name=outlet,proto3" json:"outlet,omitempty"`
+	// The space the app HAS, not the space the tier could offer. Zero means
+	// unknown — a terminal whose width the host did not measure — and an app must
+	// read zero as "wrap however you like", never as "you have no room".
+	//
+	// A wrong non-zero number is worse than no number, so a host that does not
+	// know must send zero rather than guess 80.
+	Cols uint32 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows uint32 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+}
+
+func (x *TextOut) Reset() {
+	*x = TextOut{}
+}
+
+func (*TextOut) ProtoMessage() {}
+
+func (x *TextOut) GetOutlet() TextOutlet {
+	if x != nil {
+		return x.Outlet
+	}
+	return TextOutlet_TEXT_OUTLET_UNSPECIFIED
+}
+
+func (x *TextOut) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *TextOut) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
 }
 
 type GetCommandSurfaceRequest struct {
@@ -726,6 +843,7 @@ func (m *Environment) CloneVT() *Environment {
 	r := new(Environment)
 	r.Revision = m.Revision
 	r.Filesystem = protobuf_go_lite.CloneVTValue(m.Filesystem)
+	r.TextOut = protobuf_go_lite.CloneVTValue(m.TextOut)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -733,6 +851,24 @@ func (m *Environment) CloneVT() *Environment {
 }
 
 func (m *Environment) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *TextOut) CloneVT() *TextOut {
+	if m == nil {
+		return (*TextOut)(nil)
+	}
+	r := new(TextOut)
+	r.Outlet = m.Outlet
+	r.Cols = m.Cols
+	r.Rows = m.Rows
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *TextOut) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
@@ -1037,11 +1173,39 @@ func (this *Environment) EqualVT(that *Environment) bool {
 	if !protobuf_go_lite.IsEqualVT(this.Filesystem, that.Filesystem) {
 		return false
 	}
+	if !protobuf_go_lite.IsEqualVT(this.TextOut, that.TextOut) {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
 func (this *Environment) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*Environment)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *TextOut) EqualVT(that *TextOut) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Outlet != that.Outlet {
+		return false
+	}
+	if this.Cols != that.Cols {
+		return false
+	}
+	if this.Rows != that.Rows {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *TextOut) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*TextOut)
 	if !ok {
 		return false
 	}
@@ -1440,6 +1604,46 @@ func (x *Isolation) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the TextOutlet to JSON.
+func (x TextOutlet) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), TextOutlet_name)
+}
+
+// MarshalText marshals the TextOutlet to text.
+func (x TextOutlet) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), TextOutlet_name)), nil
+}
+
+// MarshalJSON marshals the TextOutlet to JSON.
+func (x TextOutlet) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the TextOutlet from JSON.
+func (x *TextOutlet) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(TextOutlet_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read TextOutlet enum: %v", err)
+		return
+	}
+	*x = TextOutlet(v)
+}
+
+// UnmarshalText unmarshals the TextOutlet from text.
+func (x *TextOutlet) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), TextOutlet_value)
+	if err != nil {
+		return err
+	}
+	*x = TextOutlet(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the TextOutlet from JSON.
+func (x *TextOutlet) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the BundleFormat to JSON.
 func (x BundleFormat) MarshalProtoJSON(s *json.MarshalState) {
 	s.WriteEnum(int32(x), BundleFormat_name)
@@ -1676,6 +1880,11 @@ func (x *Environment) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("filesystem")
 		x.Filesystem.MarshalProtoJSON(s.WithField("filesystem"))
 	}
+	if x.TextOut != nil || s.HasField("textOut") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("textOut")
+		x.TextOut.MarshalProtoJSON(s.WithField("textOut"))
+	}
 	s.WriteObjectEnd()
 }
 
@@ -1703,12 +1912,77 @@ func (x *Environment) UnmarshalProtoJSON(s *json.UnmarshalState) {
 			}
 			x.Filesystem = &Filesystem{}
 			x.Filesystem.UnmarshalProtoJSON(s.WithField("filesystem", true))
+		case "text_out", "textOut":
+			if s.ReadNil() {
+				x.TextOut = nil
+				return
+			}
+			x.TextOut = &TextOut{}
+			x.TextOut.UnmarshalProtoJSON(s.WithField("text_out", true))
 		}
 	})
 }
 
 // UnmarshalJSON unmarshals the Environment from JSON.
 func (x *Environment) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the TextOut message to JSON.
+func (x *TextOut) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Outlet != 0 || s.HasField("outlet") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("outlet")
+		x.Outlet.MarshalProtoJSON(s)
+	}
+	if x.Cols != 0 || s.HasField("cols") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("cols")
+		s.WriteUint32(x.Cols)
+	}
+	if x.Rows != 0 || s.HasField("rows") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("rows")
+		s.WriteUint32(x.Rows)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the TextOut to JSON.
+func (x *TextOut) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the TextOut message from JSON.
+func (x *TextOut) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "outlet":
+			s.AddField("outlet")
+			x.Outlet.UnmarshalProtoJSON(s)
+		case "cols":
+			s.AddField("cols")
+			x.Cols = s.ReadUint32()
+		case "rows":
+			s.AddField("rows")
+			x.Rows = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the TextOut from JSON.
+func (x *TextOut) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -2474,6 +2748,16 @@ func (m *Environment) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.TextOut != nil {
+		size, err := m.TextOut.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x22
+	}
 	if m.Filesystem != nil {
 		size, err := m.Filesystem.MarshalToSizedBufferVT(dAtA[:i])
 		if err != nil {
@@ -2488,6 +2772,53 @@ func (m *Environment) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Revision))
 		i--
 		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *TextOut) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *TextOut) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *TextOut) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Rows != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Rows))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Cols != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Cols))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Outlet != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Outlet))
+		i--
+		dAtA[i] = 0x10
 	}
 	return len(dAtA) - i, nil
 }
@@ -3179,6 +3510,16 @@ func (m *Environment) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.TextOut != nil {
+		size, err := m.TextOut.MarshalToSizedBufferVTStrict(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x22
+	}
 	if m.Filesystem != nil {
 		size, err := m.Filesystem.MarshalToSizedBufferVTStrict(dAtA[:i])
 		if err != nil {
@@ -3193,6 +3534,53 @@ func (m *Environment) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Revision))
 		i--
 		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *TextOut) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *TextOut) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *TextOut) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Rows != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Rows))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Cols != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Cols))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Outlet != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Outlet))
+		i--
+		dAtA[i] = 0x10
 	}
 	return len(dAtA) - i, nil
 }
@@ -3780,6 +4168,23 @@ func (m *Environment) SizeVT() (n int) {
 		l = m.Filesystem.SizeVT()
 		n += protobuf_go_lite.SizeMessage(1, l)
 	}
+	if m.TextOut != nil {
+		l = m.TextOut.SizeVT()
+		n += protobuf_go_lite.SizeMessage(1, l)
+	}
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *TextOut) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Outlet)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Cols)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Rows)
 	n += len(m.unknownFields)
 	return n
 }
@@ -3952,6 +4357,9 @@ func (x FilesystemKind) MarshalProtoText() string {
 func (x Isolation) MarshalProtoText() string {
 	return x.String()
 }
+func (x TextOutlet) MarshalProtoText() string {
+	return x.String()
+}
 func (x BundleFormat) MarshalProtoText() string {
 	return x.String()
 }
@@ -4016,10 +4424,35 @@ func (x *Environment) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "filesystem")
 		protobuf_go_lite.TextWriteTextMarshaler(&sb, x.Filesystem)
 	}
+	if x.TextOut != nil {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "text_out")
+		protobuf_go_lite.TextWriteTextMarshaler(&sb, x.TextOut)
+	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
 
 func (x *Environment) String() string {
+	return x.MarshalProtoText()
+}
+func (x *TextOut) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "TextOut")
+	if x.Outlet != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "outlet")
+		protobuf_go_lite.TextWriteStringer(&sb, TextOutlet(x.Outlet))
+	}
+	if x.Cols != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "cols")
+		protobuf_go_lite.TextWriteUint(&sb, x.Cols)
+	}
+	if x.Rows != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "rows")
+		protobuf_go_lite.TextWriteUint(&sb, x.Rows)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *TextOut) String() string {
 	return x.MarshalProtoText()
 }
 func (x *GetCommandSurfaceRequest) MarshalProtoText() string {
@@ -4447,6 +4880,92 @@ func (m *Environment) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TextOut", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			if m.TextOut == nil {
+				m.TextOut = &TextOut{}
+			}
+			if err := m.TextOut.UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *TextOut) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: TextOut: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: TextOut: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Outlet", wireType)
+			}
+			m.Outlet = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Outlet = TextOutlet(_v)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Cols", wireType)
+			}
+			m.Cols = 0
+			m.Cols, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Rows", wireType)
+			}
+			m.Rows = 0
+			m.Rows, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -5460,6 +5979,92 @@ func (m *Environment) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TextOut", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			if m.TextOut == nil {
+				m.TextOut = &TextOut{}
+			}
+			if err := m.TextOut.UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *TextOut) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: TextOut: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: TextOut: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Outlet", wireType)
+			}
+			m.Outlet = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Outlet = TextOutlet(_v)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Cols", wireType)
+			}
+			m.Cols = 0
+			m.Cols, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Rows", wireType)
+			}
+			m.Rows = 0
+			m.Rows, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

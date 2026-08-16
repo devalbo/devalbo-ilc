@@ -149,7 +149,7 @@ impl<'a, U: Write> Report<'a, U> {
         report.clear_screen();
         report.draw(TOP, 0, title, NAME_COLOR);
         report.line = 1;
-        let _ = writeln!(report.uart, "\r\n=== ILC badge bring-up ===");
+        let _ = writeln!(report.uart, "\r\n=== DLC badge bring-up ===");
         report
     }
 
@@ -219,6 +219,11 @@ impl<'a, U: Write> Report<'a, U> {
     fn resolve_ok(&mut self, detail: Arguments<'_>) {
         let y = self.y();
         self.draw(y, RESULT_COL, format_args!("OK"), OK_COLOR);
+        // THE DETAIL BELONGS ON THE SCREEN TOO. It went only to the UART, so
+        // stage 4 read "payload region  OK" on the badge while the log said
+        // "empty" — and the screen narration exists precisely for people without
+        // an adapter. Truncated by the line buffer if it does not fit.
+        self.draw(y, RESULT_COL + 3, detail, DIM_COLOR);
         let _ = self.uart.write_fmt(detail);
         let _ = writeln!(self.uart, " [OK]");
         if self.last_was_hardware {
@@ -235,6 +240,10 @@ impl<'a, U: Write> Report<'a, U> {
         self.failures += 1;
         let y = self.y();
         self.draw(y, RESULT_COL, format_args!("FAIL"), FAIL_COLOR);
+        // Same reasoning as resolve_ok: a failure with no reason on screen is
+        // the least useful thing this firmware could show.
+        self.draw(y + LINE_H, 3, detail, FAIL_COLOR);
+        self.line += 1;
         let _ = self.uart.write_fmt(detail);
         let _ = writeln!(self.uart, " [FAIL]");
         self.line += 1;

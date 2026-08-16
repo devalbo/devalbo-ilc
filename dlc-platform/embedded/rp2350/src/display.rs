@@ -39,7 +39,6 @@
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_hal::digital::OutputPin;
 
-use mipidsi::interface::{InterfaceKind, OutputBus, ParallelInterface};
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, Orientation, Rotation};
 use mipidsi::{Builder, NoResetPin};
@@ -47,59 +46,36 @@ use mipidsi::{Builder, NoResetPin};
 use rp235x_hal as hal;
 use hal::gpio::{DynPinId, FunctionSio, Pin, PullDown, SioOutput};
 
-/// The panel, in landscape.
+/// The panel as DRAWN — landscape, after the rotation below. This is what the
+/// report and console lay out against.
 pub const WIDTH: u16 = 320;
 pub const HEIGHT: u16 = 240;
+
+/// The panel as the CONTROLLER sees it. The ST7789 is natively 240x320 portrait,
+/// and `mipidsi` validates `display_size` against exactly this — see
+/// `Display::new`, where getting it backwards stopped the panel initialising.
+const NATIVE_WIDTH: u16 = 240;
+const NATIVE_HEIGHT: u16 = 320;
 
 /// A configured output pin, type-erased so the eight data lines fit an array.
 pub type OutPin = Pin<DynPinId, FunctionSio<SioOutput>, PullDown>;
 
-/// Bits 0..7 of the HIGH SIO bank — GPIO32..39, the data bus.
-const DATA_MASK: u32 = 0xFF;
-
-/// The data bus as ONE register write.
+/// The eight data pins, owned so nothing reconfigures them under the bus.
 ///
-/// **Why this exists rather than `Generic8BitBus`:** the Tufty wires DB0..DB7 to
-/// GPIO32..39, which land as bits 0..7 of the RP2350's high SIO bank. So a byte
-/// is a clear-then-set of one register instead of eight pin writes — and at
-/// 153,600 bytes for a full-screen fill, that difference is the whole frame time.
+/// `SioBus` — an `OutputBus` impl that sat under `mipidsi::ParallelInterface` —
+/// lived here until the panel came up. It was replaced wholesale by
+/// `siobus::SioInterface`, which implements `Interface` directly so that
+/// mipidsi's solid-fill fast path (a WR strobe with no data write between the
+/// edges) cannot be reached. That fast path was dropping pixels on real
+/// hardware; see `siobus.rs`.
+/// The bus: our own `Interface` (padded strobes, no solid-fill fast path),
+/// wrapped so CS is asserted per transaction.
 ///
-/// **SET/CLR rather than writing `gpio_hi_out` wholesale**, which is a
-/// correctness point and not a speed one: GPIO40..47 share that register
-/// (`VBAT_SENSE`, `POWER_EN`, `LIGHT_SENSE`), so a full-register write would
-/// stamp on pins this module does not own. SET/CLR touch only the bits named.
-pub struct SioBus {
-    /// Held, never read. Owning the pins is what makes the raw register writes
-    /// sound: nothing else in the firmware can be driving these pads.
-    _pins: [OutPin; 8],
-}
-
-impl SioBus {
-    pub fn new(pins: [OutPin; 8]) -> Self {
-        Self { _pins: pins }
-    }
-}
-
-impl OutputBus for SioBus {
-    type Word = u8;
-    const KIND: InterfaceKind = InterfaceKind::Parallel8Bit;
-    /// Writing a GPIO register cannot fail.
-    type Error = core::convert::Infallible;
-
-    #[inline(always)]
-    fn set_value(&mut self, value: u8) -> Result<(), Self::Error> {
-        // SAFETY: this struct owns GPIO32..39, and SET/CLR affect only the bits
-        // named, so the neighbours in this register are untouched.
-        let sio = unsafe { &*hal::pac::SIO::ptr() };
-        sio.gpio_hi_out_clr().write(|w| unsafe { w.bits(DATA_MASK) });
-        sio.gpio_hi_out_set()
-            .write(|w| unsafe { w.bits(value as u32) });
-        Ok(())
-    }
-}
-
-/// The bus plus the two lines `mipidsi` drives per transaction.
-pub type Bus = ParallelInterface<SioBus, OutPin, OutPin>;
+/// NOT `mipidsi::ParallelInterface`. Its solid-fill fast path strobes WR without
+/// re-driving the data, which is the narrowest pulse the CPU can emit — measured
+/// on hardware as dropped pixels: rows walked sideways and the far end of the
+/// framebuffer was never written. See `siobus.rs`.
+pub type Bus = crate::cs::ChipSelect<crate::siobus::SioInterface<OutPin, OutPin>, OutPin>;
 
 /// The Tufty's display: a `mipidsi` ST7789 over our own bus.
 ///
@@ -108,14 +84,21 @@ pub type Bus = ParallelInterface<SioBus, OutPin, OutPin>;
 /// version did anyway without saying so.
 pub type Panel = mipidsi::Display<Bus, ST7789, NoResetPin>;
 
-/// The panel did not come up.
+/// The panel did not come up, and WHY.
 ///
-/// Deliberately opaque: `mipidsi::InitError` is generic over the interface and
-/// reset-pin error types, and neither can actually occur here — writing a GPIO
-/// register is infallible and there is no reset pin. What the firmware needs is
-/// the binary fact, which it prints.
+/// It used to be a unit struct, on the reasoning that the error types involved
+/// are all infallible so only the binary fact could matter. That was wrong twice
+/// over: `init` also rejects a bad CONFIGURATION before touching any pin, and
+/// discarding the reason cost a hardware session. The badge showed a blinking
+/// backlight and no text, which looks exactly like a dead panel, while the real
+/// answer — `InvalidDisplaySize` — was in a value thrown away by
+/// `.map_err(|_| DisplayError)`.
+///
+/// A `&'static str` rather than the generic `InitError`, because the message has
+/// to survive into a 40-column report and a UART line, and every variant this
+/// can actually take is known at compile time.
 #[derive(Debug)]
-pub struct DisplayError;
+pub struct DisplayError(pub &'static str);
 
 /// Everything the badge needs from a screen.
 pub struct Display {
@@ -124,7 +107,6 @@ pub struct Display {
     /// never toggled: nothing else is on this bus, and RD left floating would be
     /// an input the ST7789 may sample as a read strobe. Kept so they cannot be
     /// reconfigured elsewhere.
-    _cs: OutPin,
     _rd: OutPin,
 }
 
@@ -149,26 +131,43 @@ impl Display {
         data: [OutPin; 8],
         delay: &mut impl embedded_hal::delay::DelayNs,
     ) -> Result<Self, DisplayError> {
-        let mut cs = cs;
-        // Assert for the whole session, before any traffic.
-        let _ = cs.set_low();
+        // CS is NOT held low for the session: the wrapper asserts it per
+        // transaction, matching Pimoroni. RD stays high — this driver never
+        // reads, and a floating RD is an input the controller may sample.
         let _ = rd.set_high();
 
-        let bus = ParallelInterface::new(SioBus::new(data), rs, wr);
+        // CS is bracketed per transaction by the wrapper; the data pins stay
+        // owned here so nothing reconfigures them underneath the bus.
+        let _data = data;
+        let bus = crate::cs::ChipSelect::new(crate::siobus::SioInterface::new(rs, wr), cs);
 
         let panel = Builder::new(ST7789, bus)
-            .display_size(WIDTH, HEIGHT)
-            // Landscape. Try Rotation::Deg270 if the image comes up upside down.
-            .orientation(Orientation::new().rotate(Rotation::Deg90))
+            // NATIVE framebuffer, not the rotated presentation — `init` compares
+            // this against MODEL::FRAMEBUFFER_SIZE, which for ST7789 is
+            // (240, 320). Passing the landscape 320x240 made width exceed the
+            // maximum and failed with InvalidDisplaySize on every boot, so the
+            // panel never initialised at all. The `orientation` below is what
+            // makes it landscape; WIDTH/HEIGHT stay the rotated dimensions
+            // because that is what the drawing code lays out against.
+            .display_size(NATIVE_WIDTH, NATIVE_HEIGHT)
+            // Deg270, not Deg90 — landscape the OTHER way up. Confirmed on
+            // hardware: Deg90 put the image upside down relative to the buttons.
+            // The comment above this line used to say "try Deg270 if it comes up
+            // upside down"; it did, so this is that.
+            .orientation(Orientation::new().rotate(Rotation::Deg270))
             .invert_colors(ColorInversion::Inverted)
             .init(delay)
-            .map_err(|_| DisplayError)?;
+            .map_err(|e| {
+                // NAME THE FAILURE. Which of these it is decides where to look,
+                // and they point at completely different things.
+                DisplayError(match e {
+                    mipidsi::InitError::InvalidConfiguration(_) => "bad config (size/offset)",
+                    mipidsi::InitError::ResetPin(_) => "reset pin",
+                    mipidsi::InitError::Interface(_) => "bus/interface",
+                })
+            })?;
 
-        Ok(Self {
-            panel,
-            _cs: cs,
-            _rd: rd,
-        })
+        Ok(Self { panel, _rd: rd })
     }
 
     /// Flood the panel with one colour — **the minimal world's entire output**,

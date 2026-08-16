@@ -48,6 +48,40 @@ const BAR_TEXT: Rgb565 = Rgb565::new(0, 0, 0);
 /// How many lines fit under the bar.
 const ROWS: usize = ((HEIGHT as i32 - TEXT_TOP) / LINE_H) as usize;
 
+/// THE APP'S SHARE OF THE SCREEN, in characters.
+///
+/// Under `Split` the world keeps a band and the app gets the rest; under `Full`
+/// the app gets everything and the world falls back to the backlight and the
+/// status colour.
+///
+/// These are the numbers the world SENDS IN ITS MANIFEST (`TextOut.cols/rows`),
+/// so an app formats for the space that exists rather than the space it hoped
+/// for. They travel ONLY in the manifest: an allocation belongs on the channel
+/// that can correct it when this world takes rows back
+/// (docs/ENVIRONMENT-PLAN.md D12).
+///
+/// `world::text_sink` derives the outlet from `APP_ROWS` rather than declaring
+/// it separately, which is what stops the outlet and the budget contradicting
+/// each other.
+pub const APP_COLS: usize = COLS;
+pub const APP_ROWS: usize = match crate::world::SCREEN {
+    crate::world::ScreenLayout::Split => ROWS - crate::world::WORLD_BAND_ROWS,
+    crate::world::ScreenLayout::Full => ROWS,
+};
+
+// THE APP MUST ACTUALLY HAVE ROWS, checked at build time.
+//
+// `Split` subtracts the world's band from ROWS. A band taller than the screen
+// would underflow, and a zero budget would have this world sending a manifest
+// that promises a display while `text_sink` still says "display" — an app would
+// format for a screen that cannot show anything.
+//
+// A compile-time fact, so a compile-time error.
+const _: () = {
+    assert!(APP_ROWS > 0, "Split leaves the app no rows: shrink WORLD_BAND_ROWS");
+    assert!(APP_ROWS <= ROWS, "the app cannot have more rows than the screen");
+};
+
 /// Draw the app's output with a status bar above it.
 ///
 /// Truncates rather than scrolls: this is the LAST frame, drawn once after the
@@ -68,9 +102,12 @@ pub fn render(panel: &mut Display, status: Status, label: &str, body: &str) {
     let _ = Text::new(label, Point::new(4, 13), style).draw(panel.target());
 
     let style = MonoTextStyle::new(&FONT_8X13, TEXT_COLOR);
+    // THE APP GETS ITS BUDGET AND NOT A ROW MORE. Sending `rows` in the manifest
+    // and then drawing past it would make the number a suggestion, and an app
+    // that trusted it would have its last line silently eaten.
     let mut row = 0usize;
     for line in wrap(body) {
-        if row >= ROWS {
+        if row >= APP_ROWS {
             break;
         }
         let y = TEXT_TOP + row as i32 * LINE_H;

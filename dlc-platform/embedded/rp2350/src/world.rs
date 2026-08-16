@@ -61,6 +61,13 @@ pub enum BadgeWorld {
     Minimal,
 }
 
+/// How the panel is shared, decided by `BADGE_SCREEN` at build time.
+pub const SCREEN: ScreenLayout = if cfg!(badge_screen_full) {
+    ScreenLayout::Full
+} else {
+    ScreenLayout::Split
+};
+
 /// What this firmware is, decided by `BADGE_WORLD` at build time.
 pub const WORLD: BadgeWorld = if cfg!(badge_world_minimal) {
     BadgeWorld::Minimal
@@ -115,6 +122,12 @@ impl BadgeWorld {
             count += 1;
         }
 
+        // NO SCREEN BUDGET HERE. It briefly went out as `ILC_COLS`/`ILC_ROWS`,
+        // which cost a const integer-to-string formatter and a lookup table to
+        // produce two keys nothing ever read. The budget is an ALLOCATION and
+        // belongs in the manifest, which is the only channel that can correct it
+        // — see `main.rs` stage 5b and docs/ENVIRONMENT-PLAN.md D12.
+
         // THE ABSENCE IS THE MESSAGE, and it has to be said out loud. Every world
         // provides `wasi:cli/stdout` — TinyGo will not instantiate without it — so
         // an app cannot learn anything from its presence. A world lacking the text
@@ -135,6 +148,72 @@ impl BadgeWorld {
     }
 }
 
+/// CAPABILITY IS NOT ALLOCATION, and they are dynamic to different degrees.
+///
+/// Two questions that look alike and are not:
+///
+/// | | question | changes? | channel |
+/// | --- | --- | --- | --- |
+/// | **capability** | can this tier show text at all, and at most how much? | settled for the session | wasi env, at instantiation |
+/// | **allocation** | how much has the app got RIGHT NOW? | yes | the manifest (`SetEnvironment`) |
+///
+/// The wasi environment is read once, during `_initialize`, before any command
+/// has run. That makes it the right home for a fact settled for the session and
+/// the WRONG home for one that moves: an app cannot re-read it, so a changing
+/// allocation announced there would simply be missed.
+///
+/// The manifest is the moving half — revision-stamped and re-sent on change, so
+/// an app can both POLL it (`platform.Env()`, a cached read with no import) and
+/// be TOLD (`platform.OnEnvironmentChange`).
+///
+/// **This badge sends both.** The wasi keys go out at instantiation and the
+/// manifest goes out at stage 5b, before the app's first command — see
+/// `main.rs` and `dlc_platform_embedded::manifest`.
+///
+/// Today the two AGREE, because this world has one app, one layout, and the
+/// budget is fixed at flash time. Sending the manifest anyway is what makes the
+/// numbers correctable rather than a promise this world cannot keep: the day it
+/// takes rows back for a menu, it re-sends with revision 2 and the app finds
+/// out. Nothing else has to change.
+///
+/// The keys below remain the startup bootstrap — what a boot log shows, and all
+/// a world that cannot push a manifest would ever have. Nothing in the platform
+/// reads them any more (docs/ENVIRONMENT-PLAN.md D12).
+///
+/// HOW THE PANEL IS DIVIDED between the world and the app.
+///
+/// The world has things worth showing — which app is running, whether it
+/// succeeded, what it cost — and the app has its own output. Both on one 320x240
+/// screen is a budget, and somebody has to decide it. The WORLD decides, because
+/// it is the only party that knows what else is competing for the space.
+///
+/// **The app is then TOLD what it got** (`TextOut.cols`/`rows` in the manifest), rather than
+/// left to assume a size. That is the same move as `ILC_STDOUT`: a tier states
+/// what it can do, and an app that reads it formats for the space that exists
+/// instead of the space it hoped for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ScreenLayout {
+    /// A world band across the top, the app underneath.
+    ///
+    /// The default, and the right one while the badge is still being brought up:
+    /// an app that fails silently is much harder to diagnose when the screen
+    /// gives no indication of which app ran or how it ended.
+    Split,
+    /// The app gets everything.
+    ///
+    /// For a badge doing a job rather than being debugged. World status has to
+    /// go somewhere, and it goes to the backlight and the status colour — one
+    /// bit and one hue, which is exactly what `minimal` proves is workable.
+    Full,
+}
+
+/// Rows the world keeps for itself under [`ScreenLayout::Split`].
+///
+/// One line of text plus padding. Deliberately small: the world's business is a
+/// label and a colour, and anything larger is the world competing with the app
+/// for the thing the app is there to do.
+pub const WORLD_BAND_ROWS: usize = 1;
+
 /// One thing a badge world can do for an app.
 ///
 /// ORDERED BY HOW LITTLE HARDWARE IT NEEDS, which is what lets the lists below
@@ -154,35 +233,41 @@ impl Capability {
     pub const fn advertisement(self) -> (&'static str, &'static str) {
         match self {
             Capability::Status => ("ILC_STATUS", "color"),
-            Capability::Text => ("ILC_STDOUT", TEXT_SINK),
+            Capability::Text => ("ILC_STDOUT", text_sink()),
         }
     }
 }
 
-/// WHERE THE APP'S TEXT ACTUALLY GOES — and the badge's intended answer is the
-/// SCREEN, not this one.
+/// WHERE THE APP'S TEXT ACTUALLY GOES — **derived from the screen budget, not
+/// declared alongside it.**
 ///
-/// **The design: the normal world mirrors stdout onto the TFT.** A badge has a
-/// 320×240 display and is worn rather than tethered, so "show the app's output"
-/// should mean a console on the screen, with the UART as the diagnostic channel
-/// a developer clips onto. Anything else makes the default experience depend on
-/// owning a serial adapter.
+/// `ILC_STDOUT` and the manifest's `cols`/`rows` are the same statement at two
+/// resolutions: one says whether an outlet exists, the other how big it is. Left
+/// as independent constants they can contradict — a world claiming `display`
+/// while budgeting the app zero rows is telling an app to format for a screen it
+/// does not have, which is precisely the failure the advertisement exists to
+/// prevent.
 ///
-/// **`display` as of 2026-08-15**, and the seam worked exactly as written: the
-/// driver landed, `console.rs` renders the app's output as the final frame, and
-/// this constant changed. The capability, the advertisement key and the subset
-/// invariant did not move.
+/// So the rule, and it holds by construction rather than by discipline:
 ///
-/// It was `uart` until the panel genuinely rendered text, which is the discipline
-/// this constant exists to enforce — an advertisement that runs ahead of the
-/// hardware is the one kind of lie this channel makes expensive, because an app
-/// that believed `display` would stop printing and show nothing at all.
+/// | the app's rows | outlet |
+/// | --- | --- |
+/// | one or more | `display` — it reaches a screen |
+/// | none, but a UART exists | `uart` — a developer may be watching; a user is not |
+/// | neither | `none` — do not spend heap formatting |
 ///
-/// **The UART has not gone away**; it carries the full log, and it is where an
-/// app's output goes when the panel failed to initialise. What changed is what
-/// the tier CLAIMS, and the claim is now the screen because that is what a person
-/// looking at the badge actually sees.
-const TEXT_SINK: &str = "display";
+/// The badge always has a UART on the clip pads, so `none` here is only ever a
+/// deliberate choice by a world with no text capability at all (`minimal`),
+/// never an accident of layout.
+pub const fn text_sink() -> &'static str {
+    if crate::console::APP_ROWS > 0 {
+        "display"
+    } else {
+        // The clip pads are always there, so text is not lost — just not shown
+        // to anyone who is not looking for it.
+        "uart"
+    }
+}
 
 /// The minimal world: a colour, and nothing else.
 pub const CAPABILITIES_MINIMAL: &[Capability] = &[Capability::Status];
@@ -209,8 +294,8 @@ const _: () = {
     }
 };
 
-/// Room for the fixed pairs plus every capability plus the `ILC_STDOUT=none`
-/// note. Sized against the largest world so `advertise` cannot overrun.
+/// Room for the fixed pairs, every capability, and the `ILC_STDOUT=none` note.
+/// Sized against the largest world so `advertise` cannot overrun.
 pub const ADVERTISEMENT_MAX: usize = 2 + CAPABILITIES_NORMAL.len() + 1;
 
 /// What the badge is showing — the whole vocabulary of the minimal world.

@@ -142,7 +142,8 @@ static CWASM: &Aligned<[u8]> =
 /// firmware share one implementation; a locally-written linker here would measure
 /// the harness rather than the thing being shipped.
 fn measure_instantiation(out: &mut impl Write, payload: &'static [u8]) {
-    use dlc_platform_embedded::minimal::MinimalHost;
+    use dlc_platform_embedded::manifest;
+use dlc_platform_embedded::minimal::MinimalHost;
     use dlc_platform_embedded::pulley::PulleyWidth;
 
     let before = HEAP.used();
@@ -168,6 +169,42 @@ fn measure_instantiation(out: &mut impl Write, payload: &'static [u8]) {
     // AND THEN RUN IT. Instantiation proves the imports link; a command proves
     // the interpreter executes our engine at 32 bits, which is the claim the
     // whole embedded tier rests on. hello's `greet` is method 10000.
+    // FIRST, THE MANIFEST — and this is the only place it is proved.
+    //
+    // The encoder in `dlc_platform_embedded::manifest` is hand-rolled protobuf,
+    // because a `no_std` firmware has no allocator to give a real one. Its unit
+    // tests pin the BYTES, which catches a wrong field number but cannot catch a
+    // wrong understanding of the format: bytes that are self-consistently wrong
+    // pass a byte test and are refused by an engine.
+    //
+    // Here a REAL ENGINE decodes them, on a 32-bit core, through the badge's own
+    // host. That is the difference between "these are the bytes I meant to
+    // write" and "these are the bytes an engine accepts".
+    let env = manifest::encode(
+        1,
+        manifest::TEXT_OUTLET_UART,
+        // The harness prints over semihosting to a terminal of unknown size.
+        // Zero is UNMEASURED, which is the honest answer and the one an app reads
+        // as "wrap however you like".
+        0,
+        0,
+    );
+    match host.execute(manifest::METHOD_SET_ENVIRONMENT, env.as_bytes()) {
+        Ok(r) if r.success => {
+            let _ = writeln!(out, "set-environment: success");
+        }
+        Ok(r) => {
+            let _ = writeln!(
+                out,
+                "set-environment: REFUSED: {}",
+                r.error.as_deref().unwrap_or("no reason")
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(out, "set-environment: FAILED: {e:?}");
+        }
+    }
+
     match host.execute(10000, &[]) {
         Ok(r) => {
             let _ = writeln!(out, "execute(10000): success={}", r.success);
