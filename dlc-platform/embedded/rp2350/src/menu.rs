@@ -178,11 +178,6 @@ where
     }
 }
 
-/// The first entry that can actually run.
-fn first_runnable(payloads: &Payloads) -> Option<usize> {
-    (0..payloads.len()).find(|i| payloads.get(*i).map(|p| p.runnable()).unwrap_or(false))
-}
-
 /// Move the highlight, skipping anything corrupt and wrapping around.
 ///
 /// Bounded by the list length so a catalog of nothing but corrupt entries cannot

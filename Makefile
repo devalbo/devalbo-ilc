@@ -86,16 +86,6 @@ verify-scaffold-golden: ## §11: `dlc new` emits exactly the tree we meant
 verify-scaffold: build-host ## §11 Scaffolder: `dlc new` output generates, builds, and runs
 	@./scripts/verify-scaffold.sh
 
-.PHONY: qemu-payload
-qemu-payload: ## AOT-compile hello for the QEMU firmware to embed (gitignored; regenerate freely)
-	# The qemu crate does include_bytes! on this, so a fresh clone must run this
-	# target before `cargo build` there. Not committed: it is 1.6 MB, derived
-	# twice over, and version-locked to the exact Wasmtime that made it.
-	@test -f example-apps/hello/build/engine.component.wasm \
-		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
-	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
-		CWASM_OUT=dlc-platform/embedded/qemu-armv7m/hello.pulley32.cwasm
-
 .PHONY: qemu
 qemu: ## run the embedded tier on an emulated 32-bit ARM core and print its RAM cost
 	# THE MEASUREMENT THE PSRAM DECISION RESTS ON, so it is a target rather than a
@@ -111,7 +101,10 @@ qemu: ## run the embedded tier on an emulated 32-bit ARM core and print its RAM 
 	# `mps2-an385` rather than a real M33 machine: QEMU's mps2-an505 boots secure
 	# at an address cortex-m-rt's default layout does not match, and the claim
 	# under test does not depend on ARMv8-M.
-	$(MAKE) qemu-payload
+	# ONE payload, shared. `build.rs` in the harness reads
+	# build/hello.pulley32.cwasm directly, so the emulator runs the badge's own
+	# artifact rather than a duplicate that could drift from it.
+	$(MAKE) badge-cwasm
 	cd dlc-platform/embedded/qemu-armv7m && cargo build --release
 	qemu-system-arm -machine mps2-an385 -cpu cortex-m3 -nographic \
 		-semihosting-config enable=on,target=native \
@@ -123,6 +116,7 @@ badge-cwasm: ## AOT-compile hello for the badge (gitignored; regenerate freely)
 	# it — so a hardware failure cannot be the bytes.
 	@test -f example-apps/hello/build/engine.component.wasm \
 		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
+	@mkdir -p build
 	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
 		CWASM_OUT=build/hello.pulley32.cwasm
 

@@ -30,9 +30,23 @@ fn main() -> wasmtime::Result<()> {
     config.generate_address_map(false);
 
     let engine = wasmtime::Engine::new(&config)?;
-    let wasm = std::fs::read(&input)?;
+    // NAME THE FILE. `?` on an io::Error prints "No such file or directory
+    // (os error 2)" and nothing else — which sent a CI failure to the wrong
+    // suspect entirely, because the message could equally have meant the input,
+    // the output directory, or the compiler itself.
+    let wasm = std::fs::read(&input)
+        .map_err(|e| wasmtime::Error::msg(format!("reading {input}: {e}")))?;
     let bytes = engine.precompile_component(&wasm)?;
-    std::fs::write(&output, &bytes)?;
+    // CREATE THE PARENT. Every caller so far happened to have one — `build/`
+    // exists on any machine that has built before — so a fresh clone was the
+    // first place this failed, which is precisely the machine least able to
+    // guess why. Cheap, and it makes CWASM_OUT genuinely arbitrary.
+    if let Some(dir) = std::path::Path::new(&output).parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| wasmtime::Error::msg(format!("creating {}: {e}", dir.display())))?;
+    }
+    std::fs::write(&output, &bytes)
+        .map_err(|e| wasmtime::Error::msg(format!("writing {output}: {e}")))?;
 
     println!("{} -> {} ({} bytes) for {}", input, output, bytes.len(), target);
     Ok(())

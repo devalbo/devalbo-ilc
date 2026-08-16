@@ -119,10 +119,14 @@ const SRAM_BYTES: usize = 520 * 1024;
 #[repr(C, align(16))]
 struct Aligned<T: ?Sized>(T);
 
-/// GITIGNORED — run `make qemu-payload` first on a fresh clone. Not committed:
-/// 1.6 MB, derived twice over (engine -> component -> .cwasm), and version-locked
-/// to the Wasmtime that produced it, so a stored copy would go stale silently.
-static CWASM: &Aligned<[u8]> = &Aligned(*include_bytes!("../hello.pulley32.cwasm"));
+/// THE BADGE'S OWN ARTIFACT, borrowed rather than copied. `build.rs` places
+/// `build/hello.pulley32.cwasm` into OUT_DIR, so the emulator and the board
+/// demonstrably run the same bytes — which is what makes a green run here mean
+/// anything about the board. Run `make badge-cwasm` on a fresh clone; the
+/// artifact is gitignored because it is derived and version-locked to the
+/// Wasmtime that produced it.
+static CWASM: &Aligned<[u8]> =
+    &Aligned(*include_bytes!(concat!(env!("OUT_DIR"), "/payload.cwasm")));
 
 /// THE OPEN QUESTION after `deserialize_raw`: what does *instantiation* cost?
 ///

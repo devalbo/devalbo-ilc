@@ -177,6 +177,11 @@ group_embedded() {
 	# found by a cron job the next morning rather than by the push that caused it,
 	# and the lib builds above cannot see one: an API change keeps a library green
 	# and breaks its callers, which is exactly how `PulleyWidth` went missing.
+	# ONE artifact, TWO consumers. Both the QEMU harness and the badge firmware
+	# read build/hello.pulley32.cwasm — the harness through its build.rs — so this
+	# single AOT run feeds both, and neither can run bytes the other did not.
+	# Nothing produced it here while this tier was nightly-only, which is why the
+	# harness failed to compile the day it moved into `full`.
 	step "badge payload artifact" run make badge-cwasm
 	# REQUIRE_BADGE_PAYLOAD, because two of the five badge modes need a real
 	# .cwasm and were SKIPPED-IF-ABSENT — which, with a path that pointed outside
