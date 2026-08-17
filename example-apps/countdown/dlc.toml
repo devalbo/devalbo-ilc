@@ -1,0 +1,43 @@
+# countdown — what this project IS.
+#
+# Read by `dlc` (host-side toolchain only). The ENGINE never reads it: it runs
+# in a browser tab and on devices with no config file, so anything the engine
+# needs from here is turned into GENERATED code by `dlc gen` rather than parsed
+# at runtime.
+#
+# This file is the single source for facts that would otherwise be typed twice —
+# the version, the platform path, where build output goes.
+
+[project]
+name    = "countdown"
+version = "0.1.0"
+module  = "github.com/you/countdown"
+
+[platform]
+# BOOTSTRAP: dlc-platform is not published yet, so builds resolve it from a local
+# checkout. Recorded ONCE here — dlc derives both the go.mod `replace` and the
+# npm `file:` dependency from it, which sit at different depths and are easy to
+# get subtly wrong by hand.
+path = ""
+
+# A tier exists because its section does. Capabilities are declared PER TIER
+# because the hosts genuinely differ — a browser has no serial port, a CLI has no
+# canvas. This is build-time composition: what gets linked in. What the host
+# actually has at run time (a display's resolution, say) arrives separately, in
+# the environment manifest.
+[tiers.native]
+capabilities = ["console", "filesystem"]
+# This tier's HOST code — native input in, a proto request out.
+root      = "hosts/native"
+
+# THE BADGE. Declared so `dlc build rp2350` produces a component the loader can
+# AOT-compile — the same artifact the native tier links, with no second build.
+#
+# `console` only: the badge has no filesystem yet (every `wasi:filesystem`
+# descriptor refuses ACCESS), and claiming one an app could not use would be the
+# manifest lying about a capability.
+[tiers.rp2350]
+capabilities = ["console"]
+# Inherited, not scaffolded — the world is the firmware, not app code.
+root         = "hosts/rp2350"
+

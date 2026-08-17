@@ -75,7 +75,7 @@ if [ -n "$newer" ]; then
 	echo "    A stale guest runs the OLD app while every stage reports OK, which" >&2
 	echo "    is the hardest kind of wrong to see. Rebuild it:" >&2
 	echo "" >&2
-	echo "        cd example-apps/hello && make build-web" >&2
+	echo "        ${REBUILD_HINT:-cd example-apps/hello && make build-web}" >&2
 	echo "" >&2
 	exit 1
 fi

@@ -38,6 +38,17 @@ func init() {
 	platform.SetVersion(dlcconfig.Display())
 
 	platform.RegisterRaw({{.PkgName}}v1.AppServiceHandlers(handleGreet))
+
+	// WHAT THE COMMANDS TAKE, so a host that cannot compile this app's schema
+	// can still collect input for it — a badge running payloads it was never
+	// built for, or a browser that would otherwise hand-write an <input> per
+	// field and not notice when the field is renamed.
+	//
+	// Without this line the description is stripped from the wasm as DEAD CODE:
+	// it is generated into the message package, and only the native CLI ever
+	// referenced it. `"who to greet"` appeared zero times in a built component
+	// until this call existed.
+	platform.RegisterCommandSpec({{.PkgName}}v1.AppServiceCLI)
 }
 
 // handleGreet is a command: typed request in, typed response out. Failure is an

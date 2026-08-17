@@ -111,19 +111,36 @@ qemu: ## run the embedded tier on an emulated 32-bit ARM core and print its RAM 
 		-kernel dlc-platform/embedded/qemu-armv7m/target/thumbv7m-none-eabi/release/dlc-qemu-armv7m
 
 .PHONY: badge-cwasm
-badge-cwasm: ## AOT-compile hello for the badge (gitignored; regenerate freely)
-	# The SAME artifact the QEMU harness runs — one payload, two places that load
-	# it — so a hardware failure cannot be the bytes.
-	@test -f example-apps/hello/build/engine.component.wasm \
-		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
+badge-cwasm: ## AOT-compile an app for the badge — APP=hello by default (gitignored; regenerate freely)
+	# ONE APP AT A TIME, and WHICH app is a parameter.
+	#
+	# This was hardwired to hello, and that single fact kept three things stuck:
+	# the MENU never appeared (it needs two payloads and there was no way to make
+	# a second), tictactoe had never run on hardware despite passing every other
+	# tier, and `badge-selftest` — the app that reads the manifest back from
+	# INSIDE the guest — could not be built at all. Generalising it is one change
+	# that unblocks all three.
+	#
+	#   make badge-cwasm                 hello (the default; QEMU runs this one)
+	#   make badge-cwasm APP=tictactoe   -> build/tictactoe.pulley32.cwasm
+	#
+	# The default stays hello because the QEMU harness borrows exactly that path
+	# (`build/hello.pulley32.cwasm`) — the SAME artifact two loaders run, so a
+	# hardware failure cannot be the bytes.
+	@test -f example-apps/$(or $(APP),hello)/build/engine.component.wasm \
+		|| { echo "  first: cd example-apps/$(or $(APP),hello) && make build-web"; exit 1; }
 	# EXISTENCE IS NOT FRESHNESS, and testing only the first shipped a guest built
 	# before the platform changed underneath it — printing nothing, emitting no
 	# status event, with every bring-up stage reporting OK. See the script.
-	@./scripts/check-component-fresh.sh example-apps/hello/build/engine.component.wasm \
-		example-apps/hello/engine dlc-platform
+	@REBUILD_HINT="cd example-apps/$(or $(APP),hello) && make build-web" \
+		./scripts/check-component-fresh.sh \
+		example-apps/$(or $(APP),hello)/build/engine.component.wasm \
+		example-apps/$(or $(APP),hello)/engine dlc-platform
 	@mkdir -p build
-	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
-		CWASM_OUT=build/hello.pulley32.cwasm
+	$(MAKE) embedded-cwasm \
+		COMPONENT_IN=example-apps/$(or $(APP),hello)/build/engine.component.wasm \
+		CWASM_OUT=build/$(or $(APP),hello).pulley32.cwasm
+
 
 .PHONY: hello-component
 hello-component: ## hello's wasm component — what the badge payload is AOT-compiled from

@@ -39,7 +39,9 @@ extern crate alloc;
 mod board;
 mod console;
 mod display;
+mod keyboard;
 mod menu;
+mod spinner;
 mod cs;
 mod siobus;
 mod usblog;
@@ -75,6 +77,21 @@ static HEAP: Heap = Heap::empty();
 /// it. It has to outlive the borrow the report holds, and it must survive into
 /// `rest()`, which is where the USB polling happens.
 static mut LOG: usblog::LogBuffer = usblog::LogBuffer::new();
+
+/// The panel, reachable from an import handler.
+///
+/// See the comment where this is filled: a `wasi:cli/stdout` write arrives
+/// through a bare `fn(&[u8])`, which can only see statics. This is what lets the
+/// world DRAW a guest's output while the command is still running rather than
+/// only after it returns.
+static mut SCREEN: Option<display::Display> = None;
+
+/// The app's output so far, for repainting.
+///
+/// Separate from `LOG`, which interleaves the bring-up report — a repaint wants
+/// only what the app said. Sized for a screenful and a bit; the panel shows 13
+/// rows of 40, and anything older has already scrolled out of usefulness.
+static mut APP_OUT: usblog::LogBuffer = usblog::LogBuffer::new();
 
 
 /// WHAT THE DATA BUS ACTUALLY DOES, measured rather than assumed.
@@ -218,6 +235,87 @@ fn serve_log() -> ! {
     }
 }
 
+/// Microseconds, from TIMER0's raw counter.
+///
+/// THE RAW REGISTERS, not the latching pair. `TIMELR` latches `TIMEHR` as a side
+/// effect, which is fine for one reader and wrong the moment an interrupt reads
+/// the timer between another reader's two halves — and this firmware has a USB
+/// interrupt that could.
+///
+/// Reading high/low/high and retrying on a change is the documented way to get a
+/// consistent 64-bit value without latching. The retry is almost never taken: it
+/// costs a loop iteration once every 71 minutes, when the low word wraps.
+fn now_us() -> u64 {
+    let timer = unsafe { &*hal::pac::TIMER0::ptr() };
+    loop {
+        let high = timer.timerawh().read().bits();
+        let low = timer.timerawl().read().bits();
+        if timer.timerawh().read().bits() == high {
+            return ((high as u64) << 32) | low as u64;
+        }
+    }
+}
+
+/// Append guest output to the boot log, as the guest writes it.
+///
+/// SAFETY: single core, and the log's only other writer is the report — which
+/// cannot run here, because this is called from inside a guest call that the
+/// report is waiting on.
+fn echo_to_log(bytes: &[u8]) {
+    use core::fmt::Write;
+    let Ok(text) = core::str::from_utf8(bytes) else {
+        return;
+    };
+
+    // NOT INTO `LOG`, and this was a real bug rather than a preference.
+    //
+    // The report holds a `&mut LogBuffer` for its whole lifetime, inside its
+    // `Tee` sink. Taking a SECOND `&mut` here — through `addr_of_mut!`, which
+    // silences the borrow checker without removing the aliasing — is undefined
+    // behaviour, and it behaved like it: the optimiser is entitled to cache
+    // `len` across the two writers, so the published length drifted below the
+    // ISR's `SENT` cursor and `pending()` returned empty FOREVER.
+    //
+    // The symptom was a USB log that froze mid-boot while the badge kept
+    // running perfectly — the worst shape of failure available here, because
+    // the diagnostic channel is what you reach for when something looks wrong.
+    //
+    // App output still reaches the log: it is drained after the command and
+    // written as the `stdout:` note, which is where it was before any of this.
+    // What is lost is INTERLEAVING, and the panel is the live channel now.
+
+    // The app's own buffer, which is what a repaint draws from. Nothing else
+    // holds a reference to it, so this one is not an alias.
+    let out: &mut usblog::LogBuffer = unsafe { &mut *core::ptr::addr_of_mut!(APP_OUT) };
+    let _ = write!(out, "{text}");
+
+    // REPAINT ON A NEWLINE, not on every write.
+    //
+    // A full frame is 153,600 bytes on a bit-banged parallel bus. Repainting per
+    // character would make an app that prints a word slower than one that
+    // prints a paragraph, and would spend the whole command in the display
+    // driver. A LINE is the natural unit: it is what the reader is waiting for,
+    // and an app that prints without newlines is already asking for its output
+    // to be treated as one piece.
+    if !text.contains('\n') {
+        return;
+    }
+    if !WORLD.can(world::Capability::Text) {
+        return;
+    }
+    // SAFETY: single core. The report is not drawing here — this runs inside
+    // `host.execute`, which the report is waiting on and cannot re-enter.
+    let screen: &mut Option<display::Display> = unsafe { &mut *core::ptr::addr_of_mut!(SCREEN) };
+    if let Some(panel) = screen.as_mut() {
+        console::render(
+            panel,
+            Status::Ok,
+            "running",
+            core::str::from_utf8(out.as_bytes()).unwrap_or(""),
+        );
+    }
+}
+
 /// The RP2350 boot block. Without it the chip does not consider this a valid
 /// image and will sit in the bootloader instead of telling you why.
 #[link_section = ".start_block"]
@@ -300,6 +398,24 @@ fn main() -> ! {
     // the rest of the firmware may want.
     let mut timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
 
+    // A REAL CLOCK FOR THE GUEST. Until now `wasi:clocks/monotonic-clock` counted
+    // CALLS and `subscribe_duration` ignored its argument, so an app's
+    // `time.Sleep` returned immediately and nothing could unfold over time.
+    //
+    // TIMER0 counts microseconds in hardware, which is exactly what the guest
+    // needs and what the comment on that stub always promised.
+    dlc_platform_embedded::clock::install(now_us);
+
+    // GUEST OUTPUT, LIVE. `wasi:cli/stdout.write` is an IMPORT — host code
+    // running while the guest is suspended mid-call — so its bytes exist long
+    // before the command returns. They were buffered and read afterwards, which
+    // made every tier look like output only arrives at the end.
+    //
+    // Echoing into the boot log means a sleeping app's ticks appear as it prints
+    // them, over the USB cable, at the moment it prints them. That is the whole
+    // demonstration that an import is a callback.
+    dlc_platform_embedded::uart::set_echo(echo_to_log);
+
     // POWER THE PANEL. GPIO41 gates the display's rail — verified by toggling it
     // under Pimoroni's firmware and watching the screen blank and return. Their
     // header calls it "I2C power for talking to RTC", which is what kept it out
@@ -346,7 +462,20 @@ fn main() -> ! {
     );
     // A screen that does not come up is NOT fatal: the badge still has a UART
     // and a backlight, and saying so is more useful than halting.
-    let (mut screen, screen_err) = match screen {
+    // THE SCREEN LIVES IN A STATIC, and this is what Phase 4a needed.
+    //
+    // A guest's `stdout` write is an IMPORT — host code running mid-`execute`,
+    // reached through a `fn(&[u8])` hook with no arguments and no captured
+    // state. It can therefore only see statics. The panel used to be a local
+    // owned by `main` and borrowed by the report, which is why output could be
+    // collected during a command and not DRAWN during one.
+    //
+    // SAFETY, and it is a real argument rather than a shrug: this is a single
+    // core with no preemption between the report and a guest call. The report
+    // draws between commands; the echo draws inside one. They cannot interleave
+    // because `execute` does not return until the guest is done, and the report
+    // is not running while it is inside `execute`.
+    let (screen, screen_err) = match screen {
         Ok(panel) => (Some(panel), ""),
         // KEEP THE REASON. Discarding it is what made a configuration mistake
         // look like dead hardware for a whole session: the badge blinked with a
@@ -354,10 +483,12 @@ fn main() -> ! {
         // wired, while the actual answer was `InvalidDisplaySize`.
         Err(display::DisplayError(why)) => (None, why),
     };
+    unsafe { SCREEN = screen };
+    let screen: &mut Option<display::Display> = unsafe { &mut *core::ptr::addr_of_mut!(SCREEN) };
     // Captured before the report borrows `screen`, so stage 2 can report on the
     // very thing it is drawing to.
     let screen_ok = screen.is_some();
-    show(&mut backlight, &mut screen, Status::Broken);
+    show(&mut backlight, screen, Status::Broken);
 
     let sys_hz = clocks.system_clock.freq().to_Hz();
 
@@ -371,7 +502,7 @@ fn main() -> ! {
     let mut sink = usblog::Tee(&mut uart, log);
     let mut report = report::Report::new(
         &mut sink,
-        &mut screen,
+        screen,
         sys_hz,
         format_args!("DLC {} [{}]", env!("CARGO_PKG_VERSION"), WORLD.name()),
     );
@@ -459,7 +590,7 @@ fn main() -> ! {
         report.note(format_args!("{}", payload::MODE));
         report.note(format_args!("drag a payload UF2 onto the RP2350 drive"));
         report.finish(Status::Idle);
-        rest(&mut backlight, &mut screen, Status::Idle, sys_hz);
+        rest(&mut backlight, screen, Status::Idle, sys_hz);
     }
     let runnable = available.iter().filter(|p| p.runnable()).count();
     if runnable == available.len() {
@@ -552,7 +683,7 @@ fn main() -> ! {
             selected.name
         ));
         report.finish(Status::Broken);
-        rest(&mut backlight, &mut screen, Status::Broken, sys_hz);
+        rest(&mut backlight, screen, Status::Broken, sys_hz);
     }
 
     // 5 — INSTANTIATION. **This one QEMU already proved**, at this pointer width,
@@ -597,7 +728,7 @@ fn main() -> ! {
             report.note(format_args!("PSRAM did not come up — 2911 KB will not fit SRAM"));
         }
         report.finish(Status::Broken);
-        rest(&mut backlight, &mut screen, Status::Broken, sys_hz);
+        rest(&mut backlight, screen, Status::Broken, sys_hz);
     };
 
     // 6 — RUN IT. Also proven in QEMU, and it is still the claim the whole tier
@@ -655,14 +786,123 @@ fn main() -> ! {
         }
     }
 
+    // COLLECT INPUT — for the field THE APP ADVERTISES, not a hardcoded one.
+    //
+    // Phase 2 wired `name?` and field 1 as constants so the keyboard could be
+    // exercised before this existed. It asked hello's question of every app: a
+    // countdown was prompted for a name, and waited 30 seconds to be told one.
+    //
+    // Now the world asks the engine what the command takes (method 5, generated
+    // from the app's own .proto) and prompts for that, or skips entirely.
+    let mut request = [0u8; 64];
+    let mut request_len = 0usize;
+    #[cfg(not(badge_input_off))]
+    {
+        let menu::Buttons { up: _up, down, a } = buttons;
+        let mut keys = keyboard::Keys {
+            a,
+            b: pins.gpio9.into_pull_up_input(),
+            c: pins.gpio10.into_pull_up_input(),
+            down,
+        };
+
+        // ASK WHAT THIS COMMAND TAKES. A zero-length request means "every
+        // command"; naming the method keeps the answer to the one about to run.
+        let mut ask = [0u8; 16];
+        let ask = dlc_platform_embedded::request::encode_varint_field(
+            1,
+            selected.entry_method as u64,
+            &mut ask,
+        )
+        .unwrap_or(&[]);
+
+        let spec = host.execute(5, ask).ok().filter(|r| r.success);
+        let answer: &[u8] = spec.as_ref().map(|r| r.output.as_slice()).unwrap_or(&[]);
+        let flag = dlc_platform_embedded::spec::first_flag(answer);
+
+        use dlc_platform_embedded::spec;
+        match flag {
+            // A STRING: the character strip. Prompted with the app's own help
+            // text, so the question is the one the app would have asked.
+            Some(flag) if flag.kind == spec::KIND_STRING => {
+                let prompt = spec::help_of(answer, &flag).unwrap_or("input?");
+                let typed = report.with_screen_and_log(|screen, log| {
+                    keyboard::read(prompt, screen, &mut keys, sys_hz, log)
+                });
+                // AN EMPTY VALUE IS NOT SENT. Proto3 scalars have no presence, so
+                // an empty string and an absent field decode identically — and
+                // sending nothing keeps the request honest about what happened.
+                if !typed.is_empty() {
+                    if let Some(encoded) = dlc_platform_embedded::request::encode_string_field(
+                        flag.field as u8,
+                        typed.as_str(),
+                        &mut request,
+                    ) {
+                        request_len = encoded.len();
+                    }
+                }
+            }
+
+            // A NUMBER: the spinner, starting from the declared default.
+            //
+            // The character strip could not do this at all — 26 letters and no
+            // digits — which is why `countdown` declared its `from` as a string
+            // and paid for it with a parse and an error path.
+            Some(flag) if spec::is_integer(flag.kind) || flag.kind == spec::KIND_BOOL => {
+                let prompt = spec::help_of(answer, &flag).unwrap_or("value?");
+                let start = spec::default_number(answer, &flag);
+                let shape = if flag.kind == spec::KIND_BOOL {
+                    spinner::Shape::Boolean
+                } else {
+                    spinner::Shape::Integer
+                };
+                let value = report.with_screen_and_log(|screen, log| {
+                    spinner::read(prompt, shape, start, screen, &mut keys, sys_hz, log)
+                });
+                // ZERO IS NOT SENT, for the same presence reason as an empty
+                // string: proto3 cannot tell a zero from an absent field, so the
+                // app takes its default either way and the shorter request is
+                // the honest one.
+                if value != 0 {
+                    if let Some(encoded) = dlc_platform_embedded::request::encode_varint_field(
+                        flag.field as u8,
+                        value as u64,
+                        &mut request,
+                    ) {
+                        request_len = encoded.len();
+                    }
+                }
+            }
+
+            // A KIND WITH NO WIDGET — bytes, an enum, something added later. The
+            // field is skipped and the app takes its default, which is a no-op
+            // rather than an error (Decision 33).
+            Some(flag) => {
+                report.note(format_args!("input: kind {} has no widget", flag.kind));
+            }
+
+            // NO INPUT ADVERTISED: no prompt, no delay, straight to the app.
+            // This is the case that made a countdown wait 30 seconds for a name
+            // it never wanted.
+            None => {}
+        }
+    }
+
     let method = selected.entry_method;
     // The app's text, held for the last frame. A fixed buffer because this is
     // still the pre-menu world of "do not allocate what you can put on the stack",
     // and a screen holds far less than this anyway.
     let mut output = [0u8; 512];
     let mut output_len = 0usize;
+    // HOW LONG THE APP ACTUALLY TOOK, and how many times it asked to wait.
+    //
+    // Added because a countdown that should have taken five seconds finished
+    // instantly, and nothing outside the badge could tell whether the sleep was
+    // ignored, resolved early, or never requested.
+    let started_us = now_us();
+    let sleeps_before = dlc_platform_embedded::clock::sleeps();
     let stage = report.stage(report::Scope::Emulated, format_args!("execute {method}"));
-    let status = match host.execute(method, &[]) {
+    let status = match host.execute(method, &request[..request_len]) {
         Ok(result) => {
             if result.success {
                 stage.ok(format_args!("success"));
@@ -718,6 +958,11 @@ fn main() -> ! {
             for (topic, body) in host.events() {
                 report.note(format_args!("event {topic} ({} bytes)", body.len()));
             }
+            report.note(format_args!(
+                "took {} ms, {} sleeps",
+                (now_us() - started_us) / 1000,
+                dlc_platform_embedded::clock::sleeps() - sleeps_before
+            ));
             report.note(format_args!("peak heap {} KB", (HEAP.used() - before) / 1024));
             world::status_of(&result)
         }
@@ -776,7 +1021,7 @@ fn main() -> ! {
             cortex_m::asm::wfi();
         }
     }
-    rest(&mut backlight, &mut screen, status, sys_hz);
+    rest(&mut backlight, screen, status, sys_hz);
 }
 
 // MILESTONE 3 STARTS HERE, and this note is the handover:

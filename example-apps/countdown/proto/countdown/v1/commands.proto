@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package countdown.v1;
+
+option go_package = "github.com/you/countdown/gen/go/countdown/v1;countdownv1";
+
+import "devalbo/options/v1/options.proto";
+
+// countdown's own commands.
+//
+// METHOD IDS — two permanent bands, and yours is the second:
+//
+//	    1 –  9999   ILC itself (version, export-fs, import-fs, reset-fs, and
+//	                every capability it adds later)
+//	10000 +         YOURS
+//
+// The id is permanent — it *is* the wire — and `proto/method-ids.lock` fails the
+// build if one ever changes. The rpc *name* is cosmetic, so renaming a command
+// is safe; renumbering it is not.
+service AppService {
+  // Count down from a number, one tick a second
+  rpc Count(CountRequest) returns (CountResponse) {
+    option (devalbo.options.v1.method_id) = 10000;
+  }
+}
+
+message CountRequest {
+  // WHERE TO START.
+  //
+  // An INT32, which is what it always should have been. It was a `string` for
+  // one reason: the badge's only input widget was a character strip with 26
+  // letters and no digits, so a number was uncollectable there and the app
+  // parsed text to work around it.
+  //
+  // WORLD-INPUT-PLAN D3d gave the badge a spinner and the workaround went away
+  // — along with a `strconv.Atoi` and an error path for input the app should
+  // never have been handed. The declared type is now the real type, and every
+  // tier collects it the way that suits it: a flag, a form field, or three
+  // buttons.
+  int32 from = 1 [
+    (devalbo.options.v1.help) = "count down from this number",
+    (devalbo.options.v1.short) = "f",
+    (devalbo.options.v1.default) = "5"
+  ];
+}
+message CountResponse {
+  string text = 1;
+}

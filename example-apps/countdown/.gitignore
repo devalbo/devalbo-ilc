@@ -1,0 +1,10 @@
+/gen/
+/build/
+hosts/web/node_modules/
+hosts/web/src/gen/
+hosts/web/src/wasm/
+hosts/web/test-results/
+hosts/web/dist/
+/countdown
+.devbox/
+*.wasm

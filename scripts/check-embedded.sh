@@ -167,6 +167,12 @@ if [ "$want_firmware" = 1 ]; then
 	# each alone leaves the other branch unbuilt.
 	BADGE_SCREEN=full BADGE_WORLD=minimal \
 		try "badge firmware: minimal world, full screen" rp2350 --release
+
+	# BADGE_INPUT, which decides whether the world can collect text at all
+	# (WORLD-INPUT-PLAN D3a). `off` compiles the keyboard OUT, so it is a
+	# different program rather than the same one with a flag — exactly the shape
+	# that rots when nothing builds it. The default build covers `keyboard`.
+	BADGE_INPUT=off try "badge firmware: no input surface" rp2350 --release
 fi
 
 exit $rc

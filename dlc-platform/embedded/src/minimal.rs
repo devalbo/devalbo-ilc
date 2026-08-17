@@ -50,8 +50,17 @@ pub struct MinimalState {
     /// What this tier tells the app about itself. See the `environment` impl for
     /// why capability advertisement lives here rather than in a new capability.
     pub environment: Vec<(String, String)>,
-    /// A monotonic counter standing in for a hardware timer.
+    /// A monotonic counter standing in for a hardware timer, used only when no
+    /// real clock has been installed.
     ticks: u64,
+    /// THE REAL CLOCK, in microseconds, or `None` on a host that has not
+    /// supplied one.
+    ///
+    /// A function pointer rather than a peripheral because this struct is
+    /// threaded through every WASI impl and shared by three very different
+    /// hosts — TIMER0 on the badge, SysTick under QEMU, the OS on a laptop. It
+    /// is the smallest thing all three can provide.
+    pub clock: Option<crate::clock::Clock>,
     /// A deterministic PRNG standing in for the hardware RNG.
     ///
     /// NOT for anything that needs real entropy. It exists because TinyGo calls
@@ -126,18 +135,48 @@ impl crate::cli_bindings::wasi::cli::environment::Host for MinimalState {
 /// A monotonic tick. On the badge this is the RP2350's timer; here it counts
 /// calls, which is enough for anything that only needs "later than last time".
 impl crate::cli_bindings::wasi::clocks::monotonic_clock::Host for MinimalState {
+    /// NANOSECONDS, which is what `wasi:clocks` specifies. The installed clock
+    /// counts microseconds because that is what the hardware timer does, so the
+    /// conversion happens here — once, rather than in every caller.
     fn now(&mut self) -> u64 {
-        self.ticks += 1;
-        self.ticks
+        match self.clock {
+            Some(clock) => clock().saturating_mul(1_000),
+            // No clock installed: the old counting behaviour, which satisfies
+            // anything that only needs "later than last time" and satisfies
+            // nothing that needs a duration. Kept so a host without a timer
+            // still instantiates — TinyGo reads the clock during `_initialize`.
+            None => {
+                self.ticks += 1;
+                self.ticks
+            }
+        }
     }
+
     fn resolution(&mut self) -> u64 {
-        1
+        // A microsecond, in nanoseconds. Honest about the timer underneath
+        // rather than claiming nanosecond precision it does not have.
+        if self.clock.is_some() {
+            1_000
+        } else {
+            1
+        }
     }
-    fn subscribe_instant(&mut self, _when: u64) -> Resource<wasmtime_wasi_io::poll::DynPollable> {
-        self.ready_pollable()
+
+    fn subscribe_instant(&mut self, when: u64) -> Resource<wasmtime_wasi_io::poll::DynPollable> {
+        // `when` is an absolute nanosecond instant on the same clock `now`
+        // reports, so the conversion is the same one.
+        self.deadline_pollable(when / 1_000)
     }
-    fn subscribe_duration(&mut self, _when: u64) -> Resource<wasmtime_wasi_io::poll::DynPollable> {
-        self.ready_pollable()
+
+    fn subscribe_duration(&mut self, when: u64) -> Resource<wasmtime_wasi_io::poll::DynPollable> {
+        crate::clock::note_sleep();
+        // A DURATION from now, not an instant — the difference mattered exactly
+        // once, when this ignored its argument entirely and every sleep returned
+        // immediately.
+        let Some(clock) = self.clock else {
+            return self.ready_pollable();
+        };
+        self.deadline_pollable(clock().saturating_add(when / 1_000))
     }
 }
 
@@ -255,6 +294,23 @@ impl MinimalState {
             .expect("the resource table is ours and unbounded");
         wasmtime_wasi_io::poll::subscribe(&mut self.table, stream)
             .expect("subscribing to an always-ready pollable cannot fail")
+    }
+
+    /// A pollable that becomes ready when the clock passes `deadline_us`.
+    ///
+    /// Falls back to always-ready with no clock installed: a host that cannot
+    /// measure time must not hang a guest that asks to wait. The sleep becomes a
+    /// no-op, which is what happened everywhere before this existed.
+    fn deadline_pollable(&mut self, deadline_us: u64) -> Resource<wasmtime_wasi_io::poll::DynPollable> {
+        let Some(clock) = self.clock else {
+            return self.ready_pollable();
+        };
+        let pollable = self
+            .table
+            .push(crate::clock::DeadlinePollable::new(clock, deadline_us))
+            .expect("the resource table is ours and unbounded");
+        wasmtime_wasi_io::poll::subscribe(&mut self.table, pollable)
+            .expect("subscribing to a deadline pollable cannot fail")
     }
 
     fn next_random(&mut self) -> u64 {
@@ -473,6 +529,11 @@ impl MinimalHost {
                 .collect(),
             ..MinimalState::default()
         };
+        // THE CLOCK GOES IN BEFORE THE GUEST EXISTS. TinyGo reads it during
+        // `_initialize`, which runs inside instantiation below — set it after
+        // and a guest's first look at the time would find the counting stub.
+        let mut state = state;
+        state.clock = crate::clock::installed();
         let mut store = Store::new(&engine, state);
         let instance =
             crate::block_on::block_on(linker.instantiate_async(&mut store, &component))?;

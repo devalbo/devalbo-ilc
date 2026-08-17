@@ -58,6 +58,7 @@ const (
 	MethodVersion           = ilcv1.MethodVersion
 	MethodSetEnvironment    = ilcv1.MethodSetEnvironment
 	MethodGetCommandSurface = ilcv1.MethodGetCommandSurface
+	MethodGetCommandSpec    = ilcv1.MethodGetCommandSpec
 
 	// filesystem (100–199)
 	MethodExportFs = ilcv1.MethodExportFs

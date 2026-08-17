@@ -23,8 +23,6 @@ use wasmtime::{Config, Engine, Result};
 /// a 64-bit laptop. That is what makes a laptop a faithful stand-in.
 pub fn pulley_engine(pointer_width: PulleyWidth) -> Result<Engine> {
     let mut config = Config::new();
-    config.target(pointer_width.triple())?;
-    config.wasm_component_model(true);
     // NO `async_support(true)` — wasmtime 46 deprecates it as "no longer has any
     // effect", so the call was pure warning noise. Async is still what `wasi:io`
     // needs (it registers through `add_to_linker_async`, and calls go through
@@ -40,7 +38,10 @@ pub fn pulley_engine(pointer_width: PulleyWidth) -> Result<Engine> {
     // Harmless with `std`: they disable optimisations a laptop could have used,
     // and keeping one code path is worth more than that on a tier whose whole
     // purpose is to be the same everywhere.
-    crate::no_vm::no_virtual_memory(&mut config);
+    // ONE CALL, not a list. Producer and consumer must agree on every setting a
+    // loader can see, so they come from the same function rather than the same
+    // intentions — see engine_config.rs for the three-attempt story behind that.
+    crate::engine_config::for_runtime(&mut config, pointer_width.triple())?;
     Engine::new(&config)
 }
 

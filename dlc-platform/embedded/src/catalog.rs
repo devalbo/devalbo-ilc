@@ -201,6 +201,50 @@ impl Payload {
     }
 }
 
+/// Build one catalog entry's HEADER — the writer half of this format.
+///
+/// # Why this moved out of the packer
+///
+/// The writer lived in `bin/payload_image.rs` and the reader lives in `scan`,
+/// which made them two implementations of one format with tests on only ONE of
+/// them. Every field here is a hand-written byte offset, and a writer that put
+/// the engine tag at 56 instead of 60 would have produced images that scan
+/// cleanly, verify, and mean something else.
+///
+/// Sharing it makes a ROUND TRIP testable: pack, scan, and assert the entries
+/// come back as they went in. That is the only test that can catch the two
+/// halves drifting, and it could not be written while the writer was a `main`.
+///
+/// The caller supplies the payload; this returns the 64 bytes that precede it.
+pub fn entry_header(
+    name: &str,
+    payload: &[u8],
+    entry_method: u32,
+    flags: u32,
+) -> [u8; HEADER_LEN] {
+    let mut header = [0u8; HEADER_LEN];
+    header[..8].copy_from_slice(&MAGIC);
+    header[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    // Truncation is the CALLER's business: `names::check_component` refuses a
+    // name that does not fit long before it reaches here, and silently cutting
+    // one at this depth would produce a payload nobody asked for by a name
+    // nobody chose.
+    let name_len = name.len().min(NAME_MAX);
+    header[12..16].copy_from_slice(&(name_len as u32).to_le_bytes());
+    header[16..16 + name_len].copy_from_slice(&name.as_bytes()[..name_len]);
+    header[48..52].copy_from_slice(&entry_method.to_le_bytes());
+    // Recorded so the BADGE can tell a truncated drag from a bad build. Cheap to
+    // write, and the only way corruption becomes a named condition rather than a
+    // confusing failure at instantiation.
+    header[52..56].copy_from_slice(&checksum(payload).to_le_bytes());
+    header[56..60].copy_from_slice(&flags.to_le_bytes());
+    // WHICH ENGINE THIS WAS COMPILED FOR. A .cwasm only loads in the Wasmtime
+    // that produced it, and without this the mismatch surfaces as a deserialize
+    // error two stages after the payload was reported healthy.
+    header[60..64].copy_from_slice(&ENGINE_TAG.to_le_bytes());
+    header
+}
+
 /// FNV-1a, 32-bit.
 ///
 /// **Chosen for what it has to catch, not for strength.** Payloads are trusted by
@@ -412,6 +456,73 @@ mod tests {
         out.extend_from_slice(payload);
         out.resize(out.len().div_ceil(SLOT_ALIGN) * SLOT_ALIGN, 0);
         out
+    }
+
+    /// Pack entries the way `payload-image` does, using the SHARED writer.
+    fn pack(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut image = Vec::new();
+        for (index, (name, payload)) in entries.iter().enumerate() {
+            let flags = if index == 0 { FLAG_DEFAULT } else { 0 };
+            image.extend_from_slice(&entry_header(name, payload, DEFAULT_ENTRY_METHOD, flags));
+            image.extend_from_slice(payload);
+            image.resize(image.len().div_ceil(SLOT_ALIGN) * SLOT_ALIGN, 0);
+        }
+        image
+    }
+
+    /// THE ROUND TRIP — the writer and the reader must agree.
+    ///
+    /// They are separate implementations of one format, built from hand-written
+    /// byte offsets, and until `entry_header` was shared only the READER had
+    /// tests. A writer that put the engine tag at 56 instead of 60 would have
+    /// produced images that scan cleanly, verify, and mean something else.
+    ///
+    /// This is also the menu's precondition. Three payloads on the badge is what
+    /// makes `menu::choose` appear at all, and nothing exercised a multi-entry
+    /// image end to end until it was flashed by hand.
+    #[test]
+    fn packed_entries_scan_back_as_written() {
+        let image = pack(&[
+            ("hello", b"first payload"),
+            ("ttt", b"second, a different length"),
+            ("selftest", b"third"),
+        ]);
+        let catalog = scan(leak(image));
+        assert_eq!(catalog.len(), 3, "every packed entry must be found");
+
+        let names = ["hello", "ttt", "selftest"];
+        let bodies: [&[u8]; 3] = [b"first payload", b"second, a different length", b"third"];
+        for (index, (name, body)) in names.iter().zip(bodies).enumerate() {
+            let found = catalog.get(index).unwrap();
+            assert_eq!(found.name, *name, "entry {index} name");
+            assert_eq!(found.bytes, body, "entry {index} payload");
+            assert_eq!(found.integrity, Integrity::Verified, "entry {index} integrity");
+            assert_eq!(found.entry_method, DEFAULT_ENTRY_METHOD, "entry {index} method");
+            assert!(found.runnable(), "entry {index} must be runnable");
+        }
+    }
+
+    /// The FIRST entry is the default, so an untouched badge boots something.
+    ///
+    /// Positional-by-convention would be a rule nobody could see in the image;
+    /// the flag records the intent where a reader can check it.
+    #[test]
+    fn the_first_packed_entry_is_the_default() {
+        let catalog = scan(leak(pack(&[("hello", b"a"), ("ttt", b"b")])));
+        assert!(catalog.get(0).unwrap().is_default());
+        assert!(!catalog.get(1).unwrap().is_default());
+        let (index, _) = catalog.default_choice().expect("a default must exist");
+        assert_eq!(index, 0);
+    }
+
+    /// A packed image carries the engine tag, so a payload built against another
+    /// Wasmtime is named rather than discovered at instantiate.
+    #[test]
+    fn packed_entries_carry_the_engine_tag() {
+        let image = pack(&[("hello", b"payload")]);
+        let tag = u32::from_le_bytes([image[60], image[61], image[62], image[63]]);
+        assert_eq!(tag, ENGINE_TAG, "the packer must stamp the engine it compiled for");
+        assert_ne!(tag, 0, "zero means 'not recorded' and would defeat the check");
     }
 
     /// THE CONSTANT MUST TRACK THE PIN, and nothing else enforces that.

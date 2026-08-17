@@ -109,16 +109,6 @@ fn main() -> std::io::Result<()> {
         }
         let payload = std::fs::read(path)?;
 
-        let mut header = vec![0u8; HEADER_LEN];
-        header[..8].copy_from_slice(&MAGIC);
-        header[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
-        header[12..16].copy_from_slice(&(name.len() as u32).to_le_bytes());
-        header[16..16 + name.len()].copy_from_slice(name.as_bytes());
-        header[48..52].copy_from_slice(&method.to_le_bytes());
-        // Recorded here so the BADGE can tell a truncated drag from a bad build.
-        // Cheap to write, and the only way corruption becomes a named condition
-        // rather than a confusing failure at instantiation.
-        header[52..56].copy_from_slice(&catalog::checksum(&payload).to_le_bytes());
         // WHICH ONE RUNS UNATTENDED, marked rather than positional. `DEFAULT=`
         // names it; with none given, the first entry is marked so a single-app
         // image needs no ceremony and the intent is still recorded in the image.
@@ -126,14 +116,12 @@ fn main() -> std::io::Result<()> {
         if default_name.as_deref() == Some(name) || (default_name.is_none() && index == 0) {
             flags |= catalog::FLAG_DEFAULT;
         }
-        header[56..60].copy_from_slice(&flags.to_le_bytes());
-        // WHICH ENGINE THIS WAS COMPILED FOR. A .cwasm only loads in the Wasmtime
-        // that produced it, and without this the mismatch surfaces as a
-        // deserialize error two stages after the payload was reported healthy —
-        // the bytes are intact, so the checksum verifies and says so.
-        header[60..64].copy_from_slice(&catalog::ENGINE_TAG.to_le_bytes());
-        // A hash goes here the day
-        // the badge wants to verify a payload it did not just receive.
+
+        // THE SHARED WRITER, not a local copy of the byte offsets. This was 12
+        // lines of `header[52..56]` here and a matching set of reads in `scan`,
+        // with tests on the reader only — so a field written to the wrong offset
+        // produced an image that scanned cleanly and meant something else.
+        let header = catalog::entry_header(name, &payload, method, flags);
 
         image.extend_from_slice(&header);
         image.extend_from_slice(&payload);

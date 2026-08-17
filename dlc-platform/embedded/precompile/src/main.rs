@@ -4,8 +4,8 @@
 //!   cargo run -p dlc-precompile -- <component.wasm> <out.cwasm> [pulley32|pulley64]
 /// SHARED WITH THE RUNTIME, not copied — see the file's own header for why it is
 /// included by path rather than depended on as a crate.
-#[path = "../../src/no_vm.rs"]
-mod no_vm;
+#[path = "../../src/engine_config.rs"]
+mod engine_config;
 
 fn main() -> wasmtime::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -14,20 +14,12 @@ fn main() -> wasmtime::Result<()> {
     let target = args.next().unwrap_or_else(|| "pulley32".to_string());
 
     let mut config = wasmtime::Config::new();
-    config.target(&target)?;
-    config.wasm_component_model(true);
-    // Everything a target with no MMU requires, from the one list the runtime
-    // also uses. Compilation settings are recorded in the artifact, so a
-    // disagreement here is a load failure there.
-    no_vm::no_virtual_memory(&mut config);
-    // 44% OF THE ARTIFACT IS DEBUG METADATA. `.wasmtime.addrmap` alone was
-    // 679 KB of hello's 1.57 MB — a wasm-offset-to-code-offset map that exists
-    // for backtraces. On a device where the whole artifact must be ONE
-    // contiguous allocation, that is the cheapest RAM win available.
-    //
-    // The cost is real: traps on the badge report addresses rather than wasm
-    // locations. Worth it while the constraint is "does it load at all".
-    config.generate_address_map(false);
+    // ONE CALL. Target, component model, the no-MMU settings and the address-map
+    // choice all come from `engine_config`, because compilation settings are
+    // recorded in the ARTIFACT — a producer that assembles its own list will
+    // eventually assemble a different one, and the failure lands at load time
+    // looking like a bad file. See engine_config.rs.
+    engine_config::for_artifact(&mut config, &target)?;
 
     let engine = wasmtime::Engine::new(&config)?;
     // NAME THE FILE. `?` on an io::Error prints "No such file or directory

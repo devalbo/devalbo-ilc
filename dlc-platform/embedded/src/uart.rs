@@ -94,8 +94,36 @@ impl SharedBuffer {
     }
 }
 
+/// Called on every guest write, as it happens.
+///
+/// # Why this exists
+///
+/// `SinkStream::write` is HOST CODE running mid-`execute`: the guest calls
+/// `wasi:cli/stdout.write`, Wasmtime dispatches here, and the guest is suspended
+/// until it returns. So the bytes are available while the command is still
+/// running — they were simply buffered and read afterwards, which made every
+/// tier look like output only arrived at the end.
+///
+/// A firmware installs this to see output LIVE. The buffer is still filled, so
+/// nothing that drains afterwards changes.
+///
+/// SAFETY: written once at boot, on a single core, before any guest runs.
+static mut ECHO: Option<fn(&[u8])> = None;
+
+/// Install the live-output hook. Call at boot.
+pub fn set_echo(echo: fn(&[u8])) {
+    unsafe { ECHO = Some(echo) };
+}
+
 impl ByteSink for SharedBuffer {
     fn write(&mut self, bytes: &[u8]) {
+        // ECHO FIRST, buffer second. If a firmware's echo panics or hangs, the
+        // buffer should not already claim to hold bytes nobody saw — and the
+        // ordering makes the live path the one that cannot be starved by a slow
+        // consumer downstream.
+        if let Some(echo) = unsafe { ECHO } {
+            echo(bytes);
+        }
         self.with(|buffer| buffer.extend_from_slice(bytes));
     }
 }

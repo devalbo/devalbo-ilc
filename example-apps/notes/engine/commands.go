@@ -55,12 +55,20 @@ func init() {
 	platform.SetIndexRebuilder(rebuildIndex)
 
 	platform.RegisterRaw(notesv1.NotesServiceHandlers(
+
 		handleCreateRecord,
 		handleListRecords,
 		handleOpenRecord,
 		handleDeleteRecord,
 		handleUpdateRecord,
 	))
+
+	// WHAT THE COMMANDS TAKE, so a host that cannot compile this app's
+	// schema can still collect input for it — a badge running payloads it
+	// was never built for, or a browser that would otherwise hand-write an
+	// <input> per field. Without this the description is stripped from the
+	// wasm as dead code, because only the native CLI referenced it.
+	platform.RegisterCommandSpec(notesv1.AppServiceCLI)
 }
 
 func handleCreateRecord(req *notesv1.CreateRecordRequest) (*notesv1.CreateRecordResponse, error) {

@@ -38,6 +38,13 @@ func init() {
 	platform.SetVersion(dlcconfig.Display())
 
 	platform.RegisterRaw(hellov1.AppServiceHandlers(handleGreet))
+
+	// WHAT THE COMMANDS TAKE, so a host that cannot compile this app's
+	// schema can still collect input for it — a badge running payloads it
+	// was never built for, or a browser that would otherwise hand-write an
+	// <input> per field. Without this the description is stripped from the
+	// wasm as dead code, because only the native CLI referenced it.
+	platform.RegisterCommandSpec(hellov1.AppServiceCLI)
 }
 
 // handleGreet is a command: typed request in, typed response out. Failure is an

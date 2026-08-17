@@ -282,7 +282,7 @@ fn main() -> ! {
         debug::exit(debug::EXIT_FAILURE);
     }
     config.wasm_component_model(true);
-    // THE SHARED LIST, not a local copy — `dlc-platform-embedded`'s `no_vm`, the
+    // THE SHARED LIST, not a local copy — `dlc-platform-embedded`'s `engine_config`, the
     // same function `pulley_engine` and the AOT compiler call.
     //
     // This site is why that function exists. It carried its own two settings and
@@ -290,7 +290,7 @@ fn main() -> ! {
     // rejected the very payload it had just been taught to produce:
     // "compiled with a memory reservation of '0' but '10485760' is expected for
     // the host". Three places had to agree; now there is one.
-    dlc_platform_embedded::no_vm::no_virtual_memory(&mut config);
+    dlc_platform_embedded::engine_config::no_virtual_memory(&mut config);
 
     match wasmtime::Engine::new(&config) {
         Ok(engine) => {

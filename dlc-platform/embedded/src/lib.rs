@@ -19,10 +19,11 @@ extern crate alloc;
 
 pub mod block_on;
 pub mod catalog;
+pub mod clock;
 pub mod cli_bindings;
 pub mod command;
 pub mod fatview;
-pub mod no_vm;
+pub mod engine_config;
 pub mod manifest;
 pub mod minimal;
 pub mod names;
@@ -30,6 +31,8 @@ pub mod names;
 mod names_gen;
 pub mod uart;
 pub mod pulley;
+pub mod request;
+pub mod spec;
 
 /// The `wasmtime-wasi` host — a laptop's, and the one Phase 2 replaces.
 ///

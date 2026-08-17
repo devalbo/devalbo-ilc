@@ -62,6 +62,7 @@ func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
 		handleVersion,
 		handleSetEnvironment,
 		handleGetCommandSurface,
+		handleGetCommandSpec,
 		handleExportFs,
 		handleImportFs,
 		handleResetFs,

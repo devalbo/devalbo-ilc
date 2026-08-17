@@ -32,8 +32,8 @@
 //
 // `#[path]` for the same reason `precompile/src/main.rs` uses it — no dependency,
 // no feature unification, and still one list rather than two.
-#[path = "../../../dlc-platform/embedded/src/no_vm.rs"]
-mod no_vm;
+#[path = "../../../dlc-platform/embedded/src/engine_config.rs"]
+mod engine_config;
 
 /// Compile a component to Pulley bytecode for the badge.
 ///
@@ -43,19 +43,10 @@ mod no_vm;
 /// not merely that some compiler ran.
 pub fn precompile_pulley32(component: &[u8]) -> Result<Vec<u8>, String> {
     let mut config = wasmtime::Config::new();
-    // The whole trick, and it is a CROSS-compile: the host may be anything, the
-    // output is always Pulley for a 32-bit target.
-    config
-        .target("pulley32")
-        .map_err(|e| format!("target: {e}"))?;
-    config.wasm_component_model(true);
-    no_vm::no_virtual_memory(&mut config);
-    // 44% OF THE ARTIFACT IS DEBUG METADATA, and omitting this line is how the
-    // spike produced 1,586,584 bytes where the native tool makes 900,720 — the
-    // `.wasmtime.addrmap` the real precompiler already drops. Matching it is the
-    // difference between "a browser can compile something" and "a browser can
-    // compile the artifact this badge loads".
-    config.generate_address_map(false);
+    // THE WHOLE CONFIG FROM ONE PLACE — which is this spike's own finding turned
+    // back on itself. Three earlier versions copied part of the list and built a
+    // working compiler that emitted an artifact the badge rejects.
+    engine_config::for_artifact(&mut config, "pulley32").map_err(|e| format!("config: {e}"))?;
 
     let engine = wasmtime::Engine::new(&config).map_err(|e| format!("engine: {e}"))?;
     engine

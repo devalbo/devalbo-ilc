@@ -193,6 +193,115 @@ func (x TextOutlet) String() string {
 	return strconv.Itoa(int(x))
 }
 
+// Where a flag's value comes from, as opposed to what type it is.
+//
+// Mirrors `devalbo.options.v1.CliSource` and `clispec.Source`. Kept separate
+// from `kind` because they vary independently: a `bytes` field is almost always
+// a file, but a long `string` may equally well be piped in, and a host must not
+// have to guess which.
+//
+// STDIN IS THE ONE THAT TRAVELS FURTHEST. On a terminal it means a pipe; in a
+// browser a text area; on a badge it is what makes the on-screen keyboard
+// appear. The app declares "this value is typed by a person" once, and each
+// world answers it with what it has.
+type SpecSource int32
+
+const (
+	SpecSource_SPEC_SOURCE_UNSPECIFIED SpecSource = 0 // literal — the argument is the value
+	SpecSource_SPEC_SOURCE_LITERAL     SpecSource = 1
+	SpecSource_SPEC_SOURCE_FILE        SpecSource = 2
+	SpecSource_SPEC_SOURCE_STDIN       SpecSource = 3
+)
+
+// Enum value maps for SpecSource.
+var (
+	SpecSource_name = map[int32]string{
+		0: "SPEC_SOURCE_UNSPECIFIED",
+		1: "SPEC_SOURCE_LITERAL",
+		2: "SPEC_SOURCE_FILE",
+		3: "SPEC_SOURCE_STDIN",
+	}
+	SpecSource_value = map[string]int32{
+		"SPEC_SOURCE_UNSPECIFIED": 0,
+		"SPEC_SOURCE_LITERAL":     1,
+		"SPEC_SOURCE_FILE":        2,
+		"SPEC_SOURCE_STDIN":       3,
+	}
+)
+
+func (x SpecSource) Enum() *SpecSource {
+	p := new(SpecSource)
+	*p = x
+	return p
+}
+
+func (x SpecSource) String() string {
+	name, valid := SpecSource_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// A flag's wire type — what a host needs to parse a value and encode the field.
+//
+// Mirrors `clispec.Kind`. A host that meets a kind it cannot render skips the
+// field and the app takes its default, which is a no-op rather than an error
+// (Decision 33).
+type SpecKind int32
+
+const (
+	SpecKind_SPEC_KIND_UNSPECIFIED SpecKind = 0
+	SpecKind_SPEC_KIND_STRING      SpecKind = 1
+	SpecKind_SPEC_KIND_BOOL        SpecKind = 2
+	SpecKind_SPEC_KIND_INT32       SpecKind = 3
+	SpecKind_SPEC_KIND_INT64       SpecKind = 4
+	SpecKind_SPEC_KIND_UINT32      SpecKind = 5
+	SpecKind_SPEC_KIND_UINT64      SpecKind = 6
+	SpecKind_SPEC_KIND_ENUM        SpecKind = 7
+	SpecKind_SPEC_KIND_BYTES       SpecKind = 8
+)
+
+// Enum value maps for SpecKind.
+var (
+	SpecKind_name = map[int32]string{
+		0: "SPEC_KIND_UNSPECIFIED",
+		1: "SPEC_KIND_STRING",
+		2: "SPEC_KIND_BOOL",
+		3: "SPEC_KIND_INT32",
+		4: "SPEC_KIND_INT64",
+		5: "SPEC_KIND_UINT32",
+		6: "SPEC_KIND_UINT64",
+		7: "SPEC_KIND_ENUM",
+		8: "SPEC_KIND_BYTES",
+	}
+	SpecKind_value = map[string]int32{
+		"SPEC_KIND_UNSPECIFIED": 0,
+		"SPEC_KIND_STRING":      1,
+		"SPEC_KIND_BOOL":        2,
+		"SPEC_KIND_INT32":       3,
+		"SPEC_KIND_INT64":       4,
+		"SPEC_KIND_UINT32":      5,
+		"SPEC_KIND_UINT64":      6,
+		"SPEC_KIND_ENUM":        7,
+		"SPEC_KIND_BYTES":       8,
+	}
+)
+
+func (x SpecKind) Enum() *SpecKind {
+	p := new(SpecKind)
+	*p = x
+	return p
+}
+
+func (x SpecKind) String() string {
+	name, valid := SpecKind_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 // Filesystem export/import — the first-class platform primitive (§7.3). An
 // app's whole state is a filesystem tree, so one bundle moves it between the
 // terminal, the browser, and an embedded device.
@@ -475,6 +584,225 @@ func (x *TextOut) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+// One field of a request message, as an input a host can collect.
+type SpecFlag struct {
+	unknownFields []byte
+	// The kebab-cased field name. Cosmetic — `field` is the wire.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The proto field NUMBER. A host encodes by number, never by name, for the
+	// same reason dispatch keys on method_id.
+	Field    uint32     `protobuf:"varint,2,opt,name=field,proto3" json:"field,omitempty"`
+	Kind     SpecKind   `protobuf:"varint,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Source   SpecSource `protobuf:"varint,4,opt,name=source,proto3" json:"source,omitempty"`
+	Help     string     `protobuf:"bytes,5,opt,name=help,proto3" json:"help,omitempty"`
+	Required bool       `protobuf:"varint,6,opt,name=required,proto3" json:"required,omitempty"`
+	// In string form, parsed by the host to the field's wire type.
+	DefaultValue string `protobuf:"bytes,7,opt,name=default_value,json=defaultValue,proto3" json:"defaultValue,omitempty"`
+	Repeated     bool   `protobuf:"varint,8,opt,name=repeated,proto3" json:"repeated,omitempty"`
+	// 1-based argument position, or 0 for flag-only.
+	Positional uint32 `protobuf:"varint,9,opt,name=positional,proto3" json:"positional,omitempty"`
+	// The permitted names for an enum flag — and the MENU a richer host shows.
+	// The one place an app already declares its own choices.
+	EnumValues []string `protobuf:"bytes,10,rep,name=enum_values,json=enumValues,proto3" json:"enumValues,omitempty"`
+	// Single-letter alias. CLI-shaped, carried because dropping it would make
+	// this description lossy against the one the CLI compiles in.
+	Short string `protobuf:"bytes,11,opt,name=short,proto3" json:"short,omitempty"`
+}
+
+func (x *SpecFlag) Reset() {
+	*x = SpecFlag{}
+}
+
+func (*SpecFlag) ProtoMessage() {}
+
+func (x *SpecFlag) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SpecFlag) GetField() uint32 {
+	if x != nil {
+		return x.Field
+	}
+	return 0
+}
+
+func (x *SpecFlag) GetKind() SpecKind {
+	if x != nil {
+		return x.Kind
+	}
+	return SpecKind_SPEC_KIND_UNSPECIFIED
+}
+
+func (x *SpecFlag) GetSource() SpecSource {
+	if x != nil {
+		return x.Source
+	}
+	return SpecSource_SPEC_SOURCE_UNSPECIFIED
+}
+
+func (x *SpecFlag) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
+}
+
+func (x *SpecFlag) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *SpecFlag) GetDefaultValue() string {
+	if x != nil {
+		return x.DefaultValue
+	}
+	return ""
+}
+
+func (x *SpecFlag) GetRepeated() bool {
+	if x != nil {
+		return x.Repeated
+	}
+	return false
+}
+
+func (x *SpecFlag) GetPositional() uint32 {
+	if x != nil {
+		return x.Positional
+	}
+	return 0
+}
+
+func (x *SpecFlag) GetEnumValues() []string {
+	if x != nil {
+		return x.EnumValues
+	}
+	return nil
+}
+
+func (x *SpecFlag) GetShort() string {
+	if x != nil {
+		return x.Short
+	}
+	return ""
+}
+
+// One rpc, as a command a host can offer.
+type SpecCommand struct {
+	unknownFields []byte
+	Name          string      `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Method        uint32      `protobuf:"varint,2,opt,name=method,proto3" json:"method,omitempty"`
+	Summary       string      `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	Flags         []*SpecFlag `protobuf:"bytes,4,rep,name=flags,proto3" json:"flags,omitempty"`
+	// Request message name, for diagnostics only.
+	Request string `protobuf:"bytes,5,opt,name=request,proto3" json:"request,omitempty"`
+	// A verb the HOST handles rather than the engine (Decision 30).
+	Local bool `protobuf:"varint,6,opt,name=local,proto3" json:"local,omitempty"`
+	// Request fields this description cannot express — nested messages, maps,
+	// repeated non-scalars. LISTED rather than dropped: a command that silently
+	// ignores a field is worse than one that says it cannot set it.
+	Unsupported []string `protobuf:"bytes,7,rep,name=unsupported,proto3" json:"unsupported,omitempty"`
+}
+
+func (x *SpecCommand) Reset() {
+	*x = SpecCommand{}
+}
+
+func (*SpecCommand) ProtoMessage() {}
+
+func (x *SpecCommand) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SpecCommand) GetMethod() uint32 {
+	if x != nil {
+		return x.Method
+	}
+	return 0
+}
+
+func (x *SpecCommand) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *SpecCommand) GetFlags() []*SpecFlag {
+	if x != nil {
+		return x.Flags
+	}
+	return nil
+}
+
+func (x *SpecCommand) GetRequest() string {
+	if x != nil {
+		return x.Request
+	}
+	return ""
+}
+
+func (x *SpecCommand) GetLocal() bool {
+	if x != nil {
+		return x.Local
+	}
+	return false
+}
+
+func (x *SpecCommand) GetUnsupported() []string {
+	if x != nil {
+		return x.Unsupported
+	}
+	return nil
+}
+
+type GetCommandSpecRequest struct {
+	unknownFields []byte
+	// Zero means EVERY command. A badge asks for one; a browser building a whole
+	// surface asks for all of them, and paying for a round trip per command would
+	// be the only reason to hand-cache it host-side.
+	MethodId uint32 `protobuf:"varint,1,opt,name=method_id,json=methodId,proto3" json:"methodId,omitempty"`
+}
+
+func (x *GetCommandSpecRequest) Reset() {
+	*x = GetCommandSpecRequest{}
+}
+
+func (*GetCommandSpecRequest) ProtoMessage() {}
+
+func (x *GetCommandSpecRequest) GetMethodId() uint32 {
+	if x != nil {
+		return x.MethodId
+	}
+	return 0
+}
+
+type GetCommandSpecResponse struct {
+	unknownFields []byte
+	Commands      []*SpecCommand `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+}
+
+func (x *GetCommandSpecResponse) Reset() {
+	*x = GetCommandSpecResponse{}
+}
+
+func (*GetCommandSpecResponse) ProtoMessage() {}
+
+func (x *GetCommandSpecResponse) GetCommands() []*SpecCommand {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
 }
 
 type GetCommandSurfaceRequest struct {
@@ -872,6 +1200,86 @@ func (m *TextOut) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
+func (m *SpecFlag) CloneVT() *SpecFlag {
+	if m == nil {
+		return (*SpecFlag)(nil)
+	}
+	r := new(SpecFlag)
+	r.Name = m.Name
+	r.Field = m.Field
+	r.Kind = m.Kind
+	r.Source = m.Source
+	r.Help = m.Help
+	r.Required = m.Required
+	r.DefaultValue = m.DefaultValue
+	r.Repeated = m.Repeated
+	r.Positional = m.Positional
+	r.Short = m.Short
+	r.EnumValues = protobuf_go_lite.CloneSlice(m.EnumValues)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *SpecFlag) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *SpecCommand) CloneVT() *SpecCommand {
+	if m == nil {
+		return (*SpecCommand)(nil)
+	}
+	r := new(SpecCommand)
+	r.Name = m.Name
+	r.Method = m.Method
+	r.Summary = m.Summary
+	r.Request = m.Request
+	r.Local = m.Local
+	r.Flags = protobuf_go_lite.CloneVTSlice(m.Flags)
+	r.Unsupported = protobuf_go_lite.CloneSlice(m.Unsupported)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *SpecCommand) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *GetCommandSpecRequest) CloneVT() *GetCommandSpecRequest {
+	if m == nil {
+		return (*GetCommandSpecRequest)(nil)
+	}
+	r := new(GetCommandSpecRequest)
+	r.MethodId = m.MethodId
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *GetCommandSpecRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *GetCommandSpecResponse) CloneVT() *GetCommandSpecResponse {
+	if m == nil {
+		return (*GetCommandSpecResponse)(nil)
+	}
+	r := new(GetCommandSpecResponse)
+	r.Commands = protobuf_go_lite.CloneVTSlice(m.Commands)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *GetCommandSpecResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
 func (m *GetCommandSurfaceRequest) CloneVT() *GetCommandSurfaceRequest {
 	if m == nil {
 		return (*GetCommandSurfaceRequest)(nil)
@@ -1206,6 +1614,130 @@ func (this *TextOut) EqualVT(that *TextOut) bool {
 
 func (this *TextOut) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*TextOut)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *SpecFlag) EqualVT(that *SpecFlag) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Name != that.Name {
+		return false
+	}
+	if this.Field != that.Field {
+		return false
+	}
+	if this.Kind != that.Kind {
+		return false
+	}
+	if this.Source != that.Source {
+		return false
+	}
+	if this.Help != that.Help {
+		return false
+	}
+	if this.Required != that.Required {
+		return false
+	}
+	if this.DefaultValue != that.DefaultValue {
+		return false
+	}
+	if this.Repeated != that.Repeated {
+		return false
+	}
+	if this.Positional != that.Positional {
+		return false
+	}
+	if !protobuf_go_lite.EqualSlice(this.EnumValues, that.EnumValues) {
+		return false
+	}
+	if this.Short != that.Short {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *SpecFlag) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*SpecFlag)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *SpecCommand) EqualVT(that *SpecCommand) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Name != that.Name {
+		return false
+	}
+	if this.Method != that.Method {
+		return false
+	}
+	if this.Summary != that.Summary {
+		return false
+	}
+	if !protobuf_go_lite.EqualVTSliceImplicit(this.Flags, that.Flags, func() *SpecFlag { return &SpecFlag{} }) {
+		return false
+	}
+	if this.Request != that.Request {
+		return false
+	}
+	if this.Local != that.Local {
+		return false
+	}
+	if !protobuf_go_lite.EqualSlice(this.Unsupported, that.Unsupported) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *SpecCommand) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*SpecCommand)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *GetCommandSpecRequest) EqualVT(that *GetCommandSpecRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.MethodId != that.MethodId {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *GetCommandSpecRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*GetCommandSpecRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *GetCommandSpecResponse) EqualVT(that *GetCommandSpecResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !protobuf_go_lite.EqualVTSliceImplicit(this.Commands, that.Commands, func() *SpecCommand { return &SpecCommand{} }) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *GetCommandSpecResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*GetCommandSpecResponse)
 	if !ok {
 		return false
 	}
@@ -1644,6 +2176,86 @@ func (x *TextOutlet) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the SpecSource to JSON.
+func (x SpecSource) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), SpecSource_name)
+}
+
+// MarshalText marshals the SpecSource to text.
+func (x SpecSource) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), SpecSource_name)), nil
+}
+
+// MarshalJSON marshals the SpecSource to JSON.
+func (x SpecSource) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SpecSource from JSON.
+func (x *SpecSource) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(SpecSource_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read SpecSource enum: %v", err)
+		return
+	}
+	*x = SpecSource(v)
+}
+
+// UnmarshalText unmarshals the SpecSource from text.
+func (x *SpecSource) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), SpecSource_value)
+	if err != nil {
+		return err
+	}
+	*x = SpecSource(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the SpecSource from JSON.
+func (x *SpecSource) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the SpecKind to JSON.
+func (x SpecKind) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), SpecKind_name)
+}
+
+// MarshalText marshals the SpecKind to text.
+func (x SpecKind) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), SpecKind_name)), nil
+}
+
+// MarshalJSON marshals the SpecKind to JSON.
+func (x SpecKind) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SpecKind from JSON.
+func (x *SpecKind) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(SpecKind_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read SpecKind enum: %v", err)
+		return
+	}
+	*x = SpecKind(v)
+}
+
+// UnmarshalText unmarshals the SpecKind from text.
+func (x *SpecKind) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), SpecKind_value)
+	if err != nil {
+		return err
+	}
+	*x = SpecKind(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the SpecKind from JSON.
+func (x *SpecKind) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the BundleFormat to JSON.
 func (x BundleFormat) MarshalProtoJSON(s *json.MarshalState) {
 	s.WriteEnum(int32(x), BundleFormat_name)
@@ -1983,6 +2595,352 @@ func (x *TextOut) UnmarshalProtoJSON(s *json.UnmarshalState) {
 
 // UnmarshalJSON unmarshals the TextOut from JSON.
 func (x *TextOut) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the SpecFlag message to JSON.
+func (x *SpecFlag) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Name != "" || s.HasField("name") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("name")
+		s.WriteString(x.Name)
+	}
+	if x.Field != 0 || s.HasField("field") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("field")
+		s.WriteUint32(x.Field)
+	}
+	if x.Kind != 0 || s.HasField("kind") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("kind")
+		x.Kind.MarshalProtoJSON(s)
+	}
+	if x.Source != 0 || s.HasField("source") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("source")
+		x.Source.MarshalProtoJSON(s)
+	}
+	if x.Help != "" || s.HasField("help") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("help")
+		s.WriteString(x.Help)
+	}
+	if x.Required || s.HasField("required") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("required")
+		s.WriteBool(x.Required)
+	}
+	if x.DefaultValue != "" || s.HasField("defaultValue") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("defaultValue")
+		s.WriteString(x.DefaultValue)
+	}
+	if x.Repeated || s.HasField("repeated") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("repeated")
+		s.WriteBool(x.Repeated)
+	}
+	if x.Positional != 0 || s.HasField("positional") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("positional")
+		s.WriteUint32(x.Positional)
+	}
+	if len(x.EnumValues) > 0 || s.HasField("enumValues") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("enumValues")
+		s.WriteStringArray(x.EnumValues)
+	}
+	if x.Short != "" || s.HasField("short") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("short")
+		s.WriteString(x.Short)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the SpecFlag to JSON.
+func (x *SpecFlag) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SpecFlag message from JSON.
+func (x *SpecFlag) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "name":
+			s.AddField("name")
+			x.Name = s.ReadString()
+		case "field":
+			s.AddField("field")
+			x.Field = s.ReadUint32()
+		case "kind":
+			s.AddField("kind")
+			x.Kind.UnmarshalProtoJSON(s)
+		case "source":
+			s.AddField("source")
+			x.Source.UnmarshalProtoJSON(s)
+		case "help":
+			s.AddField("help")
+			x.Help = s.ReadString()
+		case "required":
+			s.AddField("required")
+			x.Required = s.ReadBool()
+		case "default_value", "defaultValue":
+			s.AddField("default_value")
+			x.DefaultValue = s.ReadString()
+		case "repeated":
+			s.AddField("repeated")
+			x.Repeated = s.ReadBool()
+		case "positional":
+			s.AddField("positional")
+			x.Positional = s.ReadUint32()
+		case "enum_values", "enumValues":
+			s.AddField("enum_values")
+			if s.ReadNil() {
+				x.EnumValues = nil
+				return
+			}
+			x.EnumValues = s.ReadStringArray()
+		case "short":
+			s.AddField("short")
+			x.Short = s.ReadString()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the SpecFlag from JSON.
+func (x *SpecFlag) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the SpecCommand message to JSON.
+func (x *SpecCommand) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Name != "" || s.HasField("name") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("name")
+		s.WriteString(x.Name)
+	}
+	if x.Method != 0 || s.HasField("method") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("method")
+		s.WriteUint32(x.Method)
+	}
+	if x.Summary != "" || s.HasField("summary") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("summary")
+		s.WriteString(x.Summary)
+	}
+	if len(x.Flags) > 0 || s.HasField("flags") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("flags")
+		s.WriteArrayStart()
+		var wroteElement bool
+		for _, element := range x.Flags {
+			s.WriteMoreIf(&wroteElement)
+			element.MarshalProtoJSON(s.WithField("flags"))
+		}
+		s.WriteArrayEnd()
+	}
+	if x.Request != "" || s.HasField("request") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("request")
+		s.WriteString(x.Request)
+	}
+	if x.Local || s.HasField("local") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("local")
+		s.WriteBool(x.Local)
+	}
+	if len(x.Unsupported) > 0 || s.HasField("unsupported") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("unsupported")
+		s.WriteStringArray(x.Unsupported)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the SpecCommand to JSON.
+func (x *SpecCommand) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SpecCommand message from JSON.
+func (x *SpecCommand) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "name":
+			s.AddField("name")
+			x.Name = s.ReadString()
+		case "method":
+			s.AddField("method")
+			x.Method = s.ReadUint32()
+		case "summary":
+			s.AddField("summary")
+			x.Summary = s.ReadString()
+		case "flags":
+			s.AddField("flags")
+			if s.ReadNil() {
+				x.Flags = nil
+				return
+			}
+			s.ReadArray(func() {
+				if s.ReadNil() {
+					x.Flags = append(x.Flags, nil)
+					return
+				}
+				v := &SpecFlag{}
+				v.UnmarshalProtoJSON(s.WithField("flags", false))
+				if s.Err() != nil {
+					return
+				}
+				x.Flags = append(x.Flags, v)
+			})
+		case "request":
+			s.AddField("request")
+			x.Request = s.ReadString()
+		case "local":
+			s.AddField("local")
+			x.Local = s.ReadBool()
+		case "unsupported":
+			s.AddField("unsupported")
+			if s.ReadNil() {
+				x.Unsupported = nil
+				return
+			}
+			x.Unsupported = s.ReadStringArray()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the SpecCommand from JSON.
+func (x *SpecCommand) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the GetCommandSpecRequest message to JSON.
+func (x *GetCommandSpecRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.MethodId != 0 || s.HasField("methodId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("methodId")
+		s.WriteUint32(x.MethodId)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the GetCommandSpecRequest to JSON.
+func (x *GetCommandSpecRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the GetCommandSpecRequest message from JSON.
+func (x *GetCommandSpecRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "method_id", "methodId":
+			s.AddField("method_id")
+			x.MethodId = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the GetCommandSpecRequest from JSON.
+func (x *GetCommandSpecRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the GetCommandSpecResponse message to JSON.
+func (x *GetCommandSpecResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if len(x.Commands) > 0 || s.HasField("commands") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("commands")
+		s.WriteArrayStart()
+		var wroteElement bool
+		for _, element := range x.Commands {
+			s.WriteMoreIf(&wroteElement)
+			element.MarshalProtoJSON(s.WithField("commands"))
+		}
+		s.WriteArrayEnd()
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the GetCommandSpecResponse to JSON.
+func (x *GetCommandSpecResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the GetCommandSpecResponse message from JSON.
+func (x *GetCommandSpecResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "commands":
+			s.AddField("commands")
+			if s.ReadNil() {
+				x.Commands = nil
+				return
+			}
+			s.ReadArray(func() {
+				if s.ReadNil() {
+					x.Commands = append(x.Commands, nil)
+					return
+				}
+				v := &SpecCommand{}
+				v.UnmarshalProtoJSON(s.WithField("commands", false))
+				if s.Err() != nil {
+					return
+				}
+				x.Commands = append(x.Commands, v)
+			})
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the GetCommandSpecResponse from JSON.
+func (x *GetCommandSpecResponse) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -2823,6 +3781,252 @@ func (m *TextOut) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *SpecFlag) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SpecFlag) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *SpecFlag) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Short) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Short)
+		i--
+		dAtA[i] = 0x5a
+	}
+	if len(m.EnumValues) > 0 {
+		for iNdEx := len(m.EnumValues) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.EnumValues[iNdEx])
+			i--
+			dAtA[i] = 0x52
+		}
+	}
+	if m.Positional != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Positional))
+		i--
+		dAtA[i] = 0x48
+	}
+	if m.Repeated {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Repeated)
+		i--
+		dAtA[i] = 0x40
+	}
+	if len(m.DefaultValue) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.DefaultValue)
+		i--
+		dAtA[i] = 0x3a
+	}
+	if m.Required {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Required)
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.Help) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Help)
+		i--
+		dAtA[i] = 0x2a
+	}
+	if m.Source != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Source))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Kind != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Kind))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Field != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Field))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *SpecCommand) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SpecCommand) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *SpecCommand) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Unsupported) > 0 {
+		for iNdEx := len(m.Unsupported) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.Unsupported[iNdEx])
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
+	if m.Local {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Local)
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.Request) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Request)
+		i--
+		dAtA[i] = 0x2a
+	}
+	if len(m.Flags) > 0 {
+		for iNdEx := len(m.Flags) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Flags[iNdEx].MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	if len(m.Summary) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Summary)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.Method != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Method))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetCommandSpecRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetCommandSpecRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *GetCommandSpecRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetCommandSpecResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetCommandSpecResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *GetCommandSpecResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Commands) > 0 {
+		for iNdEx := len(m.Commands) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Commands[iNdEx].MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *GetCommandSurfaceRequest) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -3585,6 +4789,252 @@ func (m *TextOut) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *SpecFlag) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SpecFlag) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *SpecFlag) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Short) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Short)
+		i--
+		dAtA[i] = 0x5a
+	}
+	if len(m.EnumValues) > 0 {
+		for iNdEx := len(m.EnumValues) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.EnumValues[iNdEx])
+			i--
+			dAtA[i] = 0x52
+		}
+	}
+	if m.Positional != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Positional))
+		i--
+		dAtA[i] = 0x48
+	}
+	if m.Repeated {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Repeated)
+		i--
+		dAtA[i] = 0x40
+	}
+	if len(m.DefaultValue) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.DefaultValue)
+		i--
+		dAtA[i] = 0x3a
+	}
+	if m.Required {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Required)
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.Help) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Help)
+		i--
+		dAtA[i] = 0x2a
+	}
+	if m.Source != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Source))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Kind != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Kind))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Field != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Field))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *SpecCommand) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SpecCommand) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *SpecCommand) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Unsupported) > 0 {
+		for iNdEx := len(m.Unsupported) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.Unsupported[iNdEx])
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
+	if m.Local {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Local)
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.Request) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Request)
+		i--
+		dAtA[i] = 0x2a
+	}
+	if len(m.Flags) > 0 {
+		for iNdEx := len(m.Flags) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Flags[iNdEx].MarshalToSizedBufferVTStrict(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	if len(m.Summary) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Summary)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.Method != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Method))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetCommandSpecRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetCommandSpecRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *GetCommandSpecRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetCommandSpecResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetCommandSpecResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *GetCommandSpecResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Commands) > 0 {
+		for iNdEx := len(m.Commands) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Commands[iNdEx].MarshalToSizedBufferVTStrict(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *GetCommandSurfaceRequest) MarshalVTStrict() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -4189,6 +5639,72 @@ func (m *TextOut) SizeVT() (n int) {
 	return n
 }
 
+func (m *SpecFlag) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Name)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Field)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Kind)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Source)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Help)
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.Required)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.DefaultValue)
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.Repeated)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Positional)
+	n += protobuf_go_lite.SizeStringSlice(1, m.EnumValues)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Short)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *SpecCommand) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Name)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Method)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Summary)
+	for _, e := range m.Flags {
+		l = e.SizeVT()
+		n += protobuf_go_lite.SizeMessage(1, l)
+	}
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Request)
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.Local)
+	n += protobuf_go_lite.SizeStringSlice(1, m.Unsupported)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *GetCommandSpecRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.MethodId)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *GetCommandSpecResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	for _, e := range m.Commands {
+		l = e.SizeVT()
+		n += protobuf_go_lite.SizeMessage(1, l)
+	}
+	n += len(m.unknownFields)
+	return n
+}
+
 func (m *GetCommandSurfaceRequest) SizeVT() (n int) {
 	if m == nil {
 		return 0
@@ -4360,6 +5876,12 @@ func (x Isolation) MarshalProtoText() string {
 func (x TextOutlet) MarshalProtoText() string {
 	return x.String()
 }
+func (x SpecSource) MarshalProtoText() string {
+	return x.String()
+}
+func (x SpecKind) MarshalProtoText() string {
+	return x.String()
+}
 func (x BundleFormat) MarshalProtoText() string {
 	return x.String()
 }
@@ -4453,6 +5975,146 @@ func (x *TextOut) MarshalProtoText() string {
 }
 
 func (x *TextOut) String() string {
+	return x.MarshalProtoText()
+}
+func (x *SpecFlag) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "SpecFlag")
+	if x.Name != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "name")
+		protobuf_go_lite.TextWriteString(&sb, x.Name)
+	}
+	if x.Field != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "field")
+		protobuf_go_lite.TextWriteUint(&sb, x.Field)
+	}
+	if x.Kind != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "kind")
+		protobuf_go_lite.TextWriteStringer(&sb, SpecKind(x.Kind))
+	}
+	if x.Source != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "source")
+		protobuf_go_lite.TextWriteStringer(&sb, SpecSource(x.Source))
+	}
+	if x.Help != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "help")
+		protobuf_go_lite.TextWriteString(&sb, x.Help)
+	}
+	if x.Required != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "required")
+		protobuf_go_lite.TextWriteBool(&sb, x.Required)
+	}
+	if x.DefaultValue != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "default_value")
+		protobuf_go_lite.TextWriteString(&sb, x.DefaultValue)
+	}
+	if x.Repeated != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "repeated")
+		protobuf_go_lite.TextWriteBool(&sb, x.Repeated)
+	}
+	if x.Positional != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "positional")
+		protobuf_go_lite.TextWriteUint(&sb, x.Positional)
+	}
+	if len(x.EnumValues) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "enum_values")
+		for i, v := range x.EnumValues {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			protobuf_go_lite.TextWriteString(&sb, v)
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	if x.Short != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "short")
+		protobuf_go_lite.TextWriteString(&sb, x.Short)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *SpecFlag) String() string {
+	return x.MarshalProtoText()
+}
+func (x *SpecCommand) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "SpecCommand")
+	if x.Name != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "name")
+		protobuf_go_lite.TextWriteString(&sb, x.Name)
+	}
+	if x.Method != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "method")
+		protobuf_go_lite.TextWriteUint(&sb, x.Method)
+	}
+	if x.Summary != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "summary")
+		protobuf_go_lite.TextWriteString(&sb, x.Summary)
+	}
+	if len(x.Flags) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "flags")
+		for i, v := range x.Flags {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			if v == nil {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, &SpecFlag{})
+			} else {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, v)
+			}
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	if x.Request != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "request")
+		protobuf_go_lite.TextWriteString(&sb, x.Request)
+	}
+	if x.Local != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "local")
+		protobuf_go_lite.TextWriteBool(&sb, x.Local)
+	}
+	if len(x.Unsupported) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "unsupported")
+		for i, v := range x.Unsupported {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			protobuf_go_lite.TextWriteString(&sb, v)
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *SpecCommand) String() string {
+	return x.MarshalProtoText()
+}
+func (x *GetCommandSpecRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "GetCommandSpecRequest")
+	if x.MethodId != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "method_id")
+		protobuf_go_lite.TextWriteUint(&sb, x.MethodId)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *GetCommandSpecRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *GetCommandSpecResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "GetCommandSpecResponse")
+	if len(x.Commands) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "commands")
+		for i, v := range x.Commands {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			if v == nil {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, &SpecCommand{})
+			} else {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, v)
+			}
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *GetCommandSpecResponse) String() string {
 	return x.MarshalProtoText()
 }
 func (x *GetCommandSurfaceRequest) MarshalProtoText() string {
@@ -4966,6 +6628,378 @@ func (m *TextOut) UnmarshalVT(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SpecFlag) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SpecFlag: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SpecFlag: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Field", wireType)
+			}
+			m.Field = 0
+			m.Field, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Kind", wireType)
+			}
+			m.Kind = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Kind = SpecKind(_v)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Source", wireType)
+			}
+			m.Source = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Source = SpecSource(_v)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Help", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Help = v
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Required", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Required = bool(v)
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DefaultValue", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.DefaultValue = v
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Repeated", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Repeated = bool(v)
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Positional", wireType)
+			}
+			m.Positional = 0
+			m.Positional, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnumValues", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.EnumValues = append(m.EnumValues, v)
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Short", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Short = v
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SpecCommand) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SpecCommand: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SpecCommand: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Method", wireType)
+			}
+			m.Method = 0
+			m.Method, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Summary", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Summary = v
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Flags", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Flags = append(m.Flags, &SpecFlag{})
+			if err := m.Flags[len(m.Flags)-1].UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Request = v
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Local", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Local = bool(v)
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Unsupported", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Unsupported = append(m.Unsupported, v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetCommandSpecRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetCommandSpecRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetCommandSpecRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetCommandSpecResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetCommandSpecResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetCommandSpecResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Commands", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Commands = append(m.Commands, &SpecCommand{})
+			if err := m.Commands[len(m.Commands)-1].UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -6065,6 +8099,378 @@ func (m *TextOut) UnmarshalVTUnsafe(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SpecFlag) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SpecFlag: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SpecFlag: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Field", wireType)
+			}
+			m.Field = 0
+			m.Field, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Kind", wireType)
+			}
+			m.Kind = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Kind = SpecKind(_v)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Source", wireType)
+			}
+			m.Source = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Source = SpecSource(_v)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Help", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Help = v
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Required", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Required = bool(v)
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DefaultValue", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.DefaultValue = v
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Repeated", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Repeated = bool(v)
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Positional", wireType)
+			}
+			m.Positional = 0
+			m.Positional, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnumValues", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.EnumValues = append(m.EnumValues, v)
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Short", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Short = v
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SpecCommand) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SpecCommand: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SpecCommand: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Method", wireType)
+			}
+			m.Method = 0
+			m.Method, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Summary", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Summary = v
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Flags", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Flags = append(m.Flags, &SpecFlag{})
+			if err := m.Flags[len(m.Flags)-1].UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Request = v
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Local", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Local = bool(v)
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Unsupported", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Unsupported = append(m.Unsupported, v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetCommandSpecRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetCommandSpecRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetCommandSpecRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetCommandSpecResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetCommandSpecResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetCommandSpecResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Commands", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Commands = append(m.Commands, &SpecCommand{})
+			if err := m.Commands[len(m.Commands)-1].UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

@@ -1,0 +1,43 @@
+# countdown
+
+Scaffolded by `dlc new`. An **ILC** app: your business logic lives once, in
+`engine/`, and every tier drives it through the same command boundary.
+
+```bash
+devbox shell        # provision go + buf
+make gen            # proto → Go messages + command dispatch
+make verify         # build and smoke-test the CLI
+./countdown greet --name ILC
+```
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `engine/` | **all** business logic; portable (native + wasm). Reflection-free. |
+| `hosts/native/` | this tier's SLOT: how a response prints. The command surface is generated. |
+| `proto/` | your command surface — one rpc per command, permanent `method_id` |
+| `gen/` | generated; never edit, never commit |
+
+See [`AGENTS.md`](AGENTS.md) for the rules that are not visible in the code — where logic goes, method-id
+bands, and the portability constraints the engine has to keep.
+
+## Adding a command
+
+1. Add an `rpc` to `proto/countdown/v1/commands.proto` with the next free
+   `method_id` **at or above 10000**. Everything below is reserved for ILC itself,
+   including capabilities it has not shipped yet.
+2. `make gen` — the id constant and dispatch entry are generated.
+3. Write the handler in `engine/` and add it to `AppServiceHandlers(...)`.
+4. Add a renderer for it in `hosts/native/main.go` — the ONLY per-command code
+   a host writes. The subcommand, its flags, which are required and the `-h`
+   text all come from the `.proto` (Decision 29).
+
+You never write a `method_id` in Go. `proto/method-ids.lock` is committed and
+fails the build if an id ever changes — the id *is* the wire.
+
+## What you inherit
+
+`version`, `export-fs`, `import-fs`, `reset-fs` come from the ILC platform, along
+with command dispatch, the filesystem root seam, and path containment. They are a
+**dependency, not a copy** — upstream fixes arrive on a version bump.

@@ -37,6 +37,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=BADGE_WORLD");
     println!("cargo::rerun-if-env-changed=BADGE_BEAT_MS");
     println!("cargo::rerun-if-env-changed=BADGE_SCREEN");
+    println!("cargo::rerun-if-env-changed=BADGE_INPUT");
 
     // Declared so that a typo in a `cfg` name is a warning rather than a branch
     // that quietly never compiles.
@@ -44,6 +45,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(payload_region)");
     println!("cargo::rustc-check-cfg=cfg(badge_world_minimal)");
     println!("cargo::rustc-check-cfg=cfg(badge_screen_full)");
+    println!("cargo::rustc-check-cfg=cfg(badge_input_off)");
 
     // WHICH WORLD (see src/world.rs). Flash-time on purpose: the two differ only
     // in presentation, and a runtime switch would carry both onto a board that
@@ -63,6 +65,37 @@ fn main() {
         "full" => println!("cargo::rustc-cfg=badge_screen_full"),
         "" | "split" => {}
         other => panic!("BADGE_SCREEN={other:?}: expected `split` or `full`"),
+    }
+
+    // WHETHER THIS WORLD CAN COLLECT TEXT (see src/keyboard.rs, WORLD-INPUT-PLAN
+    // D3a). Flash-time for the same reason the world itself is: a world is a
+    // CLAIM about what the badge can do, and a claim that changes underneath a
+    // running app is the bug the environment manifest exists to prevent.
+    //
+    //   BADGE_INPUT=keyboard   the on-screen picker (default)
+    //   BADGE_INPUT=off        no input; apps take their defaults
+    //
+    // `off` is not a degraded build — it is a world that honestly advertises
+    // less, and an app cannot tell the difference between it and a terminal
+    // where somebody omitted a flag.
+    let input_off = matches!(std::env::var("BADGE_INPUT").unwrap_or_default().as_str(), "off");
+    match std::env::var("BADGE_INPUT").unwrap_or_default().as_str() {
+        "off" => println!("cargo::rustc-cfg=badge_input_off"),
+        "" | "keyboard" => {}
+        other => panic!("BADGE_INPUT={other:?}: expected `keyboard` or `off`"),
+    }
+
+    // THE MINIMAL WORLD CANNOT HAVE ONE, and asking is a contradiction rather
+    // than a preference: it simulates a device whose only output is a status
+    // colour, so an input surface would make its advertisement a lie. Refused
+    // here, where the message can name both flags, rather than compiling into a
+    // world that offers a keyboard nobody can read.
+    let minimal = matches!(std::env::var("BADGE_WORLD").unwrap_or_default().as_str(), "minimal");
+    if minimal && !input_off {
+        if std::env::var("BADGE_INPUT").is_ok() {
+            panic!("BADGE_WORLD=minimal has no screen to type on — use BADGE_INPUT=off");
+        }
+        println!("cargo::rustc-cfg=badge_input_off");
     }
 
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));

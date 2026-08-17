@@ -12,6 +12,7 @@ const (
 	MethodVersion           uint32 = 1
 	MethodSetEnvironment    uint32 = 2
 	MethodGetCommandSurface uint32 = 4
+	MethodGetCommandSpec    uint32 = 5
 	MethodExportFs          uint32 = 100
 	MethodImportFs          uint32 = 101
 	MethodResetFs           uint32 = 102
@@ -25,6 +26,7 @@ func PlatformServiceHandlers(
 	versionFn func(*VersionRequest) (*VersionResponse, error),
 	setEnvironmentFn func(*SetEnvironmentRequest) (*SetEnvironmentResponse, error),
 	getCommandSurfaceFn func(*GetCommandSurfaceRequest) (*GetCommandSurfaceResponse, error),
+	getCommandSpecFn func(*GetCommandSpecRequest) (*GetCommandSpecResponse, error),
 	exportFsFn func(*ExportFsRequest) (*ExportFsResponse, error),
 	importFsFn func(*ImportFsRequest) (*ImportFsResponse, error),
 	resetFsFn func(*ResetFsRequest) (*ResetFsResponse, error),
@@ -59,6 +61,17 @@ func PlatformServiceHandlers(
 				return nil, err
 			}
 			resp, err := getCommandSurfaceFn(&req)
+			if err != nil {
+				return nil, err
+			}
+			return resp.MarshalVT()
+		},
+		MethodGetCommandSpec: func(request []byte) ([]byte, error) {
+			var req GetCommandSpecRequest
+			if err := req.UnmarshalVT(request); err != nil {
+				return nil, err
+			}
+			resp, err := getCommandSpecFn(&req)
 			if err != nil {
 				return nil, err
 			}

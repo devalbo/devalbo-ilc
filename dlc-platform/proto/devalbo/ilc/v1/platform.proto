@@ -65,6 +65,27 @@ service PlatformService {
     // Introspection plumbing: hosts call it, people do not type it.
     option (devalbo.options.v1.cli_hidden) = true;
   }
+  // What each command TAKES — the input surface, as data.
+  //
+  // `GetCommandSurface` says which methods exist; this says what they accept.
+  // Both are things only the engine knows, and both exist because a host that
+  // guessed would guess differently on every tier.
+  //
+  // WHO NEEDS IT. The CLI does not — it compiles the same description in, and
+  // that is the point of comparison (a test asserts the two agree). It is for
+  // hosts that CANNOT compile an app's schema in: a badge running payloads it
+  // was never built for, and a browser that would otherwise hand-write an
+  // `<input>` per field and watch it rot when the field is renamed.
+  //
+  // Field NUMBER and kind are what a generic host needs, and they are enough:
+  // encoding a string into field 1 is a tag and a length, so a loader can build
+  // a request for an app whose schema it has never seen. Rendering a RESPONSE
+  // still needs the schema and is deliberately not solved here.
+  rpc GetCommandSpec(GetCommandSpecRequest) returns (GetCommandSpecResponse) {
+    option (devalbo.options.v1.method_id) = 5;
+    // Introspection plumbing: hosts call it, people do not type it.
+    option (devalbo.options.v1.cli_hidden) = true;
+  }
   // Held for commands that are designed but unbuilt. Declared, not commented —
   // the generator refuses any rpc that claims one, and the id lock records them.
   //   3 = SupportedAbis   (Decision 31) the guest advertising ITS boundaries —
@@ -275,6 +296,93 @@ message TextOut {
   // know must send zero rather than guess 80.
   uint32 cols = 3;
   uint32 rows = 4;
+}
+
+// ---- the command spec (WORLD-INPUT-PLAN.md D2) -----------------------------
+
+// Where a flag's value comes from, as opposed to what type it is.
+//
+// Mirrors `devalbo.options.v1.CliSource` and `clispec.Source`. Kept separate
+// from `kind` because they vary independently: a `bytes` field is almost always
+// a file, but a long `string` may equally well be piped in, and a host must not
+// have to guess which.
+//
+// STDIN IS THE ONE THAT TRAVELS FURTHEST. On a terminal it means a pipe; in a
+// browser a text area; on a badge it is what makes the on-screen keyboard
+// appear. The app declares "this value is typed by a person" once, and each
+// world answers it with what it has.
+enum SpecSource {
+  SPEC_SOURCE_UNSPECIFIED = 0; // literal — the argument is the value
+  SPEC_SOURCE_LITERAL = 1;
+  SPEC_SOURCE_FILE = 2;
+  SPEC_SOURCE_STDIN = 3;
+}
+
+// A flag's wire type — what a host needs to parse a value and encode the field.
+//
+// Mirrors `clispec.Kind`. A host that meets a kind it cannot render skips the
+// field and the app takes its default, which is a no-op rather than an error
+// (Decision 33).
+enum SpecKind {
+  SPEC_KIND_UNSPECIFIED = 0;
+  SPEC_KIND_STRING = 1;
+  SPEC_KIND_BOOL = 2;
+  SPEC_KIND_INT32 = 3;
+  SPEC_KIND_INT64 = 4;
+  SPEC_KIND_UINT32 = 5;
+  SPEC_KIND_UINT64 = 6;
+  SPEC_KIND_ENUM = 7;
+  SPEC_KIND_BYTES = 8;
+}
+
+// One field of a request message, as an input a host can collect.
+message SpecFlag {
+  // The kebab-cased field name. Cosmetic — `field` is the wire.
+  string name = 1;
+  // The proto field NUMBER. A host encodes by number, never by name, for the
+  // same reason dispatch keys on method_id.
+  uint32 field = 2;
+  SpecKind kind = 3;
+  SpecSource source = 4;
+  string help = 5;
+  bool required = 6;
+  // In string form, parsed by the host to the field's wire type.
+  string default_value = 7;
+  bool repeated = 8;
+  // 1-based argument position, or 0 for flag-only.
+  uint32 positional = 9;
+  // The permitted names for an enum flag — and the MENU a richer host shows.
+  // The one place an app already declares its own choices.
+  repeated string enum_values = 10;
+  // Single-letter alias. CLI-shaped, carried because dropping it would make
+  // this description lossy against the one the CLI compiles in.
+  string short = 11;
+}
+
+// One rpc, as a command a host can offer.
+message SpecCommand {
+  string name = 1;
+  uint32 method = 2;
+  string summary = 3;
+  repeated SpecFlag flags = 4;
+  // Request message name, for diagnostics only.
+  string request = 5;
+  // A verb the HOST handles rather than the engine (Decision 30).
+  bool local = 6;
+  // Request fields this description cannot express — nested messages, maps,
+  // repeated non-scalars. LISTED rather than dropped: a command that silently
+  // ignores a field is worse than one that says it cannot set it.
+  repeated string unsupported = 7;
+}
+
+message GetCommandSpecRequest {
+  // Zero means EVERY command. A badge asks for one; a browser building a whole
+  // surface asks for all of them, and paying for a round trip per command would
+  // be the only reason to hand-cache it host-side.
+  uint32 method_id = 1;
+}
+message GetCommandSpecResponse {
+  repeated SpecCommand commands = 1;
 }
 
 message GetCommandSurfaceRequest {}
