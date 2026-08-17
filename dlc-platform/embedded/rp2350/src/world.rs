@@ -126,7 +126,7 @@ impl BadgeWorld {
         // which cost a const integer-to-string formatter and a lookup table to
         // produce two keys nothing ever read. The budget is an ALLOCATION and
         // belongs in the manifest, which is the only channel that can correct it
-        // — see `main.rs` stage 5b and docs/ENVIRONMENT-PLAN.md D12.
+        // — see the `manifest` stage in `main.rs` and ENVIRONMENT-PLAN.md D12.
 
         // THE ABSENCE IS THE MESSAGE, and it has to be said out loud. Every world
         // provides `wasi:cli/stdout` — TinyGo will not instantiate without it — so
@@ -167,7 +167,7 @@ impl BadgeWorld {
 /// be TOLD (`platform.OnEnvironmentChange`).
 ///
 /// **This badge sends both.** The wasi keys go out at instantiation and the
-/// manifest goes out at stage 5b, before the app's first command — see
+/// manifest goes out just before the app's first command — see
 /// `main.rs` and `dlc_platform_embedded::manifest`.
 ///
 /// Today the two AGREE, because this world has one app, one layout, and the

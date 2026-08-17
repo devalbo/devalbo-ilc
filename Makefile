@@ -116,6 +116,11 @@ badge-cwasm: ## AOT-compile hello for the badge (gitignored; regenerate freely)
 	# it — so a hardware failure cannot be the bytes.
 	@test -f example-apps/hello/build/engine.component.wasm \
 		|| { echo "  first: cd example-apps/hello && make build-web"; exit 1; }
+	# EXISTENCE IS NOT FRESHNESS, and testing only the first shipped a guest built
+	# before the platform changed underneath it — printing nothing, emitting no
+	# status event, with every bring-up stage reporting OK. See the script.
+	@./scripts/check-component-fresh.sh example-apps/hello/build/engine.component.wasm \
+		example-apps/hello/engine dlc-platform
 	@mkdir -p build
 	$(MAKE) embedded-cwasm COMPONENT_IN=example-apps/hello/build/engine.component.wasm \
 		CWASM_OUT=build/hello.pulley32.cwasm
@@ -181,7 +186,7 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 		echo "  x wrong UF2 family — this will not boot; see rp2350/memory.x"; \
 		picotool info build/badge-bringup.uf2 | head -3; exit 1; }
 	@ls -l build/badge-bringup.uf2 | awk '{print "  flashable: "$$5" bytes"}'
-	@./scripts/record-hash.sh build/badge-bringup.uf2
+	@./scripts/stage-artifact.sh build/badge-bringup.uf2
 
 
 .PHONY: display-probe
@@ -199,19 +204,19 @@ display-probe: ## a tiny firmware that ONLY tests the panel — seconds per cycl
 	@mkdir -p build
 	@cp dlc-platform/embedded/display-probe/target/thumbv8m.main-none-eabihf/release/dlc-display-probe build/display-probe.elf
 	picotool uf2 convert build/display-probe.elf build/display-probe.uf2
-	@./scripts/record-hash.sh build/display-probe.uf2
+	@./scripts/stage-artifact.sh build/display-probe.uf2
 	@picotool info build/display-probe.uf2 | grep -q rp2350 || { \
 		echo "  x wrong UF2 family — this will not boot"; exit 1; }
 	@ls -l build/display-probe.uf2 | awk '{print "  flashable: "$$5" bytes"}'
 
 .PHONY: badge-payload
 .PHONY: flash-testing
-flash-testing: ## refresh flash-testing/ — the images you drag onto the badge
-	# A CONVENIENCE OVER THE THREE BUILDS, not a fourth way to produce anything.
-	# Each target below already records its own hash in build/CHECKSUMS.txt on the
-	# way out (scripts/record-hash.sh), so the ledger is correct whether you build
-	# one image or all three, and this just gathers them somewhere a person can
-	# drag from.
+flash-testing: ## build all three flashable images (each stages itself into flash-testing/)
+	# A CONVENIENCE OVER THE THREE BUILDS, and nothing more. Each target below
+	# stages its own output and re-hashes the directory on the way out
+	# (scripts/stage-artifact.sh), so flash-testing/ is correct whether you run
+	# this or build a single image — which is the common case, since panel work
+	# only ever needs `make display-probe`.
 	#
 	# WATCHABLE BY DEFAULT (`BADGE_BEAT_MS=700`): each bring-up stage lingers so a
 	# person can read it. That is what this directory is FOR — `make badge-uf2`
@@ -219,14 +224,6 @@ flash-testing: ## refresh flash-testing/ — the images you drag onto the badge
 	$(MAKE) badge-uf2 BADGE_BEAT_MS=700
 	$(MAKE) badge-payload
 	$(MAKE) display-probe
-	@mkdir -p flash-testing
-	@cp build/badge-bringup.uf2 build/badge-payload.uf2 build/display-probe.uf2 flash-testing/
-	# The factory image is dropped in by hand and is the way back from a bad
-	# flash, so it is hashed with the rest rather than left as the one file with
-	# no record.
-	@cd flash-testing && shasum -a 256 ./*.uf2 > CHECKSUMS.txt
-	@cat flash-testing/CHECKSUMS.txt
-	@echo "  flash-testing/ refreshed"
 
 badge-payload: ## pack payloads into a UF2 you can DRAG onto the badge's BOOTSEL drive
 	# THE POINT: adding an app to a badge should not need a toolchain. Hold BOOT,
@@ -276,7 +273,7 @@ badge-payload: ## pack payloads into a UF2 you can DRAG onto the badge's BOOTSEL
 	echo "picotool uf2 convert build/badge-payload.bin -t bin -o $$offset --family data build/badge-payload.uf2"; \
 	picotool uf2 convert build/badge-payload.bin -t bin \
 		-o $$offset --family data build/badge-payload.uf2; \
-	./scripts/record-hash.sh build/badge-payload.uf2; \
+	./scripts/stage-artifact.sh build/badge-payload.uf2; \
 	ls -l build/badge-payload.uf2 | awk -v o=$$offset '{print "  draggable: "$$5" bytes -> "o}'
 
 .PHONY: embedded-cwasm

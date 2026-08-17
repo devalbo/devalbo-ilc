@@ -9,6 +9,7 @@ one of them (`preview2-shim` mangling TinyGo writes) is still load-bearing in sh
 | Spike | State |
 | --- | --- |
 | `async/` (Spike 5) | **live** — Rich JSPI ✅ · Portable ✅. Nothing else covers it: there is no async capability yet, so this remains the only evidence for how one would work. |
+| `browser-precompile/` | **live** — 🟢 GREEN. The gate for [`PAYLOAD-LOADING-PLAN.md`](../docs/PAYLOAD-LOADING-PLAN.md) D5: Wasmtime + Cranelift build for a **wasm32 host** and produce a `.cwasm` byte-identical to the native tool's — 9.9 MB of compiler. Its real finding is smaller and sharper: three earlier attempts compiled happily and produced artifacts the badge would reject, so **the config defines the artifact and must be shared, not copied**. Retire it when the web tier ships precompilation. |
 | `sqlite-sync/` (index Phase 0) | **live** — 🟢 GREEN. The gate for [`INDEX-PLAN.md`](../docs/INDEX-PLAN.md) D9: sqlite-wasm answers a query with no `await` in the call path, over OPFS, in a worker. Retire it when the real index does the same thing on every build. It also composes with Spike 5 rather than repeating it — that spike already measured that a **sync** JS import returning a value is fine under sync jco, so this one deliberately builds no component. |
 
 ## What was retired, and why

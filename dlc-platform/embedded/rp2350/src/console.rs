@@ -111,9 +111,95 @@ pub fn render(panel: &mut Display, status: Status, label: &str, body: &str) {
             break;
         }
         let y = TEXT_TOP + row as i32 * LINE_H;
-        let _ = Text::new(line, Point::new(0, y), style).draw(panel.target());
+        // FOLDED AT THE LAST MOMENT, so wrapping still measures the text the app
+        // actually produced. Folding earlier would change the character count -
+        // `...` is three where the ellipsis was one - and the app was told its
+        // budget in the manifest, so the two must agree about what a line holds.
+        let mut folded = [0u8; COLS * 3];
+        let drawable = fold_into(line, &mut folded);
+        let _ = Text::new(drawable, Point::new(0, y), style).draw(panel.target());
         row += 1;
     }
+}
+
+/// Fold a character into something `FONT_8X13` can actually draw.
+///
+/// # Why a badge needs this and a terminal does not
+///
+/// The font is ASCII. `embedded-graphics` substitutes a fallback glyph for
+/// anything it lacks, so an em dash arrives as `?` — which does not read as a
+/// dash, it reads as an ERROR. The first time it happened the reasonable
+/// question was "what is wrong with the encoding", and the answer was nothing:
+/// Component Model `string` is UTF-8, `wasi:cli/stdout` is opaque `list<u8>`,
+/// and the bytes crossed every boundary intact. They died at the last step,
+/// where characters become pixels.
+///
+/// Our own apps now stick to ASCII, but THIS WORLD RUNS APPS IT WAS NOT BUILT
+/// FOR — that is the entire point of the payload region. So the text it renders
+/// is not text it controls, and folding is the only place the problem can be
+/// solved for a payload someone else wrote.
+///
+/// # Folded, not stripped
+///
+/// A dash becomes `-` rather than vanishing, because losing a character silently
+/// is worse than showing a plainer one: `10-20` and `1020` are different claims.
+/// Anything with no sensible ASCII stand-in still becomes `?`, which is honest —
+/// the badge cannot show it, and pretending otherwise would be worse.
+///
+/// Kept deliberately SMALL. This is the punctuation that shows up in ordinary
+/// prose — the dashes and quotes editors substitute automatically, which is how
+/// they get into an app's strings without anyone typing them. It is not an
+/// attempt at Unicode support and should not grow into one: a badge with a
+/// 40-column ASCII font is not the place to solve text rendering.
+fn fold(c: char) -> &'static str {
+    match c {
+        // Dashes an editor substitutes for a typed hyphen.
+        '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}' => "-",
+        // Quotes, likewise - the commonest way non-ASCII enters prose.
+        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => "'",
+        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => "\"",
+        // Spaces that are not the space bar: non-breaking, thin, narrow.
+        '\u{00A0}' | '\u{2007}' | '\u{2009}' | '\u{202F}' => " ",
+        '\u{2026}' => "...",
+        '\u{2022}' => "*",
+        '\u{00D7}' => "x",
+        // Already drawable: ASCII graphics and the space bar. Empty means "keep
+        // the character as it is" - see fold_into.
+        c if c.is_ascii_graphic() || c == ' ' => "",
+        // Everything else, including control codes. `?` is what the font would
+        // have drawn anyway; making it explicit keeps substitution in one place.
+        _ => "?",
+    }
+}
+
+/// Write `line` into `out` with every character folded to drawable ASCII.
+///
+/// Returns the prefix of `out` that was written. Truncates rather than growing:
+/// the buffer allows for the slack `...` can add, and a line longer than the
+/// screen was already going to be cut.
+fn fold_into<'b>(line: &str, out: &'b mut [u8]) -> &'b str {
+    let mut len = 0usize;
+    for c in line.chars() {
+        let replacement = fold(c);
+        if replacement.is_empty() {
+            // Already drawable, and ASCII by construction - `fold` returns empty
+            // only for characters it has just verified are ASCII.
+            if len < out.len() {
+                out[len] = c as u8;
+                len += 1;
+            }
+            continue;
+        }
+        for byte in replacement.bytes() {
+            if len < out.len() {
+                out[len] = byte;
+                len += 1;
+            }
+        }
+    }
+    // Every byte above came from `fold` (ASCII) or from a char verified ASCII,
+    // so this cannot fail; `unwrap_or` keeps the panic out of the firmware.
+    core::str::from_utf8(&out[..len]).unwrap_or("")
 }
 
 /// Split text into display lines: on newlines, then on width.
@@ -140,6 +226,12 @@ impl<'a> Iterator for Wrap<'a> {
 
         // A newline always ends a line, before width is considered.
         if let Some(nl) = self.rest.find('\n') {
+            // `nl` is a BYTE offset and COLS is a character count, so this
+            // comparison is conservative rather than exact: a line of multi-byte
+            // characters may fall through to the wrapper below even though it
+            // would have fitted. That is the safe direction — the wrapper
+            // handles it correctly — and `nl` is always a char boundary because
+            // `find` returned it.
             if nl <= COLS {
                 let (line, rest) = self.rest.split_at(nl);
                 self.rest = &rest[1..];
@@ -147,16 +239,43 @@ impl<'a> Iterator for Wrap<'a> {
             }
         }
 
-        if self.rest.len() <= COLS {
+        // COLUMNS ARE CHARACTERS, NOT BYTES — and this used to slice by bytes.
+        //
+        // `&self.rest[..COLS]` PANICS when COLS lands inside a multi-byte
+        // character, and app text is UTF-8: hello alone ships an em dash. It
+        // never fired only because hello's line is short enough to take the
+        // early return below, so the bug was one longer string away from
+        // halting the firmware — on a panel whose whole job is to report.
+        //
+        // Byte-counting was also wrong on its own terms. A 40-byte line holding
+        // three em dashes is 34 characters and leaves six columns unused, so the
+        // display wrapped early and looked broken at exactly the moment an app
+        // used punctuation.
+        //
+        // `char_indices` gives both answers at once: how many characters fit,
+        // and the byte offset where that many end — which is a boundary by
+        // construction.
+        let mut end = self.rest.len();
+        let mut count = 0usize;
+        for (offset, _) in self.rest.char_indices() {
+            if count == COLS {
+                end = offset;
+                break;
+            }
+            count += 1;
+        }
+        if count < COLS {
             let line = self.rest;
             self.rest = "";
             return Some(line);
         }
 
         // Break at the last space that fits; if there is none, the word is longer
-        // than the screen and a hard break is the only option.
-        let window = &self.rest[..COLS];
-        let split = window.rfind(' ').map(|i| i).unwrap_or(COLS);
+        // than the screen and a hard break is the only option. `rfind` returns a
+        // byte offset into a slice that already ends on a boundary, so the split
+        // below is safe either way.
+        let window = &self.rest[..end];
+        let split = window.rfind(' ').unwrap_or(end);
         let (line, rest) = self.rest.split_at(split);
         self.rest = rest.trim_start_matches(' ');
         Some(line)

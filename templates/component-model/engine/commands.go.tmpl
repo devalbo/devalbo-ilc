@@ -48,7 +48,10 @@ func handleGreet(req *{{.PkgName}}v1.GreetRequest) (*{{.PkgName}}v1.GreetRespons
 	if name == "" {
 		name = "world"
 	}
-	text := "hello, " + name + " — from {{.ProjectName}}"
+	// ASCII ONLY IN APP-VISIBLE TEXT. An app cannot know which tier it is on,
+	// and the badge's font is ASCII — an em dash there draws as `?`, which reads
+	// like an error rather than a dash. A hyphen renders identically everywhere.
+	text := "hello, " + name + " - from {{.ProjectName}}"
 
 	// ASK THE WORLD WHERE TEXT GOES, then defer to it.
 	//

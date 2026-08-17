@@ -76,13 +76,6 @@ static HEAP: Heap = Heap::empty();
 /// `rest()`, which is where the USB polling happens.
 static mut LOG: usblog::LogBuffer = usblog::LogBuffer::new();
 
-/// The USB clock token, handed from `main` to `serve_log`.
-///
-/// A static rather than a parameter because `rest()` has four call sites and the
-/// token is only needed at the very last one; threading it through every early
-/// exit would put USB plumbing in the middle of the bring-up flow, which is the
-/// opposite of what this is for.
-static mut USB_CLOCK: Option<hal::clocks::UsbClock> = None;
 
 /// WHAT THE DATA BUS ACTUALLY DOES, measured rather than assumed.
 ///
@@ -200,90 +193,27 @@ fn rest(
 ///
 /// Never returns. The badge has finished; this is its afterlife.
 fn serve_log() -> ! {
-    // The peripherals were taken at boot, so steal them. Sound because main has
-    // finished with everything this touches and nothing else runs.
-    let pac = unsafe { hal::pac::Peripherals::steal() };
-    // SAFETY: set once in main before any of this runs, single core.
-    let Some(usb_clock) = (unsafe { core::ptr::addr_of_mut!(USB_CLOCK).replace(None) }) else {
-        // No clock token means main never got that far; nothing to serve with.
-        loop {
-            cortex_m::asm::wfi();
-        }
-    };
-    let mut resets = pac.RESETS;
-    let usb = hal::usb::UsbBus::new(pac.USB, pac.USB_DPRAM, usb_clock, true, &mut resets);
-    let bus = usb_device::bus::UsbBusAllocator::new(usb);
-    let mut serial = usbd_serial::SerialPort::new(&bus);
-    let mut device = usb_device::device::UsbDeviceBuilder::new(
-        &bus,
-        usb_device::device::UsbVidPid(0x2e8a, 0x000a),
-    )
-    .strings(&[usb_device::device::StringDescriptors::default()
-        .manufacturer("devalbo")
-        .product("DLC badge bring-up")
-        .serial_number("ilc")])
-    .unwrap()
-    .device_class(usbd_serial::USB_CLASS_CDC)
-    .build();
-
-    // SAFETY: single core, no interrupts, and main has released its borrow.
-    let log: &usblog::LogBuffer = unsafe { &*core::ptr::addr_of!(LOG) };
-    // SAY SO IF THE LOG DID NOT FIT.
+    // THE DEVICE IS ALREADY UP, and already being driven by USBCTRL_IRQ — it was
+    // started before the bring-up report so that a stall would still be
+    // reportable. This function used to build the whole USB stack here, which is
+    // exactly what made a hang invisible: no device existed until the run
+    // finished, so a run that never finished had no way to say so.
     //
-    // `LogBuffer` records truncation and, until now, nothing ever asked — the
-    // getter was dead code the compiler warned about. Deleting it would have
-    // been the smaller change and the wrong one: the field is written on every
-    // overflow, so the log was already silently dropping its tail, and a boot
-    // log that stops mid-sentence reads as a HANG rather than a full buffer.
-    // That is the most expensive thing a diagnostic can do — send someone
-    // debugging a freeze that never happened.
+    // What is left is the afterlife: keep servicing, and periodically rewind so
+    // a terminal attached after the fact sees the whole run rather than an empty
+    // port.
     //
-    // SENT ALONGSIDE THE BODY, not appended to it: the buffer being full is
-    // precisely what truncation means, so writing the notice into it is the one
-    // operation guaranteed to be dropped. It leads because a reader needs to
-    // know before they start trusting what follows.
-    let notice: &[u8] = if log.truncated() {
-        b"(log truncated -- later lines were dropped)\r\n"
-    } else {
-        b""
-    };
-    let bytes = log.as_bytes();
-    let mut sent = 0usize;
-    let mut idle_since_open = 0u32;
-
+    // `pump()` as well as the interrupt, deliberately. If the interrupt were
+    // never unmasked — a future refactor, a build where `start` bailed — this
+    // loop still drains, so the worst case degrades to the old behaviour instead
+    // of to silence.
+    let mut idle = 0u32;
     loop {
-        // POLL, THEN WRITE REGARDLESS. `poll` reports whether there was USB
-        // ACTIVITY, not whether the port is usable — gating the write on it
-        // meant an idle host (the normal case: a terminal that only reads) never
-        // triggered a single byte.
-        device.poll(&mut [&mut serial]);
-        // Drain anything the host types; a terminal opening the port often
-        // sends nothing, but an unread RX buffer stalls some stacks.
-        let mut discard = [0u8; 64];
-        let _ = serial.read(&mut discard);
-
-        // One cursor over two slices, so the repeat-on-idle logic below stays a
-        // single `sent = 0` rather than two counters that can disagree.
-        let total = notice.len() + bytes.len();
-        if sent < total {
-            let chunk = if sent < notice.len() {
-                &notice[sent..]
-            } else {
-                &bytes[sent - notice.len()..]
-            };
-            match serial.write(chunk) {
-                Ok(n) => sent += n,
-                Err(usbd_serial::UsbError::WouldBlock) => {}
-                Err(_) => {}
-            }
-        } else {
-            // REPEAT THE LOG once a host has had it, so attaching a terminal
-            // after the fact still shows something rather than an empty port.
-            idle_since_open = idle_since_open.saturating_add(1);
-            if idle_since_open > 2_000_000 {
-                sent = 0;
-                idle_since_open = 0;
-            }
+        usblog::pump();
+        idle = idle.saturating_add(1);
+        if idle > 2_000_000 {
+            usblog::rewind();
+            idle = 0;
         }
     }
 }
@@ -382,9 +312,21 @@ fn main() -> ! {
     let _ = power_en.set_high();
     // Give the rail time to come up before the panel is addressed.
     cortex_m::asm::delay(10_000_000);
-    // Hand the USB clock over AFTER the last borrow of `clocks` — taking the
-    // field partially moves it, and the timer above still needs the whole thing.
-    unsafe { USB_CLOCK = Some(clocks.usb_clock) };
+    // START THE LOG HERE — before the report, not after it.
+    //
+    // This used to hand the clock to a static and build the device only in the
+    // idle loop, which meant a run that never reached the idle loop produced no
+    // serial device at all. A stalled `execute` therefore showed one unresolved
+    // line on the panel and said nothing over USB, and the only move left was to
+    // reflash with a guess.
+    //
+    // Started here and driven by USBCTRL_IRQ, the log is live during the run and
+    // survives a stall: the interrupt keeps answering the host whatever main is
+    // doing. See usblog.rs.
+    //
+    // AFTER the last borrow of `clocks` — taking the field partially moves it,
+    // and the timer above still needs the whole thing.
+    usblog::start(pac.USB, pac.USB_DPRAM, clocks.usb_clock, &mut pac.RESETS);
     let screen = display::Display::new(
         pins.gpio27.into_push_pull_output().into_dyn_pin(),
         pins.gpio28.into_push_pull_output().into_dyn_pin(),
@@ -534,10 +476,32 @@ fn main() -> ! {
         let mut filename = [0u8; 12];
         let shown = dlc_platform_embedded::names::display_filename(found.name, &mut filename);
         if found.runnable() {
+            // THE CHECKSUM, NOT JUST THE SIZE.
+            //
+            // This line reported only `869 KB` and was the one place a stale
+            // payload was visible — a build from before the platform changed,
+            // silently running while every other stage said OK. It took
+            // comparing that number against the artifact on disk to notice, and
+            // a payload that changed WITHOUT changing size would not have shown
+            // up at all.
+            //
+            // The checksum is already computed: `scan` verifies it to produce
+            // `Integrity::Verified`. It was simply never printed, so the one
+            // fact that identifies WHICH build is on the board stayed inside the
+            // firmware. Printing it costs nothing and makes "is the board
+            // running what I just built?" answerable by looking.
             report.item(format_args!(
-                "[{index}] {shown} {} KB",
-                found.bytes.len() / 1024
+                "[{index}] {shown} {} B #{:08x}",
+                found.bytes.len(),
+                dlc_platform_embedded::catalog::checksum(found.bytes)
             ));
+        } else if found.integrity == dlc_platform_embedded::catalog::Integrity::WrongEngine {
+            // NAMED, because the remedy differs. Corrupt means the file arrived
+            // damaged and should be flashed again; this means it arrived intact
+            // and was compiled against a different Wasmtime, so it must be
+            // repacked. Before this line the mismatch showed up two stages later
+            // as a deserialize error, which reads like a firmware fault.
+            report.item(format_args!("[{index}] {shown} WRONG ENGINE - repack"));
         } else {
             report.item(format_args!("[{index}] {shown} CORRUPT"));
         }
@@ -638,7 +602,12 @@ fn main() -> ! {
 
     // 6 — RUN IT. Also proven in QEMU, and it is still the claim the whole tier
     // rests on: the same engine, the same bytes, executing on this chip.
-    // 5b — STATE THE FACTS, before the app runs.
+    // STATE THE FACTS, before the app runs.
+    //
+    // No number in this comment: `Report::stage` assigns them sequentially at
+    // runtime, so writing one here would be a second copy that goes stale the
+    // moment a stage is added ahead of it — which is exactly what happened when
+    // this was called "5b" and the docs kept calling the next one 6.
     //
     // The wasi keys set at instantiation are FROZEN: an app reads them once
     // during `_initialize` and can never re-read them. They are the bootstrap.

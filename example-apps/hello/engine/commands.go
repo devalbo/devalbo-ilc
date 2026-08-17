@@ -48,7 +48,19 @@ func handleGreet(req *hellov1.GreetRequest) (*hellov1.GreetResponse, error) {
 	if name == "" {
 		name = "world"
 	}
-	text := "hello, " + name + " — from hello"
+	// ASCII ONLY IN APP-VISIBLE TEXT.
+	//
+	// This said `—` and the badge drew `?`: its font is ASCII, so
+	// embedded-graphics substitutes for any glyph it lacks. The bytes crossed
+	// every boundary intact — Component Model `string` is UTF-8 and
+	// `wasi:cli/stdout` is opaque `list<u8>` — and then died at the last step,
+	// where characters become pixels.
+	//
+	// An app cannot know which tier it is on, so it should not spend characters
+	// the poorest one cannot draw. A hyphen renders identically everywhere; an
+	// em dash renders on two tiers out of three and degrades to punctuation that
+	// reads like an error.
+	text := "hello, " + name + " - from hello"
 
 	// ASK THE WORLD WHERE TEXT GOES, then defer to it.
 	//

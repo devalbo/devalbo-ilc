@@ -165,8 +165,8 @@ on the UART at once:
      ILC_WORLD=normal
      ILC_STDOUT=display
      ILC_STATUS=color
-5b. manifest ... 40x12 display [OK]
-6. execute 10000 ... success [OK]
+6. manifest ... 40x12 display [OK]
+7. execute 10000 ... success [OK]
      stdout: hello, world — from hello
      peak heap 2911 KB
 verdict: OK — hardware-only checks 4/4 (the rest are QEMU regressions)
@@ -189,7 +189,7 @@ a world that cannot push a manifest would ever have.
 
 **Nothing in the platform reads it any more.** The wasi environment is read once, during `_initialize`, and can
 never be re-read — so it can state a capability but not an ALLOCATION, which moves the moment this world takes
-screen back for a menu. The authoritative source is the manifest (`SetEnvironment`, stage 5b above): it is
+screen back for a menu. The authoritative source is the manifest (`SetEnvironment`, the `manifest` stage above): it is
 revision-stamped and re-sendable, so an app can poll it (`platform.Env().GetTextOut()`) and be told when it changes
 (`platform.OnEnvironmentChange`). See docs/ENVIRONMENT-PLAN.md D12.
 

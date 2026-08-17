@@ -1,0 +1,34 @@
+[package]
+name = "browser-precompile"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# SPIKE — does Wasmtime's compiler build with a WASM32 HOST?
+#
+# Not "can Wasmtime run in a browser" (a different, harder question about
+# executing guests). This asks only whether the COMPILER — Cranelift, targeting
+# pulley32 — builds and runs when the machine it runs ON is wasm32.
+#
+# Deliberately its own workspace: the embedded crate pins wasmtime with
+# `default-features = false` for a no_std board, and this needs the opposite
+# (std + cranelift). Sharing a lockfile would have the two fight.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The SAME version the badge links, because a .cwasm only loads in the Wasmtime
+# that produced it (catalog::ENGINE_TAG). A spike that proved compilation with a
+# different version would have proved nothing about this system.
+wasmtime = { version = "=46.0.1", default-features = false, features = [
+  "std",
+  "cranelift",
+  "component-model",
+  "pulley",
+  # NO `runtime`, NO `gc`. The first attempt asked for them and failed inside
+  # `mmap_vec.rs` — the runtime wants mmap, which wasm32 does not have. But
+  # PRECOMPILING NEEDS ONLY THE COMPILER: nothing here executes a guest, so the
+  # runtime half is weight this host cannot carry and this job does not want.
+] }

@@ -247,8 +247,8 @@ is the log's spelling of the screen's `*`.
      ILC_WORLD=normal
      ILC_STDOUT=display
      ILC_STATUS=color
-5b. manifest ... 40x12 display [OK]
-6. execute 10000 ... success [OK]
+6. manifest ... 40x12 display [OK]
+7. execute 10000 ... success [OK]
      stdout: hello, world — from hello
      peak heap 2911 KB
 verdict: OK — hardware-only checks 4/4 (the rest are QEMU regressions)

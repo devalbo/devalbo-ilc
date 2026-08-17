@@ -90,7 +90,7 @@ func handlePlay(req *tictactoev1.PlayRequest) (*tictactoev1.PlayResponse, error)
 	if state.Outcome != tictactoev1.Outcome_OUTCOME_IN_PROGRESS {
 		// One field to check, and no combination to interpret — the same
 		// simplification every slot gets.
-		return nil, errors.New("play: the game is over — start a new one")
+		return nil, errors.New("play: the game is over - start a new one")
 	}
 	if req.Square < 1 || req.Square > 9 {
 		return nil, errors.New("play: square must be 1-9")

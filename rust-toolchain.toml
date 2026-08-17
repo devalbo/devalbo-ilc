@@ -25,4 +25,9 @@ targets = [
   # The badge in RISC-V mode (Hazard3) AND every RISC-V ESP32 — one triple for
   # both, which is the simplification D8 is about.
   "riscv32imac-unknown-none-elf",
+  # A WASM32 HOST, for spikes/browser-precompile: the question is whether
+  # Wasmtime's COMPILER builds when the machine running it is itself wasm.
+  # wasip1 rather than unknown-unknown because Cranelift wants a fuller std, and
+  # the web tier already runs wasip1/p2 modules through jco.
+  "wasm32-wasip1",
 ]

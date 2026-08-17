@@ -174,7 +174,7 @@ func checkAdvertisement() []check {
 
 func advertisementDetail(tier, world string, partial bool) string {
 	if partial {
-		return "partial — one of ILC_TIER/ILC_WORLD is missing"
+		return "partial - one of ILC_TIER/ILC_WORLD is missing"
 	}
 	if tier == "" && world == "" {
 		return "none (undefined world)"
@@ -188,7 +188,7 @@ func describeStdout(stdout string) string {
 		return "unstated"
 	case "none":
 		// The signal to stop formatting text nobody will see.
-		return "not shown — emit events instead"
+		return "not shown - emit events instead"
 	default:
 		return stdout
 	}

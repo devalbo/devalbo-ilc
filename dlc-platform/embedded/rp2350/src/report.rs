@@ -303,16 +303,33 @@ impl<'a, U: Write> Report<'a, U> {
         // said that about most of them. It is how many of the board-only checks
         // passed, because those are the ones nothing else could have answered.
         let (passed, total) = (self.hardware_passed, self.hardware_checks);
+        // SAY WHAT THE NUMBER COUNTS, because it does not count what was watched.
+        //
+        // This read `*5/5` after EIGHT numbered stages had scrolled past, and the
+        // first question anyone asks is why those disagree. The answer — that
+        // only hardware-only stages are counted, because the rest are already
+        // covered by `make qemu` — was true and invisible: the `*` marking those
+        // stages appears beside each one, but nobody connects a marker seen
+        // eight lines ago to a ratio at the bottom.
+        //
+        // So both numbers are stated. The stage total is what the reader just
+        // watched, and the starred count is the part that carries new
+        // information — and neither has to be inferred from the other.
+        // Read out before `draw`, which takes `&mut self`.
+        let stages = self.stage;
+        let stages_ok = self.stage - self.failures;
         self.draw(
             y,
             0,
-            format_args!("{}  *{passed}/{total}", status.name()),
+            format_args!("{}  {stages_ok}/{stages} stages, *{passed}/{total}", status.name()),
             color,
         );
         let _ = writeln!(
             self.uart,
-            "verdict: {} — hardware-only checks {}/{} (the rest are QEMU regressions)",
+            "verdict: {} — {}/{} stages passed; *{}/{} hardware-only (the rest are QEMU regressions)",
             status.name(),
+            self.stage - self.failures,
+            self.stage,
             self.hardware_passed,
             self.hardware_checks
         );

@@ -127,7 +127,12 @@ fn main() -> std::io::Result<()> {
             flags |= catalog::FLAG_DEFAULT;
         }
         header[56..60].copy_from_slice(&flags.to_le_bytes());
-        // Bytes 52..64 stay zero — the reserved field. A hash goes here the day
+        // WHICH ENGINE THIS WAS COMPILED FOR. A .cwasm only loads in the Wasmtime
+        // that produced it, and without this the mismatch surfaces as a
+        // deserialize error two stages after the payload was reported healthy —
+        // the bytes are intact, so the checksum verifies and says so.
+        header[60..64].copy_from_slice(&catalog::ENGINE_TAG.to_le_bytes());
+        // A hash goes here the day
         // the badge wants to verify a payload it did not just receive.
 
         image.extend_from_slice(&header);

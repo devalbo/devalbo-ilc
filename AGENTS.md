@@ -426,6 +426,24 @@ watch it go red; then confirm CI actually executes it — by running `./scripts/
 in the output, not by assuming the tree is covered. A `go vet` list and a `go test` list over the same tree
 must be THE SAME LIST, and a `cargo build` step is not a `cargo test` step.
 
+**ASSERT WHAT THE APP PRODUCES, DO NOT RESTATE IT.** A test holding its own copy of an app's output is a
+second source of truth, and it drifts silently in the direction that hurts: the copy keeps passing while the
+app changes underneath it, or an unrelated reword turns a green suite red for no reason. Neither outcome
+tells you anything about whether the code works.
+
+The shapes that stay in sync on their own:
+
+| instead of | do |
+| --- | --- |
+| pinning the exact greeting string | compare tiers to EACH OTHER (`verify-parity.sh`) — no expected text exists to drift |
+| asserting decorative wording | assert the part that carries MEANING (the name that was typed, not the dash around it) |
+| a hand-maintained expected tree | a GOLDEN with a re-bless command, so an intentional change is one command and an accidental one is a diff |
+
+The test is: if someone rewords a message, how many places must change? One is correct. If the answer is
+"however many I can find by grepping", the copies are the bug. When a snapshot IS the right tool — templates,
+generated trees — it must ship with the command that re-blesses it, or it becomes something people edit by
+hand to make the suite quiet.
+
 **`./scripts/ci.sh full` is what CI runs and what you run.** Nothing in the suites may know about a CI
 provider; `.github/workflows/ci.yml` is a thin adapter.
 

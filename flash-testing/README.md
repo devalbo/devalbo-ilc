@@ -23,9 +23,15 @@ while the file on disk hashed to `c1f8f215`, and nothing anywhere noticed. A
 hash written by hand beside a file that is rebuilt by a different command is a
 claim with no mechanism behind it.
 
-Now `make flash-testing` produces the images and `CHECKSUMS.txt` in one step, so
-they cannot disagree — and `make flash-checksums` alone re-reads whatever is in
-the directory, including the factory image you dropped in by hand.
+Now EVERY BUILD STAGES ITSELF HERE and re-hashes the directory on its way out
+(`scripts/stage-artifact.sh`). `make badge-uf2`, `make badge-payload` and
+`make display-probe` each drop their image in and rewrite `CHECKSUMS.txt`; there
+is no step to remember and no way to end up with a fresh image beside a stale
+hash. `make flash-testing` just runs all three.
+
+The ledger is regenerated WHOLE rather than patched, so a file that arrives some
+other way still gets an entry — the factory MicroPython image below is exactly
+that, dropped in by hand and never built here.
 
 **Nothing in this directory is committed** (see `.gitignore`). These are build
 outputs of one firmware revision, and a repo carrying them would be promising

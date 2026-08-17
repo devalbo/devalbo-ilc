@@ -30,7 +30,7 @@
 //! 48      4     entry method id, u32 little-endian — 0 means DEFAULT_ENTRY_METHOD
 //! 52      4     FNV-1a checksum of the payload, u32 LE — 0 means "not checksummed"
 //! 56      4     flags, u32 LE — bit 0 = DEFAULT (run this one unattended)
-//! 60      4     reserved, zero
+//! 60      4     ENGINE TAG, u32 LE — 0 means "not recorded" (see ENGINE_TAG)
 //! 64      len   the .cwasm itself
 //! ```
 //!
@@ -97,6 +97,53 @@ pub const DEFAULT_ENTRY_METHOD: u32 = 10000;
 /// and the intent survives in the image itself.
 pub const FLAG_DEFAULT: u32 = 1 << 0;
 
+/// WHICH ENGINE A PAYLOAD WAS COMPILED FOR.
+///
+/// # The failure this exists to name
+///
+/// A `.cwasm` is bound to the exact Wasmtime that produced it. Bump the pin in
+/// `Cargo.toml` and every payload already in the region becomes unloadable —
+/// which is safe, because `deserialize_raw` refuses a mismatched artifact rather
+/// than executing garbage, but it is not DIAGNOSABLE.
+///
+/// Without this field the bytes are intact, so the checksum verifies and the
+/// payload-region stage reports `Verified`. The failure then surfaces two stages
+/// later as a Wasmtime deserialize error, which reads like a firmware fault. The
+/// one fact that explains it — "this was built for a different engine" — is
+/// known at pack time and was being thrown away.
+///
+/// # Why a constant and not a computed hash
+///
+/// Wasmtime has `Engine::precompile_compatibility_hash`, which is exactly the
+/// right answer and is gated behind `cranelift`/`winch`. The badge has NEITHER —
+/// having no compiler is the point of the tier — so the firmware cannot compute
+/// it. A shared constant is what both sides can agree on: the packer writes it,
+/// the loader compares it, and `engine_tag_matches_the_pin` keeps it honest.
+///
+/// # What must change it
+///
+/// The Wasmtime version and the pointer width, because those are what decide
+/// whether a `.cwasm` loads. Not the catalog format — `MAGIC` already carries
+/// that — and not app-level facts, which belong to the app.
+pub const ENGINE_TAG_SOURCE: &str = "wasmtime=46.0.1;pulley32";
+
+/// The tag written into byte 60, derived from [`ENGINE_TAG_SOURCE`].
+///
+/// Never zero: 0 MEANS "not recorded", so an image built before this field
+/// existed stays loadable rather than being rejected by a firmware that cannot
+/// tell "old" from "wrong".
+pub const ENGINE_TAG: u32 = {
+    let bytes = ENGINE_TAG_SOURCE.as_bytes();
+    let mut hash: u32 = 0x811c_9dc5;
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+        i += 1;
+    }
+    if hash == 0 { 1 } else { hash }
+};
+
 /// Whether a payload's bytes are what were written.
 ///
 /// **THIS MATTERS MORE NOW THAT THERE IS A MENU.** Without it, a corrupt payload
@@ -114,6 +161,13 @@ pub enum Integrity {
     /// Checksum present and WRONG. The bytes are not what was written: a
     /// half-finished drag, a bad flash write, or a truncated UF2.
     Corrupt,
+    /// Bytes intact, but built for a DIFFERENT ENGINE — see [`ENGINE_TAG`].
+    ///
+    /// Distinct from `Corrupt` because the remedy is different and a reader acts
+    /// on it: corrupt means the file arrived damaged, this means it arrived
+    /// perfectly and was compiled against another Wasmtime. One is "flash it
+    /// again", the other is "repack it".
+    WrongEngine,
 }
 
 /// One component in the region — a name and the bytes, borrowed in place.
@@ -136,7 +190,9 @@ pub struct Payload {
 impl Payload {
     /// Can this be run at all?
     pub fn runnable(&self) -> bool {
-        self.integrity != Integrity::Corrupt
+        // WrongEngine is refused for the same reason Corrupt is: it cannot load.
+        // The difference is what the report says, not whether it runs.
+        !matches!(self.integrity, Integrity::Corrupt | Integrity::WrongEngine)
     }
 
     /// Was this marked as the one to run unattended?
@@ -296,6 +352,17 @@ pub fn scan(region: &'static [u8]) -> Catalog {
 
         let flags = u32::from_le_bytes([header[56], header[57], header[58], header[59]]);
 
+        // ENGINE TAG, checked only when the bytes themselves are sound. A corrupt
+        // payload's tag proves nothing — the field could be damaged along with
+        // everything else — and reporting the wrong engine for a truncated file
+        // would send someone repacking a payload that simply needs reflashing.
+        let engine = u32::from_le_bytes([header[60], header[61], header[62], header[63]]);
+        let integrity = if integrity == Integrity::Verified && engine != 0 && engine != ENGINE_TAG {
+            Integrity::WrongEngine
+        } else {
+            integrity
+        };
+
         slots[count] = Some(Payload {
             name,
             bytes,
@@ -331,15 +398,86 @@ mod tests {
     }
 
     fn entry_with_checksum(name: &str, payload: &[u8], sum: u32) -> Vec<u8> {
+        entry_full(name, payload, sum, ENGINE_TAG)
+    }
+
+    fn entry_full(name: &str, payload: &[u8], sum: u32, engine: u32) -> Vec<u8> {
         let mut out = vec![0u8; HEADER_LEN];
         out[..8].copy_from_slice(&MAGIC);
         out[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
         out[12..16].copy_from_slice(&(name.len() as u32).to_le_bytes());
         out[16..16 + name.len()].copy_from_slice(name.as_bytes());
         out[52..56].copy_from_slice(&sum.to_le_bytes());
+        out[60..64].copy_from_slice(&engine.to_le_bytes());
         out.extend_from_slice(payload);
         out.resize(out.len().div_ceil(SLOT_ALIGN) * SLOT_ALIGN, 0);
         out
+    }
+
+    /// THE CONSTANT MUST TRACK THE PIN, and nothing else enforces that.
+    ///
+    /// `ENGINE_TAG_SOURCE` names the Wasmtime version by hand because the badge
+    /// cannot compute a compatibility hash — it has no compiler. A hand-written
+    /// version string is exactly the kind of thing that goes stale on a
+    /// dependency bump, and a STALE tag is worse than no tag: every payload
+    /// would claim compatibility with an engine that can no longer load it,
+    /// which is the original bug wearing a badge that says it was checked.
+    #[test]
+    fn engine_tag_matches_the_pin() {
+        let manifest = include_str!("../Cargo.toml");
+        let pin = manifest
+            .lines()
+            .find(|line| line.trim_start().starts_with("wasmtime = "))
+            .expect("no wasmtime dependency line in Cargo.toml");
+        let version = pin
+            .split_once("version = \"=")
+            .or_else(|| pin.split_once("\"="))
+            .map(|(_, rest)| rest.split('"').next().unwrap_or(""))
+            .expect("wasmtime pin is not an exact `=x.y.z` version");
+        assert!(
+            ENGINE_TAG_SOURCE.contains(version),
+            "ENGINE_TAG_SOURCE is {ENGINE_TAG_SOURCE:?} but Cargo.toml pins wasmtime {version:?} \
+             — bump the constant, or every payload will claim an engine that cannot load it"
+        );
+    }
+
+    /// A payload built for another engine is NAMED, not called corrupt.
+    ///
+    /// The two need different remedies: corrupt means the file arrived damaged
+    /// and should be reflashed; this means it arrived perfectly and must be
+    /// repacked. Collapsing them sends people to reflash a file that is fine.
+    #[test]
+    fn a_foreign_engine_is_named_rather_than_called_corrupt() {
+        let image = entry_full("hello", b"payload", checksum(b"payload"), ENGINE_TAG ^ 0xFFFF);
+        let catalog = scan(leak(image));
+        let found = catalog.get(0).unwrap();
+        assert_eq!(found.integrity, Integrity::WrongEngine);
+        assert!(!found.runnable(), "a payload for another engine cannot load");
+    }
+
+    /// Zero means "not recorded", so images predating this field still run.
+    ///
+    /// Refusing them would break every payload already in the field for a
+    /// firmware that cannot tell "old" from "wrong" — and `deserialize_raw`
+    /// still gets the final say, exactly as it did before the field existed.
+    #[test]
+    fn an_untagged_payload_still_runs() {
+        let image = entry_full("hello", b"payload", checksum(b"payload"), 0);
+        let catalog = scan(leak(image));
+        let found = catalog.get(0).unwrap();
+        assert_eq!(found.integrity, Integrity::Verified);
+        assert!(found.runnable());
+    }
+
+    /// A corrupt payload reports CORRUPT even when its tag is also wrong.
+    ///
+    /// Damaged bytes can damage the tag too, so the tag proves nothing here —
+    /// and "repack it" would be the wrong advice for a truncated file.
+    #[test]
+    fn corruption_outranks_a_foreign_engine() {
+        let image = entry_full("hello", b"payload", 0xDEAD_BEEF, ENGINE_TAG ^ 0xFFFF);
+        let catalog = scan(leak(image));
+        assert_eq!(catalog.get(0).unwrap().integrity, Integrity::Corrupt);
     }
 
     #[test]
