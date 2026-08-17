@@ -17,11 +17,13 @@
 
 extern crate alloc;
 
+pub mod activity;
 pub mod block_on;
 pub mod catalog;
 pub mod clock;
 pub mod cli_bindings;
 pub mod command;
+pub mod control;
 pub mod fatview;
 pub mod engine_config;
 pub mod manifest;

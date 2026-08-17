@@ -45,6 +45,22 @@ func init() {
 	platform.RegisterCommandSpec(countdownv1.AppServiceCLI)
 }
 
+// itoa without fmt: this runs once per tick and `fmt` pulls formatting machinery
+// into a component that has to fit on a badge. Writes into a caller-owned buffer
+// so nothing allocates on a path an app may run in a loop.
+func itoa(value int, buffer *[16]byte) string {
+	if value == 0 {
+		return "0 left"
+	}
+	digits := len(buffer)
+	for value > 0 && digits > 0 {
+		digits--
+		buffer[digits] = byte('0' + value%10)
+		value /= 10
+	}
+	return string(buffer[digits:]) + " left"
+}
+
 func handleCount(req *countdownv1.CountRequest) (*countdownv1.CountResponse, error) {
 	// NO PARSING. `from` is an int32 in the schema, so every tier delivers a
 	// number and this app never sees text it has to interpret — the CLI parses
@@ -81,6 +97,16 @@ func handleCount(req *countdownv1.CountRequest) (*countdownv1.CountResponse, err
 		// and an app that twiddles it produces visible activity without knowing
 		// blinking exists.
 		platform.SetStatus(1, byte(remaining), 0)
+
+		// AND IN WORDS, for a world that can show them. The dispatcher already
+		// publishes "count" — the command's name — so an app that says nothing
+		// still reports something true. This REFINES that, which is the only
+		// reason for an app to mention activity at all.
+		//
+		// It arrives while this command is still running: `emit` is an import,
+		// so the world sees it as it is set rather than when `count` returns.
+		var label [16]byte
+		platform.SetActivity(itoa(remaining, &label))
 
 		// THE SLEEP THIS APP EXISTS TO TEST. On a tier whose clock is a stub this
 		// returns immediately and the countdown finishes instantly — which is

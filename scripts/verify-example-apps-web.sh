@@ -26,7 +26,12 @@ for app in example-apps/*/; do
 	[ -d "$app/hosts/web/test" ] || continue
 	printf "\n  %s\n" "$name"
 
-	if ! ( cd "$app" && PATH="$BIN:$PATH" make build-web >/dev/null 2>&1 ); then
+	# Stream the build. A SKIPPED compiler error is how this script reported
+	# "notes: make build-web" with no reason on 2026-08-17 — notes referenced
+	# AppServiceCLI, the generator emits NotesServiceCLI, and the mismatch was
+	# thrown away. The native suite already prints go test; this one had been
+	# the only remaining /dev/null on a compile.
+	if ! ( cd "$app" && PATH="$BIN:$PATH" make build-web ); then
 		printf "  ${R}✗${Z} %s: make build-web\n" "$name"; fail=$((fail+1)); continue
 	fi
 	if ! ( cd "$app/hosts/web" && npm install --silent --no-audit --no-fund >/dev/null 2>&1 ); then

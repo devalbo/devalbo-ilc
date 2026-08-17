@@ -191,6 +191,100 @@ static NOTICE_SENT: AtomicBool = AtomicBool::new(false);
 
 const TRUNCATION_NOTICE: &[u8] = b"(log truncated -- later lines were dropped)\r\n";
 
+/// WHAT THE WORLD IS DOING, for anyone who asks (BADGE-CONTROL-PLAN D3).
+///
+/// An atomic rather than a field because the ANSWER is produced in the USB
+/// interrupt and the QUESTION is answered about main — which is the whole point:
+/// a world that could only answer between commands would go quiet exactly when
+/// somebody wants to know whether it is stuck.
+#[cfg(badge_control)]
+static ACTIVITY: AtomicUsize = AtomicUsize::new(0);
+
+/// Record what the world is doing now. Cheap enough to call at every stage.
+#[cfg(badge_control)]
+pub fn set_activity(activity: u32) {
+    ACTIVITY.store(activity as usize, Ordering::Relaxed);
+}
+
+/// Not compiled in when control is off, so callers need no `cfg` of their own.
+#[cfg(not(badge_control))]
+pub fn set_activity(_activity: u32) {}
+
+/// Bytes received but not yet consumed.
+///
+/// A frame may arrive split across USB packets, so what cannot be parsed yet has
+/// to be kept. Small: the only inbound messages are verbs and short arguments.
+#[cfg(badge_control)]
+static mut RX: [u8; 512] = [0; 512];
+#[cfg(badge_control)]
+static mut RX_LEN: usize = 0;
+
+/// Frames waiting to go out, and how much has gone.
+///
+/// A QUEUE, not a single buffer, because there are now two producers: replies to
+/// requests, and log lines nobody asked for (D8b). The CDC endpoint takes 64
+/// bytes at a time, so anything larger drains across several interrupts.
+///
+/// **FULL MEANS DROP, NEVER BLOCK (D8a).** A log frame is emitted from the
+/// report, which runs mid-bring-up and mid-command — blocking there would pause
+/// the world to talk about the world. Losing a frame is better than changing the
+/// timing of the thing being reported on, and `DROPPED` keeps the loss visible
+/// rather than silent.
+#[cfg(badge_control)]
+static mut TX: [u8; 2048] = [0; 2048];
+#[cfg(badge_control)]
+static mut TX_LEN: usize = 0;
+#[cfg(badge_control)]
+static mut TX_SENT: usize = 0;
+#[cfg(badge_control)]
+static DROPPED: AtomicUsize = AtomicUsize::new(0);
+
+/// Queue a frame, dropping it if there is no room.
+#[cfg(badge_control)]
+fn queue(frame: &[u8]) {
+    // A CRITICAL SECTION, because the two callers GENUINELY RACE.
+    //
+    // This function is reached from the report (main context) and from `answer`
+    // (the USB interrupt) — and an interrupt PREEMPTS main. An earlier version
+    // of this comment claimed they "run to completion without yielding, so they
+    // cannot interleave", which was simply false: the interrupt fires wherever
+    // main happens to be, including halfway through updating these lengths.
+    //
+    // The result was a badge that did not enumerate USB at all. A corrupted
+    // length made `copy_from_slice` panic, `panic-halt` stopped the core, and a
+    // dead board is indistinguishable from a hardware fault — the same shape of
+    // failure as the aliasing bug in this file earlier, and from the same cause:
+    // an invariant asserted rather than enforced.
+    //
+    // The section is a few dozen instructions. USB service is delayed by less
+    // than one packet time, which no host notices.
+    cortex_m::interrupt::free(|_| queue_locked(frame));
+}
+
+#[cfg(badge_control)]
+fn queue_locked(frame: &[u8]) {
+    // SAFETY: interrupts are masked by the caller, and this is a single core, so
+    // nothing else can be inside these statics.
+    let tx = unsafe { &mut *core::ptr::addr_of_mut!(TX) };
+    let len = unsafe { &mut *core::ptr::addr_of_mut!(TX_LEN) };
+    let sent = unsafe { &mut *core::ptr::addr_of_mut!(TX_SENT) };
+
+    // Reclaim what has already gone before deciding there is no room: a queue
+    // that never compacts fills up even when it is being drained faster than it
+    // is written.
+    if *sent > 0 {
+        tx.copy_within(*sent..*len, 0);
+        *len -= *sent;
+        *sent = 0;
+    }
+    if *len + frame.len() > tx.len() {
+        DROPPED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    tx[*len..*len + frame.len()].copy_from_slice(frame);
+    *len += frame.len();
+}
+
 /// Bring the CDC port up and hand it to the interrupt controller.
 ///
 /// CALL THIS EARLY — before the bring-up report, not after it. The whole point
@@ -279,9 +373,43 @@ fn service() {
     // one.
     device.poll(&mut [serial, reset]);
 
+    // A HOST JUST OPENED THE PORT: replay the run for it, once.
+    //
+    // `dtr` rises when a terminal opens the device and falls when it closes, so
+    // this is the moment — and the ONLY moment — that someone needs the history
+    // they missed. Replaying on a timer instead was noise; replaying never was
+    // the bug where a second reader saw an empty port and a healthy badge looked
+    // hung.
+    let open = serial.dtr();
+    if open && !WAS_OPEN.swap(true, Ordering::Relaxed) {
+        rewind();
+    } else if !open {
+        WAS_OPEN.store(false, Ordering::Relaxed);
+    }
+
     // Drain anything the host typed; an unread RX buffer stalls some stacks.
-    let mut discard = [0u8; 64];
-    let _ = serial.read(&mut discard);
+    let mut incoming = [0u8; 64];
+    let read = serial.read(&mut incoming).unwrap_or(0);
+
+    #[cfg(badge_control)]
+    {
+        control_receive(&incoming[..read]);
+        // A REPLY GOES BEFORE THE LOG. Somebody is waiting on it, and the log is
+        // a stream nobody is blocked on.
+        //
+        // THIS IS ONLY SAFE BECAUSE REPLIES ARE OCCASIONAL. Framed LOG LINES were
+        // added here and reverted: every report line queued one, so the queue was
+        // never empty, this early return fired on every service call, and the
+        // text log — the last-resort diagnostic — was never sent at all. The
+        // decision to frame the log stands (D8b); emitting it unconditionally
+        // does not. It needs subscriptions, so a world stays silent until a
+        // client asks.
+        if control_send(serial) {
+            return;
+        }
+    }
+    #[cfg(not(badge_control))]
+    let _ = read;
 
     // SAFETY: the ISR only ever READS the buffer, through methods that use the
     // published length. Main is the only writer.
@@ -305,6 +433,87 @@ fn service() {
         if let Ok(n) = serial.write(pending) {
             SENT.store(sent + n, Ordering::Relaxed);
         }
+        return;
+    }
+
+    // A HEARTBEAT, NOT A REPLAY.
+    //
+    // The first version of this re-sent the WHOLE LOG when idle, so that a
+    // terminal attached late saw the run. It worked and it was the wrong signal:
+    // 674 bytes to say "still here", repeated forever, and a reader could not
+    // tell a replay from a fresh run — which is the same ambiguity the heartbeat
+    // exists to remove.
+    //
+    // So the two needs are separated:
+    //
+    //   liveness  -> this line, small and unmistakable
+    //   history   -> replayed ONCE when a host opens the port (below)
+    //
+    // NOT APPENDED TO `LOG`. Written straight to the endpoint, because a
+    // heartbeat in the buffer would fill 8 KB with "still here" and truncate the
+    // run it was reporting on.
+    // DRIVEN BY TIME, NOT BY CALL COUNT.
+    //
+    // The first version counted service calls and never fired. `service` runs
+    // from the USB interrupt, and once there is nothing left to send the host's
+    // polls are NAK'd and generate almost no interrupts — so the counter crawled
+    // and a heartbeat that was supposed to prove liveness proved nothing.
+    //
+    // A clock is the right basis anyway: "every second" is what a person
+    // watching means, and it stays true however often this happens to run.
+    if HEARTBEAT_MS == 0 {
+        return;
+    }
+    let Some(clock) = dlc_platform_embedded::clock::installed() else {
+        return;
+    };
+    let now_us = clock();
+    let last = LAST_BEAT.load(Ordering::Relaxed) as u64;
+    if now_us.saturating_sub(last) >= HEARTBEAT_MS as u64 * 1_000 {
+        LAST_BEAT.store(now_us as usize, Ordering::Relaxed);
+        let uptime_ms = now_us / 1000;
+        let mut beat = LineBuffer::new();
+        use core::fmt::Write;
+        let _ = write!(beat, "~ alive {uptime_ms} ms\r\n");
+        let _ = serial.write(beat.as_bytes());
+    }
+}
+
+// HOW OFTEN TO SAY SO — a flash-time world parameter (build.rs). Zero disables
+// it, and the branch below compiles away entirely in that build.
+include!(concat!(env!("OUT_DIR"), "/heartbeat.rs"));
+
+/// Microseconds at the last heartbeat.
+static LAST_BEAT: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a host had the port open last time we looked.
+static WAS_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// A short line built without the heap, for the heartbeat.
+struct LineBuffer {
+    bytes: [u8; 40],
+    len: usize,
+}
+
+impl LineBuffer {
+    fn new() -> Self {
+        Self { bytes: [0; 40], len: 0 }
+    }
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+impl core::fmt::Write for LineBuffer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for byte in s.bytes() {
+            if self.len == self.bytes.len() {
+                break;
+            }
+            self.bytes[self.len] = byte;
+            self.len += 1;
+        }
+        Ok(())
     }
 }
 
@@ -438,4 +647,112 @@ impl<B: usb_device::bus::UsbBus> usb_device::class::UsbClass<B> for PicoToolRese
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The control channel (BADGE-CONTROL-PLAN Phase 1)
+// ---------------------------------------------------------------------------
+//
+// TRANSPORT ONLY. The framing, the decode and the answer's shape all live in
+// `dlc_platform_embedded::control`, because none of them names a peripheral and
+// a browser world needs the same ones (D6a). What is here is the part that is
+// genuinely about this board: a USB endpoint and two buffers.
+
+/// Take bytes off the wire and answer any complete frame.
+#[cfg(badge_control)]
+fn control_receive(bytes: &[u8]) {
+    use dlc_platform_embedded::control;
+
+    if bytes.is_empty() {
+        return;
+    }
+    // SAFETY: single core, and only this function touches RX. It runs from the
+    // interrupt and from `pump`, which cannot overlap on one core.
+    let rx = unsafe { &mut *core::ptr::addr_of_mut!(RX) };
+    let len = unsafe { &mut *core::ptr::addr_of_mut!(RX_LEN) };
+
+    for byte in bytes {
+        if *len < rx.len() {
+            rx[*len] = *byte;
+            *len += 1;
+        } else {
+            // FULL MEANS SOMETHING IS WRONG — a sender streaming garbage, or a
+            // frame larger than this world accepts. Dropping the oldest byte
+            // keeps the buffer moving so a later, valid frame still lands,
+            // rather than wedging until reset.
+            rx.copy_within(1.., 0);
+            rx[rx.len() - 1] = *byte;
+        }
+    }
+
+    loop {
+        match control::scan(&rx[..*len]) {
+            control::Found::Incomplete => return,
+            control::Found::Skip(n) => {
+                rx.copy_within(n..*len, 0);
+                *len -= n;
+            }
+            control::Found::Frame(request, consumed) => {
+                answer(&request, &rx[..*len]);
+                rx.copy_within(consumed..*len, 0);
+                *len -= consumed;
+                // One answer at a time: the outbound buffer holds one reply, and
+                // a second would overwrite the first before it was sent.
+                return;
+            }
+        }
+    }
+}
+
+/// Produce the reply for a request.
+#[cfg(badge_control)]
+fn answer(request: &dlc_platform_embedded::control::Request, _buffer: &[u8]) {
+    use dlc_platform_embedded::control;
+
+    let payload = match request.verb {
+        control::VERB_GET_WORLD_STATE => {
+            let uptime_ms = dlc_platform_embedded::clock::installed()
+                .map(|clock| clock() / 1000)
+                .unwrap_or(0);
+            let state = control::WorldState {
+                world: crate::WORLD.name(),
+                tier: "rp2350",
+                version: env!("CARGO_PKG_VERSION"),
+                config: &[
+                    ("screen", crate::world::screen_name()),
+                    ("input", crate::world::input_name()),
+                    ("text", crate::world::text_sink()),
+                ],
+                activity: ACTIVITY.load(Ordering::Relaxed) as u32,
+                app: "",
+                app_activity: dlc_platform_embedded::activity::get(),
+                uptime_ms,
+            };
+            control::response(true, "", &state.encode())
+        }
+        // A VERB THIS WORLD DOES NOT KNOW is answered, not ignored. A caller
+        // built against a newer proto gets a refusal naming the verb rather than
+        // a silence it has to time out on.
+        other => control::response(false, "unknown verb", &[other as u8]),
+    };
+
+    queue(&control::frame(control::KIND_RESPONSE, &payload));
+}
+
+/// Push any pending reply. Returns whether one is still outstanding.
+#[cfg(badge_control)]
+fn control_send(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool {
+    let tx = unsafe { &*core::ptr::addr_of!(TX) };
+    let tx_len = unsafe { &mut *core::ptr::addr_of_mut!(TX_LEN) };
+    let tx_sent = unsafe { &mut *core::ptr::addr_of_mut!(TX_SENT) };
+
+    if *tx_sent >= *tx_len {
+        *tx_len = 0;
+        *tx_sent = 0;
+        return false;
+    }
+    if let Ok(n) = serial.write(&tx[*tx_sent..*tx_len]) {
+        *tx_sent += n;
+    }
+    *tx_sent < *tx_len
 }

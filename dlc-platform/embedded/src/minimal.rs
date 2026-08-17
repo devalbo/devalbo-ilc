@@ -464,6 +464,15 @@ impl MinimalHost {
             "emit",
             |mut caller: wasmtime::StoreContextMut<'_, MinimalState>,
              (topic, payload): (String, Vec<u8>)| {
+                // THE RESERVED ACTIVITY TOPIC IS TAKEN AS IT PASSES.
+                //
+                // This runs while the guest is suspended inside `emit` — the only
+                // moment the value is worth having. Events are drained AFTER a
+                // command returns, and an activity report delivered then
+                // describes something that has already finished.
+                if topic == "ilc.activity" {
+                    crate::activity::set(&payload);
+                }
                 caller.data_mut().events.push((topic, payload));
                 Ok(())
             },

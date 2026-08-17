@@ -173,6 +173,16 @@ if [ "$want_firmware" = 1 ]; then
 	# different program rather than the same one with a flag — exactly the shape
 	# that rots when nothing builds it. The default build covers `keyboard`.
 	BADGE_INPUT=off try "badge firmware: no input surface" rp2350 --release
+
+	# BADGE_CONTROL compiles the control channel IN, and `off` (the default)
+	# compiles it out entirely — two different programs, so the default build
+	# does not cover this one (BADGE-CONTROL-PLAN D4).
+	BADGE_CONTROL=on try "badge firmware: control channel" rp2350 --release
+
+	# HEARTBEAT OFF compiles the beat out entirely, so the default build does not
+	# cover it — and a world that says nothing when idle is exactly the
+	# configuration a battery-powered badge would ship (BADGE-CONTROL-PLAN D8c).
+	BADGE_HEARTBEAT_MS=0 try "badge firmware: no heartbeat" rp2350 --release
 fi
 
 exit $rc

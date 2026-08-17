@@ -36,8 +36,10 @@ fn main() {
     println!("cargo::rerun-if-env-changed=BADGE_REGION");
     println!("cargo::rerun-if-env-changed=BADGE_WORLD");
     println!("cargo::rerun-if-env-changed=BADGE_BEAT_MS");
+    println!("cargo::rerun-if-env-changed=BADGE_HEARTBEAT_MS");
     println!("cargo::rerun-if-env-changed=BADGE_SCREEN");
     println!("cargo::rerun-if-env-changed=BADGE_INPUT");
+    println!("cargo::rerun-if-env-changed=BADGE_CONTROL");
 
     // Declared so that a typo in a `cfg` name is a warning rather than a branch
     // that quietly never compiles.
@@ -46,6 +48,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(badge_world_minimal)");
     println!("cargo::rustc-check-cfg=cfg(badge_screen_full)");
     println!("cargo::rustc-check-cfg=cfg(badge_input_off)");
+    println!("cargo::rustc-check-cfg=cfg(badge_control)");
 
     // WHICH WORLD (see src/world.rs). Flash-time on purpose: the two differ only
     // in presentation, and a runtime switch would carry both onto a board that
@@ -90,6 +93,24 @@ fn main() {
     // colour, so an input surface would make its advertisement a lie. Refused
     // here, where the message can name both flags, rather than compiling into a
     // world that offers a keyboard nobody can read.
+    // CAN THIS WORLD BE DRIVEN OVER THE CABLE (BADGE-CONTROL-PLAN D4)?
+    //
+    //   BADGE_CONTROL=on    answers control frames on the CDC port
+    //   BADGE_CONTROL=off   does not, and the code is not in the image (default)
+    //
+    // OFF BY DEFAULT, and compiled out rather than disabled. A channel that can
+    // invoke methods and press buttons is exactly as powerful as it sounds, and
+    // anyone with the cable gets it — so "this badge can be driven by whoever
+    // plugs in" is a claim somebody should have to make deliberately.
+    //
+    // Compiled out is a stronger property than present-and-disabled, which rests
+    // on a runtime check nobody audits.
+    match std::env::var("BADGE_CONTROL").unwrap_or_default().as_str() {
+        "on" => println!("cargo::rustc-cfg=badge_control"),
+        "" | "off" => {}
+        other => panic!("BADGE_CONTROL={other:?}: expected `on` or `off`"),
+    }
+
     let minimal = matches!(std::env::var("BADGE_WORLD").unwrap_or_default().as_str(), "minimal");
     if minimal && !input_off {
         if std::env::var("BADGE_INPUT").is_ok() {
@@ -139,6 +160,28 @@ fn main() {
         .ok()
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(0);
+    // HOW OFTEN THE WORLD SAYS IT IS ALIVE (usblog.rs, BADGE-CONTROL-PLAN D8c).
+    //
+    // A WORLD PARAMETER because the trade is the world's: a badge on a bench
+    // wants a beat a person can watch, one on a battery wants silence, and a
+    // test wants something faster than its own timeout. None of those is a
+    // default the firmware can pick for everyone.
+    //
+    //   BADGE_HEARTBEAT_MS=1000   the default — visible to a person, invisible on USB
+    //   BADGE_HEARTBEAT_MS=0      off; the world says nothing when idle
+    //
+    // Zero is OFF rather than "as fast as possible", which is the reading that
+    // would turn a typo into a firehose.
+    let heartbeat: u32 = std::env::var("BADGE_HEARTBEAT_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1_000);
+    std::fs::write(
+        out.join("heartbeat.rs"),
+        format!("/// Milliseconds between heartbeats; 0 disables them.\npub const HEARTBEAT_MS: u32 = {heartbeat};\n"),
+    )
+    .expect("writing heartbeat.rs");
+
     std::fs::write(
         out.join("beat.rs"),
         format!("/// Milliseconds between bring-up stages; 0 disables the pause entirely.\npub const BEAT_MS: u32 = {beat};\n"),

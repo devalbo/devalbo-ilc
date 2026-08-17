@@ -188,6 +188,11 @@ func TestMutationsEmitRecordChanged(t *testing.T) {
 	}
 	var got []event
 	platform.SetEventSink(func(topic string, payload []byte) {
+		// Dispatcher-derived: every Execute publishes ilc.activity once the
+		// command spec is registered. These tests pin DOMAIN events.
+		if topic == platform.ActivityTopic {
+			return
+		}
 		var e notesv1.RecordChangedEvent
 		if err := e.UnmarshalVT(payload); err != nil {
 			t.Errorf("event %q carried an undecodable payload: %v", topic, err)
@@ -228,7 +233,10 @@ func TestEventArrivesAfterTheWrite(t *testing.T) {
 	root := inTempRoot(t)
 
 	var seenAtEmit []byte
-	platform.SetEventSink(func(string, []byte) {
+	platform.SetEventSink(func(topic string, _ []byte) {
+		if topic == platform.ActivityTopic {
+			return
+		}
 		// Read the store from INSIDE the sink: this is the moment a host would
 		// forward, and whatever is on disk now is what a subscriber can see.
 		seenAtEmit, _ = os.ReadFile(filepath.Join(root, "records", "buy-milk.json"))
@@ -328,7 +336,12 @@ func TestNoOpUpdateIsSilent(t *testing.T) {
 	call(t, notesv1.MethodCreateRecord, &notesv1.CreateRecordRequest{Title: "Buy milk"}, nil)
 
 	var seen []string
-	platform.SetEventSink(func(topic string, _ []byte) { seen = append(seen, topic) })
+	platform.SetEventSink(func(topic string, _ []byte) {
+		if topic == platform.ActivityTopic {
+			return
+		}
+		seen = append(seen, topic)
+	})
 	t.Cleanup(func() { platform.SetEventSink(nil) })
 
 	var resp notesv1.UpdateRecordResponse

@@ -169,6 +169,11 @@ func Execute(method uint32, request []byte) Result {
 	if !ok {
 		return Result{Err: "unknown method_id " + strconv.FormatUint(uint64(method), 10)}
 	}
+	// SAY WHAT IS ABOUT TO RUN, so a world can report it for an app that never
+	// mentions activity (BADGE-CONTROL-PLAN D3a). Derived from the registered
+	// command spec rather than written into each handler: a hand-mirrored name
+	// is one an app can forget or leave stale after a rename.
+	publishDefaultActivity(method)
 	return h(request)
 }
 

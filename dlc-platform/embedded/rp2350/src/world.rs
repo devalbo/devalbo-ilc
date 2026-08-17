@@ -259,6 +259,24 @@ impl Capability {
 /// The badge always has a UART on the clip pads, so `none` here is only ever a
 /// deliberate choice by a world with no text capability at all (`minimal`),
 /// never an accident of layout.
+/// How the panel is divided, as a word. For the control channel (D3): a caller
+/// asking what this world is should get the same answer the build flag chose.
+pub const fn screen_name() -> &'static str {
+    match SCREEN {
+        ScreenLayout::Split => "split",
+        ScreenLayout::Full => "full",
+    }
+}
+
+/// Whether this world can collect text, as a word. Mirrors `BADGE_INPUT`.
+pub const fn input_name() -> &'static str {
+    if cfg!(badge_input_off) {
+        "off"
+    } else {
+        "keyboard"
+    }
+}
+
 pub const fn text_sink() -> &'static str {
     if crate::console::APP_ROWS > 0 {
         "display"

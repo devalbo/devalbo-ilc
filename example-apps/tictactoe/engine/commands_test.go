@@ -255,7 +255,12 @@ func TestRefusedMoveEmitsNothing(t *testing.T) {
 	play(t, 5)
 
 	var count int
-	platform.SetEventSink(func(string, []byte) { count++ })
+	platform.SetEventSink(func(topic string, _ []byte) {
+		if topic == platform.ActivityTopic {
+			return
+		}
+		count++
+	})
 	t.Cleanup(func() { platform.SetEventSink(nil) })
 
 	_ = call(t, tictactoev1.MethodPlay, &tictactoev1.PlayRequest{Square: 5}, nil)

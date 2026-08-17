@@ -251,6 +251,11 @@ where
         }
 
         cortex_m::asm::delay(sys_hz / 1000 * POLL_MS);
+        // SERVICE USB WHILE WAITING. The interrupt only fires on bus activity,
+        // and a host reading an idle port produces almost none — so a heartbeat
+        // driven by the interrupt alone never beats while a widget is waiting,
+        // which is most of the time a person is looking at the badge.
+        crate::usblog::pump();
         elapsed += POLL_MS;
 
         // ACTIVE-LOW: pulled up, a press shorts to ground. `unwrap_or(false)`

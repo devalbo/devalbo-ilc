@@ -257,6 +257,7 @@ impl<'a, U: Write> Report<'a, U> {
         let _ = writeln!(self.uart);
     }
 
+
     /// A line on the screen with no pass/fail — for a list, like the payloads
     /// found.
     pub fn item(&mut self, detail: Arguments<'_>) {

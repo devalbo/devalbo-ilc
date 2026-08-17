@@ -314,6 +314,34 @@ prove insufficient rather than be assumed to be.
 **The cost is a round trip before each input**, on a tier where a round trip is a Pulley-interpreted call.
 Cheap for a query that returns nine numbers; worth measuring before anything asks per keystroke.
 
+### D3e-a — CHOICES ARE `{id, label}` PAIRS, and a proto enum is just a static one
+
+The enum widget was blocked on a schema gap: `SpecFlag.enum_values` carries value
+NAMES and proto enum numbers are arbitrary, so a world knew what to show and not
+what to send.
+
+**The fix is to stop treating enums as special.** The general representation is a
+list of `{id, label}` — the id is what goes on the wire, the label is what a
+person reads — and that covers both sources:
+
+| where the set comes from | example | when it is known |
+| --- | --- | --- |
+| a proto enum | `{1, "north"}` | compile time, generated |
+| app state (D3e) | `{5, "centre"}` | per invocation |
+
+Tictactoe is the case that makes this obvious: its choices are squares 1..9,
+legal or not depending on the board. **They are not a proto enum and never could
+be** — no static declaration can express "not on turn three". So a mechanism
+built around proto enums would serve the easy case and miss the real one.
+
+**So `{id, label}` is the DEFAULT pattern and the enum is a degenerate instance
+of it.** The generator emits a proto enum's values as choices, numbers included,
+which closes the gap without a new field for `enum_values` to carry them. The
+world holds ONE picker, fed statically or dynamically, and cannot tell which.
+
+This is D3-general applied one level down: an enumerable set is an enumerable
+set, and where it came from is the app's business.
+
 ### D3f — THE WORLD ACCOMMODATES THE APP, never the reverse
 
 The principle behind D3b, D3d and D3e, stated once so it can be applied to cases they do not cover:
@@ -443,10 +471,6 @@ and the world gains a notion of "the current input", which is a larger idea than
 
 **What a badge does with two inputs.** Phase 4, but the answer shapes the prompt UI: three buttons cannot
 cycle two fields without a mode, and a mode is the beginning of a menu system.
-
-**Carrying enum NUMBERS, not just names.** D3f: `enum_values` is a list of names, and proto enum numbers
-are arbitrary. Adding the numbers is small and unblocks the enum widget; leaving it means a world can
-render a choice it cannot send, which is worse than not offering one.
 
 **Whether a reserved LAYOUT vocabulary is worth it.** A list picker renders any choice set; a 3x3 grid
 renders tictactoe's properly and needs the app to say "these nine values are a grid". That is new shared

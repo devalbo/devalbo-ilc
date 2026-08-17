@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package devalbo.ilc.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
+
+// Driving a WORLD from outside it (docs/BADGE-CONTROL-PLAN.md).
+//
+// Not a command surface. Every message here is a question about the WORLD — what
+// it is, what is on its screen, which button was pressed — and none of them
+// reach an app. An app cannot send these, cannot receive them, and cannot detect
+// that a world is being driven (D6).
+//
+// WORLD-AGNOSTIC ON PURPOSE (D1a). Nothing here mentions a pin, a panel or
+// flash: a badge answers over framed USB CDC, and a browser world answers over
+// postMessage, with the same vocabulary. That is what lets the same command
+// sequence drive both and their answers be compared (D7) — the difference
+// between an emulator and the hardware it emulates, rather than two intentions.
+//
+// NO SERVICE, and no method ids. These are not engine commands: the engine
+// dispatches `execute(method_id, bytes)` and knows nothing about worlds. Putting
+// a service here would put world verbs in the same numbering space as app
+// commands, which is exactly the confusion the two permanent bands exist to
+// prevent.
+
+// What a world is and what it is doing.
+//
+// The first verb, because it answers the question that has cost the most time:
+// "is the badge stuck, or is the log stuck?" A one-way log cannot distinguish
+// those, and three debugging cycles went on that ambiguity in one session.
+message WorldState {
+  // Which world this firmware was built as — `normal`, `minimal`. A browser
+  // world reports what it is emulating.
+  string world = 1;
+  // The tier's own name: `rp2350`, `browser`. The same value an app sees as
+  // `ILC_TIER`, so a test can assert the world advertises what it claims here.
+  string tier = 2;
+  // Firmware or host version.
+  string version = 3;
+
+  // Flash-time configuration, as strings so a new knob does not need a new
+  // field. These are the `BADGE_*` choices: screen layout, input mode, world.
+  map<string, string> config = 4;
+
+  // WHAT IT IS DOING RIGHT NOW — the field this verb exists for.
+  Activity activity = 5;
+
+  // The app currently instantiated, or empty.
+  string app = 6;
+
+  // WHAT THE APP LAST SAID IT WAS DOING, or empty.
+  //
+  // `activity` above is the WORLD's: `RUNNING` means a guest is executing and
+  // nothing more. A countdown on tick 3 and an import on file 400 are both
+  // `RUNNING`, which is exactly the resolution a stuck-or-slow question needs.
+  //
+  // Only the app knows, so the app says — through the reserved `ilc.activity`
+  // event, which arrives WHILE the command runs because `emit` is an import. The
+  // dispatcher publishes the command's name by default, so an app that never
+  // mentions activity still reports something true.
+  string app_activity = 8;
+
+  // Milliseconds since boot. Lets a caller tell a world that is progressing
+  // slowly from one that has stopped, without watching two answers arrive.
+  uint64 uptime_ms = 7;
+}
+
+// Where a world is in its own sequence.
+//
+// Coarse deliberately. A caller wants to know whether to keep waiting, not to
+// reconstruct the firmware's control flow — and a fine-grained enum would need
+// updating every time a stage moves.
+enum Activity {
+  ACTIVITY_UNSPECIFIED = 0;
+  // Bring-up: clocks, buses, the panel, the payload region.
+  ACTIVITY_STARTING = 1;
+  // Offering the payload menu.
+  ACTIVITY_CHOOSING = 2;
+  // Collecting input for a command.
+  ACTIVITY_COLLECTING = 3;
+  // Inside `execute`. A world reports this WHILE the guest runs, which is the
+  // whole reason the answer is serviced from `block_on`'s pump (D5).
+  ACTIVITY_RUNNING = 4;
+  // Finished, showing a result.
+  ACTIVITY_RESTING = 5;
+}
+
+// The envelope every control exchange uses.
+//
+// A VERB AND OPAQUE BYTES, rather than a oneof per request type. Two reasons,
+// and the second is the load-bearing one:
+//
+//   - a `no_std` world hand-decodes this, and a varint plus a length-delimited
+//     field is a few lines where a oneof is a dispatch table;
+//   - PASS-THROUGH (D2) carries an app's own request bytes, which have no schema
+//     the world knows. An envelope that insisted on typed payloads could not
+//     express the verb this protocol most needs.
+message ControlRequest {
+  Verb verb = 1;
+  // The verb's argument, if it takes one. For `VERB_EXECUTE` this is a
+  // `method_id` and the app's request bytes; for `VERB_GET_WORLD_STATE`, empty.
+  bytes payload = 2;
+}
+
+message ControlResponse {
+  // False means the world refused or could not answer. `error` says why, in
+  // words meant for a person reading a test failure.
+  bool ok = 1;
+  string error = 2;
+  // The verb's answer, encoded per verb. `VERB_GET_WORLD_STATE` returns an
+  // encoded `WorldState`.
+  bytes payload = 3;
+}
+
+// A line of a world's log, as a message rather than a string (D8b).
+//
+// The world still emits human-readable TEXT on the same wire, always, including
+// in builds with no control channel — a last-resort diagnostic that needs a
+// decoder is a weaker last resort. This is the machine-readable half, for a test
+// asserting on a stage rather than grepping prose, and for a browser world
+// rendering a live badge (D8).
+message LogLine {
+  // Milliseconds since boot, so a reader can see pacing without timestamping the
+  // moment it happened to read — which is how a countdown was once measured at
+  // 0 ms.
+  uint64 uptime_ms = 1;
+
+  // The stage this belongs to, if any: `manifest`, `execute 10000`. Empty for a
+  // free-standing note.
+  string stage = 2;
+
+  // What happened.
+  Level level = 3;
+
+  // The human-readable text, identical to what the text stream carried. Kept so
+  // a frame reader never has LESS than a terminal would have shown.
+  string text = 4;
+}
+
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  // A stage announced, resolved OK, or resolved FAIL. Named rather than a bool
+  // because "did not resolve" is a third state and the one that matters when a
+  // world hangs.
+  LEVEL_STAGE_OK = 1;
+  LEVEL_STAGE_FAIL = 2;
+  // Detail under a stage.
+  LEVEL_NOTE = 3;
+}
+
+// The verbs. Numbered permanently: a caller and a world may be built from
+// different revisions, and a renumbered verb would silently mean something else.
+enum Verb {
+  VERB_UNSPECIFIED = 0;
+  // What are you and what are you doing. Phase 1.
+  VERB_GET_WORLD_STATE = 1;
+  // Reserved, in the order the plan builds them. Declared rather than
+  // commented so the numbers are claimed before two branches claim the same one.
+  VERB_EXECUTE = 2;      // pass-through to the app (D2)
+  VERB_PRESS_BUTTON = 3; // drive the menu, keyboard, spinner
+  VERB_GET_SCREEN = 4;   // the panel's text, not its pixels
+  VERB_LIST_PAYLOADS = 5;
+  VERB_SELECT_PAYLOAD = 6;
+  VERB_REBOOT = 7;
+}
+
+// Frames a world sends WITHOUT being asked (D8).
+//
+// Everything above is request/response. A notification has no request to answer,
+// so it carries its own kind — and a reader that does not recognise one skips it
+// by wire type rather than desynchronising, which is what lets a world add
+// notifications a reader predates.
+enum Notice {
+  NOTICE_UNSPECIFIED = 0;
+  // A `LogLine`.
+  NOTICE_LOG = 1;
+}

@@ -416,6 +416,13 @@ fn main() -> ! {
     // demonstration that an import is a callback.
     dlc_platform_embedded::uart::set_echo(echo_to_log);
 
+    // AND WHILE A GUEST RUNS. `block_on` polls in a loop whenever the guest is
+    // suspended — inside a sleep, or waiting on a stream — and that loop is world
+    // code. Servicing USB there is what keeps the log flowing and the heartbeat
+    // beating during a command, which is exactly when somebody asks whether the
+    // badge is stuck.
+    dlc_platform_embedded::block_on::set_pump(usblog::pump);
+
     // POWER THE PANEL. GPIO41 gates the display's rail — verified by toggling it
     // under Pimoroni's firmware and watching the screen blank and return. Their
     // header calls it "I2C power for talking to RTC", which is what kept it out
@@ -500,6 +507,9 @@ fn main() -> ! {
     // taken for the report's lifetime.
     let log: &mut usblog::LogBuffer = unsafe { &mut *core::ptr::addr_of_mut!(LOG) };
     let mut sink = usblog::Tee(&mut uart, log);
+    // SAY WHAT THE WORLD IS DOING, at each transition. Without these a caller
+    // asking "are you stuck?" gets UNSPECIFIED, which is the question restated.
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_STARTING);
     let mut report = report::Report::new(
         &mut sink,
         screen,
@@ -647,16 +657,56 @@ fn main() -> ! {
     // THE SELECTION. Shown only when there is more than one app — one payload is
     // not a menu, it is a delay. It always times out and runs the highlighted
     // entry, so a badge nobody is touching still boots.
+    // EVERY BUTTON, OWNED ONCE, HERE.
+    //
+    // The menu and the keyboard SHARE pins — both want `a` and `down` — and a
+    // pin can only be moved once. That was invisible while the menu ran exactly
+    // once per boot; the moment a session could return to the menu, ownership
+    // had to move out to where both can borrow it.
+    //
+    // PULL-UP, not pull-down: the buttons short to ground (measured against
+    // Pimoroni's own firmware on the board — see menu.rs).
+    let mut pin_up = pins.gpio11.into_pull_up_input();
+    let mut pin_down = pins.gpio6.into_pull_up_input();
+    let mut pin_a = pins.gpio7.into_pull_up_input();
+    let mut pin_b = pins.gpio9.into_pull_up_input();
+    let mut pin_c = pins.gpio10.into_pull_up_input();
+    // UP LEAVES THE SESSION.
+    //
+    // NOT `HOME`, which was the first choice and a mistake `board.rs` had
+    // already warned about: gpio22 is the BOOTSEL button — "the one held for
+    // BOOTSEL, so it is not freely usable as a sixth input". Pressing it while
+    // running is harmless, but overloading "leave" onto the button people hold
+    // to flash the badge invites holding it across a reset and landing in the
+    // bootloader instead.
+    //
+    // `UP` is the button that has been kept free for this. keyboard.rs says why:
+    // an unused button is recoverable and a wrongly assigned one is a habit.
+    // THE APP LOOP — the outer half of a session (Phase 1).
+    //
+    // `HOME` used to park the badge forever. Now it comes back here, so a
+    // DIFFERENT app can run without a power cycle — which is the visible payoff
+    // of a session and the thing "one command and stop" cost.
+    //
+    // The instance is created inside this loop and dropped at the end of each
+    // pass. That is deliberate and it is the risky part: instantiation takes
+    // 2.9 MB of an 8 MB heap, so a session that leaks even a few hundred KB
+    // hangs two or three apps in — which looks like a hardware fault and is the
+    // worst thing here to debug. The heap is measured on every pass below for
+    // exactly that reason.
+    let heap_at_start = HEAP.used();
+    loop {
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_CHOOSING);
+    // BORROWED, not moved: the keyboard wants two of these back below.
     let mut buttons = menu::Buttons {
-        // PULL-UP, not pull-down: the buttons short to ground (measured against
-        // Pimoroni's own firmware on the board — see menu.rs).
-        up: pins.gpio11.into_pull_up_input(),
-        down: pins.gpio6.into_pull_up_input(),
-        a: pins.gpio7.into_pull_up_input(),
+        up: &mut pin_up,
+        down: &mut pin_down,
+        a: &mut pin_a,
     };
     let choice = report.with_screen_and_log(|screen, log| {
         menu::choose(&available, screen, &mut buttons, sys_hz, log)
     });
+    drop(buttons);
     let selected = available
         .get(choice)
         .or_else(|| available.default_choice().map(|(_, p)| p))
@@ -786,6 +836,37 @@ fn main() -> ! {
         }
     }
 
+    // THE KEYS OUTLIVE THE TURN. A session runs a command more than once, and
+    // moving the pins out of the menu's struct can only happen once — the type
+    // system says so, which is what forced this to be hoisted rather than
+    // rediscovered on the second iteration.
+    #[cfg(not(badge_input_off))]
+    let mut keys = keyboard::Keys {
+        a: &mut pin_a,
+        b: &mut pin_b,
+        c: &mut pin_c,
+        down: &mut pin_down,
+    };
+    // THE SESSION LOOP (SESSION-AND-SURFACE-PLAN Phase 1).
+    //
+    // The badge used to run ONE command and stop forever: no second command, no
+    // way back, no second app without a power cycle. Decision 31 always allowed
+    // better — `MinimalHost::execute` is documented as callable many times on one
+    // instance — and nothing called it twice.
+    //
+    // INSTANTIATE ONCE, EXECUTE MANY. Instantiation costs 2.9 MB and most of a
+    // second, and re-doing it per turn would also throw away the app's in-memory
+    // state between turns: tictactoe's board would reset on every move.
+    //
+    // The world drives; the app stays request/response (D2). An app cannot ask
+    // for another turn and does not know it got one.
+    let mut turn = 0u32;
+    // The last turn's verdict, so leaving the session can rest on the result the
+    // person actually saw rather than a default.
+    let mut last_status = Status::Idle;
+    loop {
+        turn += 1;
+
     // COLLECT INPUT — for the field THE APP ADVERTISES, not a hardcoded one.
     //
     // Phase 2 wired `name?` and field 1 as constants so the keyboard could be
@@ -794,17 +875,11 @@ fn main() -> ! {
     //
     // Now the world asks the engine what the command takes (method 5, generated
     // from the app's own .proto) and prompts for that, or skips entirely.
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_COLLECTING);
     let mut request = [0u8; 64];
     let mut request_len = 0usize;
     #[cfg(not(badge_input_off))]
     {
-        let menu::Buttons { up: _up, down, a } = buttons;
-        let mut keys = keyboard::Keys {
-            a,
-            b: pins.gpio9.into_pull_up_input(),
-            c: pins.gpio10.into_pull_up_input(),
-            down,
-        };
 
         // ASK WHAT THIS COMMAND TAKES. A zero-length request means "every
         // command"; naming the method keeps the answer to the one about to run.
@@ -821,6 +896,19 @@ fn main() -> ! {
         let flag = dlc_platform_embedded::spec::first_flag(answer);
 
         use dlc_platform_embedded::spec;
+        // WHERE THE VALUE CAME FROM, recorded by the WORLD rather than by
+        // whichever widget produced it.
+        //
+        // There is already more than one path in — a person at a widget, and
+        // shortly a control frame supplying request bytes directly (BADGE-CONTROL
+        // D2) or pressing buttons (D3). A log reading `input: 30` cannot tell
+        // those apart, and "did that come from the spinner or from the cable?"
+        // is exactly the question a failing test asks.
+        //
+        // Named at the point of ACCEPTANCE, so every path is described in the
+        // same words by the same line — a widget logging its own provenance
+        // would leave each new path free to invent its own phrasing, or forget.
+        let mut source = "none";
         match flag {
             // A STRING: the character strip. Prompted with the app's own help
             // text, so the question is the one the app would have asked.
@@ -829,6 +917,7 @@ fn main() -> ! {
                 let typed = report.with_screen_and_log(|screen, log| {
                     keyboard::read(prompt, screen, &mut keys, sys_hz, log)
                 });
+                source = "keyboard";
                 // AN EMPTY VALUE IS NOT SENT. Proto3 scalars have no presence, so
                 // an empty string and an absent field decode identically — and
                 // sending nothing keeps the request honest about what happened.
@@ -859,6 +948,7 @@ fn main() -> ! {
                 let value = report.with_screen_and_log(|screen, log| {
                     spinner::read(prompt, shape, start, screen, &mut keys, sys_hz, log)
                 });
+                source = "spinner";
                 // ZERO IS NOT SENT, for the same presence reason as an empty
                 // string: proto3 cannot tell a zero from an absent field, so the
                 // app takes its default either way and the shorter request is
@@ -878,14 +968,24 @@ fn main() -> ! {
             // field is skipped and the app takes its default, which is a no-op
             // rather than an error (Decision 33).
             Some(flag) => {
+                source = "unsupported";
                 report.note(format_args!("input: kind {} has no widget", flag.kind));
             }
 
             // NO INPUT ADVERTISED: no prompt, no delay, straight to the app.
             // This is the case that made a countdown wait 30 seconds for a name
             // it never wanted.
-            None => {}
+            None => {
+                source = "not advertised";
+            }
         }
+
+        // ONE LINE, EVERY TURN, WHATEVER HAPPENED. An empty request is as much a
+        // fact as a full one — an app that took its default did so because
+        // something decided not to send, and the log should say which something.
+        report.note(format_args!(
+            "input: {request_len} bytes from {source}"
+        ));
     }
 
     let method = selected.entry_method;
@@ -899,6 +999,7 @@ fn main() -> ! {
     // Added because a countdown that should have taken five seconds finished
     // instantly, and nothing outside the badge could tell whether the sleep was
     // ignored, resolved early, or never requested.
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_RUNNING);
     let started_us = now_us();
     let sleeps_before = dlc_platform_embedded::clock::sleeps();
     let stage = report.stage(report::Scope::Emulated, format_args!("execute {method}"));
@@ -972,7 +1073,9 @@ fn main() -> ! {
         }
     };
 
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_RESTING);
     let verdict = if report.failed() { Status::Broken } else { status };
+    last_status = verdict;
     report.finish(verdict);
 
     // THE LAST FRAME, and it is where the two worlds visibly differ.
@@ -995,6 +1098,11 @@ fn main() -> ! {
     // does not have. So when the app prints nothing, the HOST says what it knows
     // — which app, which method, and what it cost.
     if WORLD.can(world::Capability::Text) {
+        // THROUGH THE REPORT, not around it. The report holds `&mut screen` for its
+        // whole life, and once a session loop uses the report AFTER this point
+        // the borrow no longer ends here — so reaching for the panel directly
+        // stopped compiling, correctly.
+        report.with_screen_and_log(|screen, _log| {
         if let Some(panel) = screen.as_mut() {
             let mut summary = usblog::LogBuffer::new();
             let text = if output_len > 0 {
@@ -1010,6 +1118,7 @@ fn main() -> ! {
             };
             console::render(panel, verdict, selected.name, text);
         }
+        });
         // The backlight still carries the status for a badge whose panel failed.
         use embedded_hal::digital::OutputPin;
         let _ = if verdict.backlight_on() {
@@ -1017,11 +1126,104 @@ fn main() -> ! {
         } else {
             backlight.set_low()
         };
-        loop {
-            cortex_m::asm::wfi();
+    }
+
+    // WAIT FOR WHAT TO DO NEXT, rather than parking forever.
+    //
+    // This was `loop { wfi() }` — the badge's whole afterlife. Now it is the end
+    // of a TURN: B runs the command again, HOME leaves.
+    // B ENDS A TURN in both builds: a world with no input surface cannot collect
+    // a value, but it can still run the command again. Reached THROUGH `keys`
+    // where that exists, because it holds the borrow — two mutable paths to one
+    // pin is exactly what the borrow checker is for.
+    #[cfg(not(badge_input_off))]
+    let next = wait_for_turn(&mut keys.b, &mut pin_up, sys_hz);
+    #[cfg(badge_input_off)]
+    let next = wait_for_turn(&mut pin_b, &mut pin_up, sys_hz);
+    match next {
+        Turn::Again => {
+            report.note(format_args!("session: turn {} finished, again", turn));
+            continue;
+        }
+        Turn::Leave => {
+            report.note(format_args!("session: left after {turn} turn(s)"));
+            break;
         }
     }
-    rest(&mut backlight, screen, status, sys_hz);
+    }
+
+    // LEAVING THE SESSION — tear the instance down and go back to the menu.
+    //
+    // Dropping `host` releases the guest's linear memory and everything Wasmtime
+    // allocated for it. Measured rather than assumed: a leak here is invisible
+    // until the heap runs out, and by then the cause is several apps behind.
+    drop(host);
+    dlc_platform_embedded::activity::clear();
+    let leaked = HEAP.used().saturating_sub(heap_at_start);
+    report.note(format_args!(
+        "session: ended after {turn} turn(s), {} KB not reclaimed",
+        leaked / 1024
+    ));
+    }
+}
+
+/// What a person asked for at the end of a turn.
+enum Turn {
+    /// Run the command again.
+    Again,
+    /// Leave the session.
+    Leave,
+}
+
+/// Wait at the end of a turn.
+///
+/// BLOCKS RATHER THAN TIMING OUT, deliberately, and it is the opposite of every
+/// other wait in this firmware. The menu and the input widgets time out because a
+/// badge nobody is touching must still make progress — it has not run the app
+/// yet. Here the app HAS run and its result is on screen, so there is nothing to
+/// make progress toward: timing out would clear a result nobody had read.
+fn wait_for_turn<AGAIN, LEAVE>(again: &mut AGAIN, leave: &mut LEAVE, sys_hz: u32) -> Turn
+where
+    AGAIN: embedded_hal::digital::InputPin,
+    LEAVE: embedded_hal::digital::InputPin,
+{
+    // DEBOUNCE IS A WORLD CONCERN, and this is the third place that is true: an
+    // app never sees a button, only a request field, so it could not debounce
+    // even if it wanted to — and on a browser world or a control frame there is
+    // nothing to debounce.
+    //
+    // 40 ms MATCHES THE WIDGETS, and the first version of this used 20, which
+    // was a bug: sampling faster than a switch bounces means the release-wait
+    // below can exit on a transient high and then read the SAME press as a new
+    // one. That is the one-press-two-actions bug this function exists to
+    // prevent, reintroduced by polling too fast.
+    const POLL_MS: u32 = 40;
+    // And a release must be STABLE, not merely observed once. Two consecutive
+    // quiet samples cost 80 ms nobody notices and remove the whole class.
+    let mut quiet = 0u32;
+    while quiet < 2 {
+        cortex_m::asm::delay(sys_hz / 1000 * POLL_MS);
+        if again.is_low().unwrap_or(false) || leave.is_low().unwrap_or(false) {
+            quiet = 0;
+        } else {
+            quiet += 1;
+        }
+    }
+    loop {
+        cortex_m::asm::delay(sys_hz / 1000 * POLL_MS);
+        // SERVICE USB FROM HERE TOO. The interrupt only fires on bus activity,
+        // and a host reading an idle port gets NAKs that generate almost none —
+        // so a heartbeat driven purely by the interrupt never beats. This loop
+        // runs every 40 ms whatever the bus is doing, which is exactly the
+        // regularity a heartbeat needs.
+        usblog::pump();
+        if leave.is_low().unwrap_or(false) {
+            return Turn::Leave;
+        }
+        if again.is_low().unwrap_or(false) {
+            return Turn::Again;
+        }
+    }
 }
 
 // MILESTONE 3 STARTS HERE, and this note is the handover:

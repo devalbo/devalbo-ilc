@@ -68,7 +68,7 @@ func init() {
 	// was never built for, or a browser that would otherwise hand-write an
 	// <input> per field. Without this the description is stripped from the
 	// wasm as dead code, because only the native CLI referenced it.
-	platform.RegisterCommandSpec(notesv1.AppServiceCLI)
+	platform.RegisterCommandSpec(notesv1.NotesServiceCLI)
 }
 
 func handleCreateRecord(req *notesv1.CreateRecordRequest) (*notesv1.CreateRecordResponse, error) {
