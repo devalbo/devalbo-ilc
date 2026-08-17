@@ -166,124 +166,64 @@ use rp235x_hal as hal;
 // about an unlinked crate, which points nowhere near the cause.
 use hal::pac::interrupt;
 
-/// The allocator must outlive the device and the port that borrow from it, and
-/// both live for the rest of the program — so it is a static, which is the
-/// standard shape for `usb-device` on this family.
+/// EVERYTHING THE USB SERVICE TOUCHES, in one cell.
 ///
-/// SAFETY for all three: written exactly once by `start`, before the interrupt
-/// is unmasked, and read only by the ISR afterwards. Single core, and `start`
-/// refuses a second call.
-static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>> = None;
-static mut USB_SERIAL: Option<usbd_serial::SerialPort<hal::usb::UsbBus>> = None;
-static mut USB_RESET: Option<PicoToolReset<'static, hal::usb::UsbBus>> = None;
-static mut USB_DEVICE: Option<usb_device::device::UsbDevice<hal::usb::UsbBus>> = None;
+/// It was four `static mut`s reached through `addr_of_mut!`, and `service` was
+/// called from BOTH the interrupt and `pump()`. `usb-device`'s `poll` and
+/// `write` are not reentrant, so the interrupt preempting main mid-call
+/// corrupted the stack — output stopped the instant a widget started pumping,
+/// and the badge looked hung while it was working perfectly.
+///
+/// ONE CELL RATHER THAN FOUR, because they are only ever used together and four
+/// separately-guarded values would let a caller take two and think it was safe.
+/// See `shared.rs` for what that guarantee is and what it costs.
+struct Usb {
+    /// The allocator must outlive the device and the port that borrow from it.
+    /// `'static` because it lives here for the rest of the program.
+    bus: Option<&'static usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>>,
+    serial: Option<usbd_serial::SerialPort<'static, hal::usb::UsbBus>>,
+    device: Option<usb_device::device::UsbDevice<'static, hal::usb::UsbBus>>,
+    reset: Option<PicoToolReset<'static, hal::usb::UsbBus>>,
+}
+
+static USB: crate::shared::Shared<Usb> = crate::shared::Shared::new(Usb {
+    bus: None,
+    serial: None,
+    device: None,
+    reset: None,
+});
+
+/// The allocator itself, which the borrows above point into.
+///
+/// Still a `static mut`, and it is the one place that cannot be a `Shared`: the
+/// device and the port hold `&'static` references INTO it for their whole lives,
+/// so it can never be handed out mutably again. It is written exactly once, in
+/// `start`, before the interrupt is unmasked — and never touched afterwards.
+static mut USB_BUS_STORAGE: Option<usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>> = None;
+
+/// WHAT THE WORLD IS DOING, for anyone who asks (BADGE-CONTROL-PLAN D3).
+///
+/// An atomic, and compiled in whatever the control setting: the callers are
+/// scattered through the bring-up and a `cfg` at each one would be five places
+/// to forget. Without a control channel nothing reads it, which costs a word.
+static ACTIVITY: AtomicUsize = AtomicUsize::new(0);
+
+/// Record what the world is doing now. Cheap enough to call at every stage.
+pub fn set_activity(activity: u32) {
+    ACTIVITY.store(activity as usize, Ordering::Relaxed);
+}
 
 /// How much of the log the host has already been given.
 ///
-/// Touched only by the ISR, so it needs no synchronisation with main — but it is
-/// an atomic anyway, because the repeat-on-idle logic below resets it and a
-/// plain `static mut` read from one context and reset from another is exactly
-/// the pattern that stops being true when someone adds a second caller.
+/// An atomic rather than a `Shared`: it is a single word, and a torn read is
+/// impossible. The values that needed guarding were the ones with INVARIANTS
+/// between them — a buffer and its length, a device and its endpoints.
 static SENT: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether the truncation notice has been delivered ahead of the body.
 static NOTICE_SENT: AtomicBool = AtomicBool::new(false);
 
 const TRUNCATION_NOTICE: &[u8] = b"(log truncated -- later lines were dropped)\r\n";
-
-/// WHAT THE WORLD IS DOING, for anyone who asks (BADGE-CONTROL-PLAN D3).
-///
-/// An atomic rather than a field because the ANSWER is produced in the USB
-/// interrupt and the QUESTION is answered about main — which is the whole point:
-/// a world that could only answer between commands would go quiet exactly when
-/// somebody wants to know whether it is stuck.
-#[cfg(badge_control)]
-static ACTIVITY: AtomicUsize = AtomicUsize::new(0);
-
-/// Record what the world is doing now. Cheap enough to call at every stage.
-#[cfg(badge_control)]
-pub fn set_activity(activity: u32) {
-    ACTIVITY.store(activity as usize, Ordering::Relaxed);
-}
-
-/// Not compiled in when control is off, so callers need no `cfg` of their own.
-#[cfg(not(badge_control))]
-pub fn set_activity(_activity: u32) {}
-
-/// Bytes received but not yet consumed.
-///
-/// A frame may arrive split across USB packets, so what cannot be parsed yet has
-/// to be kept. Small: the only inbound messages are verbs and short arguments.
-#[cfg(badge_control)]
-static mut RX: [u8; 512] = [0; 512];
-#[cfg(badge_control)]
-static mut RX_LEN: usize = 0;
-
-/// Frames waiting to go out, and how much has gone.
-///
-/// A QUEUE, not a single buffer, because there are now two producers: replies to
-/// requests, and log lines nobody asked for (D8b). The CDC endpoint takes 64
-/// bytes at a time, so anything larger drains across several interrupts.
-///
-/// **FULL MEANS DROP, NEVER BLOCK (D8a).** A log frame is emitted from the
-/// report, which runs mid-bring-up and mid-command — blocking there would pause
-/// the world to talk about the world. Losing a frame is better than changing the
-/// timing of the thing being reported on, and `DROPPED` keeps the loss visible
-/// rather than silent.
-#[cfg(badge_control)]
-static mut TX: [u8; 2048] = [0; 2048];
-#[cfg(badge_control)]
-static mut TX_LEN: usize = 0;
-#[cfg(badge_control)]
-static mut TX_SENT: usize = 0;
-#[cfg(badge_control)]
-static DROPPED: AtomicUsize = AtomicUsize::new(0);
-
-/// Queue a frame, dropping it if there is no room.
-#[cfg(badge_control)]
-fn queue(frame: &[u8]) {
-    // A CRITICAL SECTION, because the two callers GENUINELY RACE.
-    //
-    // This function is reached from the report (main context) and from `answer`
-    // (the USB interrupt) — and an interrupt PREEMPTS main. An earlier version
-    // of this comment claimed they "run to completion without yielding, so they
-    // cannot interleave", which was simply false: the interrupt fires wherever
-    // main happens to be, including halfway through updating these lengths.
-    //
-    // The result was a badge that did not enumerate USB at all. A corrupted
-    // length made `copy_from_slice` panic, `panic-halt` stopped the core, and a
-    // dead board is indistinguishable from a hardware fault — the same shape of
-    // failure as the aliasing bug in this file earlier, and from the same cause:
-    // an invariant asserted rather than enforced.
-    //
-    // The section is a few dozen instructions. USB service is delayed by less
-    // than one packet time, which no host notices.
-    cortex_m::interrupt::free(|_| queue_locked(frame));
-}
-
-#[cfg(badge_control)]
-fn queue_locked(frame: &[u8]) {
-    // SAFETY: interrupts are masked by the caller, and this is a single core, so
-    // nothing else can be inside these statics.
-    let tx = unsafe { &mut *core::ptr::addr_of_mut!(TX) };
-    let len = unsafe { &mut *core::ptr::addr_of_mut!(TX_LEN) };
-    let sent = unsafe { &mut *core::ptr::addr_of_mut!(TX_SENT) };
-
-    // Reclaim what has already gone before deciding there is no room: a queue
-    // that never compacts fills up even when it is being drained faster than it
-    // is written.
-    if *sent > 0 {
-        tx.copy_within(*sent..*len, 0);
-        *len -= *sent;
-        *sent = 0;
-    }
-    if *len + frame.len() > tx.len() {
-        DROPPED.fetch_add(1, Ordering::Relaxed);
-        return;
-    }
-    tx[*len..*len + frame.len()].copy_from_slice(frame);
-    *len += frame.len();
-}
 
 /// Bring the CDC port up and hand it to the interrupt controller.
 ///
@@ -302,28 +242,30 @@ pub fn start(
     clock: hal::clocks::UsbClock,
     resets: &mut hal::pac::RESETS,
 ) {
-    // SAFETY: single core, interrupt not yet unmasked, so nothing else can be
-    // looking at these.
-    unsafe {
-        if (*core::ptr::addr_of!(USB_BUS)).is_some() {
-            // A second call would leak the first device and hand the ISR a
-            // dangling borrow. Refusing is the only safe answer and this is a
-            // programming error, not a runtime condition.
+    // SAFETY: single core, and the interrupt is not unmasked until the end of
+    // this function, so nothing else can be looking at the storage.
+    let bus_ref: &'static usb_device::bus::UsbBusAllocator<hal::usb::UsbBus> = unsafe {
+        if (*core::ptr::addr_of!(USB_BUS_STORAGE)).is_some() {
+            // A second call would leak the first device and leave the interrupt
+            // holding a dangling borrow. This is a programming error, not a
+            // runtime condition, and refusing is the only safe answer.
             return;
         }
-
-        let bus = usb_device::bus::UsbBusAllocator::new(hal::usb::UsbBus::new(
-            usb, dpram, clock, true, resets,
+        USB_BUS_STORAGE = Some(usb_device::bus::UsbBusAllocator::new(
+            hal::usb::UsbBus::new(usb, dpram, clock, true, resets),
         ));
-        USB_BUS = Some(bus);
-        let bus_ref = (*core::ptr::addr_of!(USB_BUS)).as_ref().unwrap();
+        (*core::ptr::addr_of!(USB_BUS_STORAGE)).as_ref().unwrap()
+    };
 
-        // ORDER MATTERS: the port must be allocated before the device is built,
-        // because the device enumerates the interfaces that exist at build time.
-        // Build the device first and the host sees no CDC endpoints at all.
-        USB_SERIAL = Some(usbd_serial::SerialPort::new(bus_ref));
-        USB_RESET = Some(PicoToolReset::new(bus_ref));
-        USB_DEVICE = Some(
+    USB.with(|state| {
+        state.bus = Some(bus_ref);
+        // ORDER MATTERS: the port and the reset interface must be allocated
+        // BEFORE the device is built, because the device enumerates the
+        // interfaces that exist at build time. Build it first and the host sees
+        // a device with no endpoints.
+        state.serial = Some(usbd_serial::SerialPort::new(bus_ref));
+        state.reset = Some(PicoToolReset::new(bus_ref));
+        state.device = Some(
             usb_device::device::UsbDeviceBuilder::new(
                 bus_ref,
                 // 0x2e8a/0x000a — Raspberry Pi's vendor id, which picotool
@@ -335,15 +277,16 @@ pub fn start(
                 .product("DLC badge bring-up")
                 .serial_number("ilc")])
             .unwrap()
-            // COMPOSITE, because there are now two functions on this cable: the
-            // CDC log and picotool's reset interface. Declaring CDC at the DEVICE
-            // level would tell a host the whole device is a serial port, and the
-            // vendor interface beside it becomes a descriptor the host has no
-            // reason to bind a driver to.
+            // COMPOSITE: there are two functions on this cable now, the CDC log
+            // and picotool's reset interface. Declaring CDC at the DEVICE level
+            // would tell a host the whole device is a serial port.
             .composite_with_iads()
             .build(),
         );
+    });
 
+    // SAFETY: everything the interrupt reads is published above.
+    unsafe {
         cortex_m::peripheral::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
     }
 }
@@ -354,13 +297,17 @@ pub fn start(
 /// badge which finishes normally keeps draining even if interrupts were never
 /// unmasked — a belt-and-braces path that costs one function call.
 fn service() {
-    // SAFETY: `start` published these before unmasking, and only this function
-    // touches them afterwards.
-    let (Some(device), Some(serial), Some(reset)) = (
-        unsafe { (*core::ptr::addr_of_mut!(USB_DEVICE)).as_mut() },
-        unsafe { (*core::ptr::addr_of_mut!(USB_SERIAL)).as_mut() },
-        unsafe { (*core::ptr::addr_of_mut!(USB_RESET)).as_mut() },
-    ) else {
+    // TRY, DO NOT INSIST. The interrupt and `pump()` both land here, and if one
+    // finds the other mid-update it has nothing useful to do with the value —
+    // and every reason not to bring the board down over it. Skipping costs one
+    // service call; panicking costs the badge.
+    USB.try_with(service_locked);
+}
+
+fn service_locked(usb: &mut Usb) {
+    let (Some(device), Some(serial), Some(reset)) =
+        (usb.device.as_mut(), usb.serial.as_mut(), usb.reset.as_mut())
+    else {
         return;
     };
 
@@ -527,6 +474,10 @@ pub fn rewind() {
 }
 
 /// Service the port from outside the interrupt. See `service`.
+///
+/// The exclusion lives in `Shared` now, not here — which is the point of the
+/// refactor: a caller cannot forget it, because there is no way to reach the
+/// device without it.
 pub fn pump() {
     service();
 }
@@ -658,6 +609,37 @@ impl<B: usb_device::bus::UsbBus> usb_device::class::UsbClass<B> for PicoToolRese
 // a browser world needs the same ones (D6a). What is here is the part that is
 // genuinely about this board: a USB endpoint and two buffers.
 
+/// The control channel's buffers, guarded together (BUG 2 in `shared.rs`).
+///
+/// These were four `static mut`s written from the interrupt AND from main, with
+/// a comment claiming they could not interleave. They could, and both channels
+/// went silent when they did.
+///
+/// ONE CELL because the invariants are BETWEEN them: a buffer and its length, a
+/// queue and how much of it has gone. Guarding them separately would let a
+/// caller take one and believe it was safe.
+#[cfg(badge_control)]
+struct Control {
+    /// Bytes received but not yet consumed. A frame may arrive split across USB
+    /// packets, so what cannot be parsed yet has to be kept.
+    rx: [u8; 512],
+    rx_len: usize,
+    /// A reply waiting to go out, and how much of it has gone. The CDC endpoint
+    /// takes 64 bytes at a time, so a reply drains across several interrupts.
+    tx: [u8; 512],
+    tx_len: usize,
+    tx_sent: usize,
+}
+
+#[cfg(badge_control)]
+static CONTROL: crate::shared::Shared<Control> = crate::shared::Shared::new(Control {
+    rx: [0; 512],
+    rx_len: 0,
+    tx: [0; 512],
+    tx_len: 0,
+    tx_sent: 0,
+});
+
 /// Take bytes off the wire and answer any complete frame.
 #[cfg(badge_control)]
 fn control_receive(bytes: &[u8]) {
@@ -666,47 +648,57 @@ fn control_receive(bytes: &[u8]) {
     if bytes.is_empty() {
         return;
     }
-    // SAFETY: single core, and only this function touches RX. It runs from the
-    // interrupt and from `pump`, which cannot overlap on one core.
-    let rx = unsafe { &mut *core::ptr::addr_of_mut!(RX) };
-    let len = unsafe { &mut *core::ptr::addr_of_mut!(RX_LEN) };
-
-    for byte in bytes {
-        if *len < rx.len() {
-            rx[*len] = *byte;
-            *len += 1;
-        } else {
-            // FULL MEANS SOMETHING IS WRONG — a sender streaming garbage, or a
-            // frame larger than this world accepts. Dropping the oldest byte
-            // keeps the buffer moving so a later, valid frame still lands,
-            // rather than wedging until reset.
-            rx.copy_within(1.., 0);
-            rx[rx.len() - 1] = *byte;
-        }
-    }
-
-    loop {
-        match control::scan(&rx[..*len]) {
-            control::Found::Incomplete => return,
-            control::Found::Skip(n) => {
-                rx.copy_within(n..*len, 0);
-                *len -= n;
-            }
-            control::Found::Frame(request, consumed) => {
-                answer(&request, &rx[..*len]);
-                rx.copy_within(consumed..*len, 0);
-                *len -= consumed;
-                // One answer at a time: the outbound buffer holds one reply, and
-                // a second would overwrite the first before it was sent.
-                return;
+    CONTROL.with(|c| {
+        for byte in bytes {
+            if c.rx_len < c.rx.len() {
+                let at = c.rx_len;
+                c.rx[at] = *byte;
+                c.rx_len += 1;
+            } else {
+                // FULL MEANS SOMETHING IS WRONG — a sender streaming garbage, or
+                // a frame larger than this world accepts. Dropping the oldest
+                // byte keeps the buffer moving so a later, valid frame still
+                // lands, rather than wedging until reset.
+                c.rx.copy_within(1.., 0);
+                let last = c.rx.len() - 1;
+                c.rx[last] = *byte;
             }
         }
-    }
+
+        loop {
+            match control::scan(&c.rx[..c.rx_len]) {
+                control::Found::Incomplete => return,
+                control::Found::Skip(n) => {
+                    c.rx.copy_within(n..c.rx_len, 0);
+                    c.rx_len -= n;
+                }
+                control::Found::Frame(request, consumed) => {
+                    let reply = answer(&request);
+                    c.rx.copy_within(consumed..c.rx_len, 0);
+                    c.rx_len -= consumed;
+                    // Queue it here, inside the same section, so a reply cannot
+                    // be overwritten by a second frame arriving between the two.
+                    let n = reply.len().min(c.tx.len());
+                    c.tx[..n].copy_from_slice(&reply[..n]);
+                    c.tx_len = n;
+                    c.tx_sent = 0;
+                    // ONE ANSWER AT A TIME: the outbound buffer holds one reply,
+                    // and a second would overwrite the first before it was sent.
+                    return;
+                }
+            }
+        }
+    });
 }
 
 /// Produce the reply for a request.
+///
+/// PURE: it reads world state and returns bytes, touching no buffers. That is
+/// what lets the caller hold the control cell across the whole receive-and-queue
+/// step without this reaching for it too — which would be a reentrant borrow and
+/// a panic.
 #[cfg(badge_control)]
-fn answer(request: &dlc_platform_embedded::control::Request, _buffer: &[u8]) {
+fn answer(request: &dlc_platform_embedded::control::Request) -> alloc::vec::Vec<u8> {
     use dlc_platform_embedded::control;
 
     let payload = match request.verb {
@@ -735,24 +727,21 @@ fn answer(request: &dlc_platform_embedded::control::Request, _buffer: &[u8]) {
         // a silence it has to time out on.
         other => control::response(false, "unknown verb", &[other as u8]),
     };
-
-    queue(&control::frame(control::KIND_RESPONSE, &payload));
+    control::frame(control::KIND_RESPONSE, &payload)
 }
 
 /// Push any pending reply. Returns whether one is still outstanding.
 #[cfg(badge_control)]
 fn control_send(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool {
-    let tx = unsafe { &*core::ptr::addr_of!(TX) };
-    let tx_len = unsafe { &mut *core::ptr::addr_of_mut!(TX_LEN) };
-    let tx_sent = unsafe { &mut *core::ptr::addr_of_mut!(TX_SENT) };
-
-    if *tx_sent >= *tx_len {
-        *tx_len = 0;
-        *tx_sent = 0;
-        return false;
-    }
-    if let Ok(n) = serial.write(&tx[*tx_sent..*tx_len]) {
-        *tx_sent += n;
-    }
-    *tx_sent < *tx_len
+    CONTROL.with(|c| {
+        if c.tx_sent >= c.tx_len {
+            c.tx_len = 0;
+            c.tx_sent = 0;
+            return false;
+        }
+        if let Ok(n) = serial.write(&c.tx[c.tx_sent..c.tx_len]) {
+            c.tx_sent += n;
+        }
+        c.tx_sent < c.tx_len
+    })
 }

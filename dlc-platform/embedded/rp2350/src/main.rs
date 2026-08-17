@@ -49,6 +49,7 @@ mod payload;
 mod platform;
 mod psram;
 mod report;
+mod shared;
 mod world;
 
 use world::{Status, WORLD};
