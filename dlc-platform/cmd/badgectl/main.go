@@ -16,8 +16,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
+	"syscall"
 	"time"
 
 	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
@@ -58,18 +59,70 @@ func main() {
 	}
 }
 
-func run(port string, wait time.Duration) error {
-	// RAW MODE FIRST. macOS puts a tty in canonical mode by default, which
-	// buffers by line and rewrites control characters — both fatal to a binary
-	// frame. `stty` is the portable way to say otherwise without taking a
-	// dependency on a serial library for one flag.
-	if out, err := exec.Command("stty", "-f", port, "raw", "-echo").CombinedOutput(); err != nil {
-		return fmt.Errorf("stty %s: %v: %s", port, err, out)
+// openRaw opens the port and puts it in raw mode ON THE DESCRIPTOR WE KEEP.
+//
+// # The bug this fixes
+//
+// The previous version ran `stty` and then opened the port:
+//
+//	exec.Command("stty", "-f", port, "raw", "-echo").Run()
+//	file, _ := os.OpenFile(port, os.O_RDWR, 0)
+//
+// `stty -f` opens the device, applies the settings, and CLOSES it. A tty's line
+// discipline is reset when its last descriptor closes, so by the time we opened
+// the port the raw mode we had just asked for was gone and we were talking to a
+// cooked terminal. The settings were real, applied to the right device, and
+// discarded a microsecond later — which is why the command looked correct in
+// review and in `stty -f <port> -a` run by hand afterwards.
+//
+// A cooked tty does not fail loudly. It CORRUPTS SELECTIVELY:
+//
+//   - OPOST/ONLCR rewrites 0x0A to 0x0D 0x0A on the way out, so any frame whose
+//     length, checksum or payload happens to contain a newline byte arrives one
+//     byte longer than its header claims.
+//   - ICRNL rewrites 0x0D to 0x0A on the way in, corrupting replies.
+//   - IXON eats 0x11 and 0x13 as flow control, so those bytes never arrive at all.
+//
+// Frames containing none of those bytes go through untouched. That is the worst
+// possible failure mode: it depends on the payload, so it presents as an
+// intermittent, message-dependent fault in the badge rather than a broken flag
+// in the host tool.
+//
+// Ordering the calls the other way — open first, then `stty` — would also work,
+// since our descriptor keeps the tty open and stty's close is no longer the
+// last. Setting the discipline on our own descriptor is preferred because it
+// does not depend on that reasoning holding, and it cannot be undone by another
+// process opening and closing the port mid-session.
+func openRaw(port string) (*os.File, error) {
+	file, err := os.OpenFile(port, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s: %w", port, err)
 	}
 
-	file, err := os.OpenFile(port, os.O_RDWR, 0)
+	// THROUGH SyscallConn, not file.Fd(): `Fd` takes the descriptor out of
+	// non-blocking mode, and `readFrame` depends on `SetReadDeadline`, which
+	// needs it registered with the runtime poller.
+	conn, err := file.SyscallConn()
 	if err != nil {
-		return fmt.Errorf("opening %s: %w", port, err)
+		file.Close()
+		return nil, fmt.Errorf("%s: %w", port, err)
+	}
+	var inner error
+	if err := conn.Control(func(fd uintptr) { inner = makeRaw(fd) }); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("%s: %w", port, err)
+	}
+	if inner != nil {
+		file.Close()
+		return nil, fmt.Errorf("%s: raw mode: %w", port, inner)
+	}
+	return file, nil
+}
+
+func run(port string, wait time.Duration) error {
+	file, err := openRaw(port)
+	if err != nil {
+		return err
 	}
 	defer file.Close()
 
@@ -143,6 +196,21 @@ func checksum(bytes []byte) uint32 {
 	return hash
 }
 
+// isIdle reports whether a read error just means "nothing has arrived yet".
+//
+// io.EOF IS NOT AN END OF STREAM ON A SERIAL PORT. In raw mode with VMIN=0 and
+// VTIME=0 the kernel returns a zero-byte read when the port is idle instead of
+// EAGAIN, and Go reports a zero-byte read as io.EOF. A badge that simply has
+// nothing to say is indistinguishable, at this layer, from a cable that has been
+// pulled — so the only workable reading is the optimistic one, and the caller's
+// deadline is what actually bounds the wait.
+//
+// This surfaced the moment raw mode started being applied for real: the previous
+// cooked-mode reads blocked, so the zero-byte case never came up.
+func isIdle(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, io.EOF)
+}
+
 // readFrame scans the stream for a reply, discarding the log around it.
 //
 // The port carries human-readable output as well as frames, so anything that is
@@ -159,8 +227,14 @@ func readFrame(file *os.File, wait time.Duration) ([]byte, error) {
 			if n > 0 {
 				buffered = append(buffered, chunk[:n]...)
 			}
-			if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) && n == 0 {
+			if err != nil && !isIdle(err) && n == 0 {
 				return nil, err
+			}
+			if n == 0 {
+				// An idle port polls hot otherwise: `read` on a raw tty returns
+				// immediately rather than waiting, so this loop would spin a core
+				// for the whole timeout.
+				time.Sleep(20 * time.Millisecond)
 			}
 		}
 
@@ -211,10 +285,7 @@ func kindOf(bytes []byte) byte { return bytes[4] }
 // This exists so a TOOL reading frames is not worse off than that person — and
 // so a test can assert on a stage and a level rather than grepping prose.
 func followLog(port string, window time.Duration) error {
-	if out, err := exec.Command("stty", "-f", port, "raw", "-echo").CombinedOutput(); err != nil {
-		return fmt.Errorf("stty %s: %v: %s", port, err, out)
-	}
-	file, err := os.OpenFile(port, os.O_RDWR, 0)
+	file, err := openRaw(port)
 	if err != nil {
 		return err
 	}
@@ -234,6 +305,8 @@ func followLog(port string, window time.Duration) error {
 			n, _ := file.Read(chunk)
 			if n > 0 {
 				buffered = append(buffered, chunk[:n]...)
+			} else {
+				time.Sleep(20 * time.Millisecond)
 			}
 		}
 		for {

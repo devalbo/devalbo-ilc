@@ -485,6 +485,100 @@ Bandwidth is otherwise a non-issue: a countdown mirrors six lines and six status
 updates. Anything wanting to mirror pixels would not fit, which is another reason
 `GetScreen` returns text (D3).
 
+### D9 — THE TRANSPORT IS A SEAM, and USB is only the first one
+
+**Retracting an idea from this same session.** With bulk CDC not delivering
+inbound bytes, the tempting move was to carry control over USB CONTROL TRANSFERS
+instead — picotool's reset interface proves those work. That would have been
+optimising for one debugging session at the cost of the architecture: control
+transfers are a USB mechanism, with SETUP packets and `wLength`, and a protocol
+built on them cannot move to TCP or BLE.
+
+**The protocol is already transport-independent and should stay that way.**
+`control::scan` takes a byte slice and returns a frame; it names no peripheral,
+and its eight tests run on a laptop. What is coupled is the DRIVER —
+`usblog.rs` happens to feed it from a CDC endpoint.
+
+So the seam is small: something that produces bytes and something that consumes
+them.
+
+```rust
+/// Where control frames come from and go. One implementation per medium.
+trait Link {
+    /// Bytes that have arrived, or an empty slice. NEVER BLOCKS: this is called
+    /// from an interrupt and from waiting loops, and a link that blocks would
+    /// stall the world to talk about the world (D8a).
+    fn receive(&mut self, into: &mut [u8]) -> usize;
+    /// Send what fits, returning how much went. A partial write is normal and
+    /// the caller retries — which is what makes a 20-byte BLE characteristic and
+    /// a 64-byte USB endpoint the same problem.
+    fn send(&mut self, bytes: &[u8]) -> usize;
+}
+```
+
+Two methods, both non-blocking, both partial-tolerant. Everything above them —
+framing, verbs, replies, subscriptions — is written once.
+
+**The current bug is a DRIVER bug, and this makes that legible.** Zero bytes
+arrive over CDC. The protocol is fine and tested; one `Link` implementation is
+not. Conflating the two is why several hours went into protocol-level
+explanations for a driver-level fact.
+
+### D10 — MESSAGES ARE SMALL BY CONSTRUCTION; CHUNKING IS OPT-IN
+
+Protobuf with shared definitions and typed messages gives bounded, fairly fixed
+sizes: `WorldState` is under a hundred bytes, a `LogLine` a few dozen, a verb a
+handful. **Most of this protocol fits in one frame on any medium**, including a
+20-byte BLE characteristic once a small header is accounted for.
+
+The exception is pass-through `execute` (D2), which carries an APP's request and
+response bytes and is therefore unbounded by nature.
+
+So chunking is not a property of the transport — it is an **opt-in capability of
+the protocol**, implemented ONCE in the shared library that both a world and a
+host import, and used only by the verbs that need it. Re-stitching lives beside
+the framing, not in four drivers.
+
+That ordering matters: if chunking were per-transport, every new medium would
+reimplement reassembly, and the bugs would be per-medium and only reproducible
+on that hardware.
+
+---
+
+## 1a. Transports
+
+Two classes, and the difference decides what the protocol must supply.
+
+| | USB CDC / UART / TCP | BLE notify | UDP |
+| --- | --- | --- | --- |
+| shape | **stream** — no message boundaries | datagram, ~20–500 B | datagram, ~1400 B |
+| reliable | yes | mostly, per characteristic | no |
+| ordered | yes | yes | no |
+| duplicates | no | no | yes |
+| framing needed | **magic + length**, to find boundaries | boundaries already exist | boundaries already exist |
+| chunking needed | no | **yes**, for anything over the MTU | rarely |
+| correlation needed | tidy | tidy | **required** |
+| who can reach it | whoever holds the cable | anyone in range | anyone routable |
+
+**The framing stays uniform anyway.** On a datagram medium the magic and length
+are redundant — the boundary is already known — but keeping one codec means one
+implementation, one set of tests, and no per-medium parser. The cost is a handful
+of bytes on a link that has few to spare, which is the right trade against a
+second parser nobody exercises.
+
+**Correlation is the requirement that changes with medium, not with taste.** Over
+USB, replies are ordered and reliable and message ids are merely tidy. Over UDP a
+reply can arrive twice, out of order, or after a retry has been sent — and an
+uncorrelated reply is then WRONG rather than confusing. So ids should exist from
+the first transport, or the second one silently breaks the first one's clients.
+
+**And the security posture inverts.** D4 makes the channel off by default, which
+was sufficient while "anyone with the cable" was a physical constraint. "Anyone
+in radio range" and "anyone routable" are not constraints at all. **A wireless or
+network transport needs authentication that USB's physicality supplied for
+free** — and that is a decision to make before shipping such a transport, not
+after somebody demonstrates driving a stranger's badge across a room.
+
 ---
 
 ## 2. Phases

@@ -184,6 +184,23 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 	#   make badge-uf2                      boot as fast as the board can  (default)
 	#   make badge-uf2 BADGE_BEAT_MS=700    watchable — ~10s, readable per stage
 	#
+	# CAN IT BE DRIVEN OVER THE CABLE is the fourth (BADGE-CONTROL-PLAN D4). Off
+	# by default and COMPILED OUT, not merely disabled — a channel that can invoke
+	# methods and press buttons is as powerful as it sounds:
+	#
+	#   make badge-uf2                     answers nothing on the port  (default)
+	#   make badge-uf2 BADGE_CONTROL=on    answers control frames, and `badgectl` works
+	#
+	# THIS LINE WAS MISSING AND COST A DEBUGGING SESSION. `BADGE_CONTROL` was read
+	# by rp2350/build.rs and exercised by scripts/check-embedded.sh, so it was
+	# implemented and it was tested — but it was never passed HERE, and this is the
+	# only path that produces a .uf2. Every image ever flashed therefore had the
+	# control channel compiled out, `badgectl` timed out against every one of them,
+	# and the search went looking for a fault in the USB driver: the firmware was
+	# reading the host's bytes and dropping them at `#[cfg(not(badge_control))] let
+	# _ = read;`, which is exactly what a broken endpoint would look like from the
+	# far end of a cable. A flag that CI proves works is not thereby reachable.
+	#
 	# picotool, NOT elf2uf2-rs — because it tags the UF2 family and elf2uf2-rs got
 	# it wrong: it emitted family `rp2040` from RP2350 firmware, which would have
 	# been flashed at a Tufty 2350 with nothing in the build to explain the result.
@@ -192,6 +209,7 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 		BADGE_REGION="$(BADGE_REGION)" \
 		BADGE_WORLD="$(BADGE_WORLD)" \
 		BADGE_BEAT_MS="$(BADGE_BEAT_MS)" \
+		BADGE_CONTROL="$(BADGE_CONTROL)" \
 		cargo build --release
 	@mkdir -p build
 	@cp dlc-platform/embedded/rp2350/target/thumbv8m.main-none-eabihf/release/dlc-rp2350-bringup build/badge-bringup.elf
