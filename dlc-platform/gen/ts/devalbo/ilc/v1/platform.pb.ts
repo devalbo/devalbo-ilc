@@ -628,6 +628,25 @@ export interface SpecFlag {
    */
   enumValues?: string[];
   /**
+   * The WIRE NUMBER of each name above, in the same order.
+   *
+   * AN ORDINAL IS NOT A VALUE, and this field exists because that was assumed.
+   * A host encoding `op=multiply` by taking multiply's INDEX in `enum_values`
+   * is right only for an enum numbered densely from zero; `UNSPECIFIED = 0;
+   * OK = 1; FAILED = 5;` encodes FAILED as 2 and the app reads OK. Both are
+   * legal values, so nothing rejects it — the app simply does the wrong thing
+   * and reports success.
+   *
+   * PARALLEL TO `enum_values` rather than replacing it with pairs, because the
+   * names alone are what a CLI prints and a menu shows, and every existing
+   * reader wants exactly that. The two are emitted from ONE loop over the
+   * enum's descriptor, so they cannot fall out of step: an index valid in one
+   * is valid in the other by construction.
+   *
+   * @generated from field: repeated int32 enum_numbers = 12;
+   */
+  enumNumbers?: number[];
+  /**
    * Single-letter alias. CLI-shaped, carried because dropping it would make
    * this description lossy against the one the CLI compiles in.
    *
@@ -650,6 +669,7 @@ export const SpecFlag: MessageType<SpecFlag> = /* @__PURE__ */ createMessageType
         { no: 8, name: "repeated", kind: "scalar", T: ScalarType.BOOL },
         { no: 9, name: "positional", kind: "scalar", T: ScalarType.UINT32 },
         { no: 10, name: "enum_values", kind: "scalar", T: ScalarType.STRING, repeated: true },
+        { no: 12, name: "enum_numbers", kind: "scalar", T: ScalarType.INT32, repeated: true },
         { no: 11, name: "short", kind: "scalar", T: ScalarType.STRING },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,

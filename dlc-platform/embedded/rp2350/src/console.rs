@@ -30,7 +30,6 @@ use embedded_graphics::pixelcolor::raw::RawU16;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::Text;
 
 use crate::display::{Display, HEIGHT, WIDTH};
 use crate::world::Status;
@@ -99,7 +98,7 @@ pub fn render(panel: &mut Display, status: Status, label: &str, body: &str) {
     // Black on the status colour: every one of them is bright enough that black
     // reads and white does not.
     let style = MonoTextStyle::new(&FONT_8X13, BAR_TEXT);
-    let _ = Text::new(label, Point::new(4, 13), style).draw(panel.target());
+    panel.text(label, Point::new(4, 13), style);
 
     let style = MonoTextStyle::new(&FONT_8X13, TEXT_COLOR);
     // THE APP GETS ITS BUDGET AND NOT A ROW MORE. Sending `rows` in the manifest
@@ -117,7 +116,7 @@ pub fn render(panel: &mut Display, status: Status, label: &str, body: &str) {
         // budget in the manifest, so the two must agree about what a line holds.
         let mut folded = [0u8; COLS * 3];
         let drawable = fold_into(line, &mut folded);
-        let _ = Text::new(drawable, Point::new(0, y), style).draw(panel.target());
+        panel.text(drawable, Point::new(0, y), style);
         row += 1;
     }
 }

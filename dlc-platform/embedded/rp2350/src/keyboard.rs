@@ -64,8 +64,9 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::Text;
 use embedded_hal::digital::InputPin;
+
+use dlc_platform_embedded::control;
 
 use crate::display::Display;
 
@@ -256,15 +257,25 @@ where
         // driven by the interrupt alone never beats while a widget is waiting,
         // which is most of the time a person is looking at the badge.
         crate::usblog::pump();
+        // A CONTROL CLIENT HAS ALREADY SUPPLIED THE INPUT, so asking a person for
+        // it is a thirty-second wait for something nobody is going to type. What
+        // is collected here is discarded either way — the turn runs on the
+        // client's bytes (D2).
+        if crate::passthrough::waiting() {
+            let _ = writeln!(log, "input: superseded by a control request");
+            break;
+        }
         elapsed += POLL_MS;
 
         // ACTIVE-LOW: pulled up, a press shorts to ground. `unwrap_or(false)`
         // reads a failed sample as "not pressed", which is the safe direction —
         // a stuck read must not type characters nobody asked for.
-        let a_now = keys.a.is_low().unwrap_or(false);
-        let b_now = keys.b.is_low().unwrap_or(false);
-        let c_now = keys.c.is_low().unwrap_or(false);
-        let down_now = keys.down.is_low().unwrap_or(false);
+        // OR THE CONTROL CHANNEL. A press consumed here is indistinguishable
+        // from a finger, which is D6's rule (see buttons.rs).
+        let a_now = keys.a.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_A);
+        let b_now = keys.b.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_B);
+        let c_now = keys.c.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_C);
+        let down_now = keys.down.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_DOWN);
 
         let a_press = a_now && !was_a;
         let b_press = b_now && !was_b;
@@ -358,29 +369,28 @@ fn draw(
     panel.fill(0x0000);
 
     let heading = MonoTextStyle::new(&FONT_8X13, HEADING);
-    let _ = Text::new(prompt, Point::new(0, TOP - LINE_H), heading).draw(panel.target());
+    panel.text(prompt, Point::new(0, TOP - LINE_H), heading);
 
     if !visible {
         // The buffer is still there; only the section is hidden. Saying so is
         // what stops "hidden" reading as "gone" — the difference matters because
         // the whole point of hiding is that you can come back to it.
         let dim = MonoTextStyle::new(&FONT_8X13, DIM);
-        let _ = Text::new("(input hidden - DOWN to show)", Point::new(0, TOP), dim).draw(panel.target());
+        panel.text("(input hidden - DOWN to show)", Point::new(0, TOP), dim);
         return;
     }
 
     // Row 1: what has been typed, with a cursor, and the active key's name.
     let style = MonoTextStyle::new(&FONT_8X13, TEXT);
-    let _ = Text::new(typed.as_str(), Point::new(0, TOP), style).draw(panel.target());
+    panel.text(typed.as_str(), Point::new(0, TOP), style);
     let cursor_x = typed.len as i32 * CELL_W;
-    let _ = Text::new("_", Point::new(cursor_x, TOP), style).draw(panel.target());
+    panel.text("_", Point::new(cursor_x, TOP), style);
 
     let label = KEYS[active].label(shift);
     if !label.is_empty() {
         // Right-aligned, so it does not collide with a long buffer.
         let x = (40 - label.len() as i32) * CELL_W;
-        let _ = Text::new(label, Point::new(x, TOP), MonoTextStyle::new(&FONT_8X13, HEADING))
-            .draw(panel.target());
+        panel.text(label, Point::new(x, TOP), MonoTextStyle::new(&FONT_8X13, HEADING));
     }
 
     // Row 2: the strip, one column per key.
@@ -400,19 +410,12 @@ fn draw(
             let _ = cell
                 .into_styled(PrimitiveStyle::with_fill(ACTIVE_BG))
                 .draw(panel.target());
-            let _ = Text::new(text, Point::new(x, y), MonoTextStyle::new(&FONT_8X13, ACTIVE_FG))
-                .draw(panel.target());
+            panel.text(text, Point::new(x, y), MonoTextStyle::new(&FONT_8X13, ACTIVE_FG));
         } else {
-            let _ = Text::new(text, Point::new(x, y), MonoTextStyle::new(&FONT_8X13, DIM))
-                .draw(panel.target());
+            panel.text(text, Point::new(x, y), MonoTextStyle::new(&FONT_8X13, DIM));
         }
     }
 
     let hint = MonoTextStyle::new(&FONT_8X13, DIM);
-    let _ = Text::new(
-        "A/C move   B select   DOWN hide",
-        Point::new(0, y + LINE_H + 4),
-        hint,
-    )
-    .draw(panel.target());
+    panel.text("A/C move   B select   DOWN hide", Point::new(0, y + LINE_H + 4), hint);
 }

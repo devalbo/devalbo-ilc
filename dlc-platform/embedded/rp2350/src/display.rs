@@ -36,7 +36,9 @@
 //! wiring, [`ColorInversion`] and [`Orientation`] still are — see
 //! [`Display::new`], where both are named rather than buried.
 
+use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::*;
 use embedded_hal::digital::OutputPin;
 
 use mipidsi::models::ST7789;
@@ -182,6 +184,10 @@ impl Display {
         // panel's native format — converting through a colour type would be a
         // round trip to nowhere.
         let _ = self.panel.clear(Rgb565::from(RawU16::new(color)));
+        // THE MIRROR GOES WITH IT. A flood is how every widget starts a new
+        // screen, so this is the redraw boundary — and a mirror that survived it
+        // would report the previous screen's text under the current one.
+        mirror::clear();
     }
 
     /// The `embedded-graphics` target, for text.
@@ -191,5 +197,112 @@ impl Display {
     /// somebody else's problem.
     pub fn target(&mut self) -> &mut Panel {
         &mut self.panel
+    }
+
+    /// Draw a string, and REMEMBER IT.
+    ///
+    /// # Why every caller goes through here
+    ///
+    /// `VERB_GET_SCREEN` answers with the panel's text, and the only way that
+    /// answer can be trusted is if it is taken from the same call that reached
+    /// the glass. The alternative — each widget also reporting what it drew —
+    /// is a convention, and a convention is exactly what fails silently on the
+    /// one screen nobody thought to update.
+    ///
+    /// So `Text::new(..).draw(panel.target())` was replaced everywhere by this.
+    /// A caller can still reach `target()` for lines and rectangles, which the
+    /// mirror does not claim to hold; what it claims is that the TEXT it reports
+    /// was drawn, and that text that was drawn is reported.
+    pub fn text(&mut self, text: &str, at: Point, style: MonoTextStyle<'_, Rgb565>) {
+        use embedded_graphics::text::Text;
+        mirror::record(text, at, style.font.character_size.width as i32);
+        let _ = Text::new(text, at, style).draw(&mut self.panel);
+    }
+}
+
+/// What the panel currently says, as characters.
+///
+/// # Why a grid and not a list of what was drawn
+///
+/// A list would need sorting, would not survive two strings landing on the same
+/// row, and would drift from the panel the moment anything overwrote anything.
+/// A grid IS the panel, at the only resolution a test cares about — so drawing
+/// over something replaces it here for the same reason it does there.
+///
+/// # Why it is approximate, and why that is fine
+///
+/// The row and column come from dividing pixel coordinates by the font's cell
+/// size, so a string drawn at a half-cell offset lands in the nearer cell. The
+/// badge draws everything on a grid already (`report.rs` and `console.rs` are
+/// built from `LINE_H` and an 8-pixel advance), so this is exact for real output
+/// and merely reasonable for anything else.
+pub mod mirror {
+    use embedded_graphics::prelude::Point;
+
+    /// The screen's own geometry, in characters. 40 columns is what the 8-pixel
+    /// font gives across 320 pixels; the rows follow from `LINE_H` in the two
+    /// modules that lay text out.
+    pub const COLS: usize = 40;
+    pub const ROWS: usize = 17;
+    const LINE_H: i32 = 14;
+
+    struct Grid {
+        cells: [[u8; COLS]; ROWS],
+    }
+
+    static GRID: crate::shared::Shared<Grid> = crate::shared::Shared::new(Grid {
+        cells: [[b' '; COLS]; ROWS],
+    });
+
+    /// Forget everything — the panel was flooded.
+    pub fn clear() {
+        GRID.with(|grid| grid.cells = [[b' '; COLS]; ROWS]);
+    }
+
+    pub(super) fn record(text: &str, at: Point, advance: i32) {
+        // `Text` positions on the BASELINE, so the row a reader means is the one
+        // the glyphs sit above.
+        let row = ((at.y - 1) / LINE_H).max(0) as usize;
+        if row >= ROWS || advance <= 0 {
+            return;
+        }
+        let start = (at.x / advance).max(0) as usize;
+        GRID.with(|grid| {
+            for (offset, byte) in text.bytes().enumerate() {
+                let col = start + offset;
+                if col >= COLS {
+                    break;
+                }
+                // NEWLINES DO NOT MOVE THE CURSOR. `Text` draws a single line;
+                // callers that want two make two calls, and recording a control
+                // byte into a cell would put it on the wire as text.
+                grid.cells[row][col] = if byte < 0x20 { b' ' } else { byte };
+            }
+        });
+    }
+
+    /// Hand each non-empty row to `f`, top to bottom, trailing spaces trimmed.
+    ///
+    /// A CALLBACK because the grid is behind a critical section and the caller —
+    /// the USB interrupt, encoding a reply — has nowhere to put a copy of it.
+    /// Returns false if the grid was busy — main was mid-redraw.
+    ///
+    /// REPORTED RATHER THAN SWALLOWED. A `try_with` that fails and returns no
+    /// rows is indistinguishable from a blank screen, and answering "the panel
+    /// is empty" when the truth is "ask again" is the kind of confident wrong
+    /// answer this whole channel exists to stop producing.
+    pub fn rows(mut f: impl FnMut(&str)) -> bool {
+        GRID.try_with(|grid| {
+            for row in grid.cells.iter() {
+                let end = row.iter().rposition(|byte| *byte != b' ').map_or(0, |at| at + 1);
+                if end == 0 {
+                    continue;
+                }
+                if let Ok(text) = core::str::from_utf8(&row[..end]) {
+                    f(text);
+                }
+            }
+        })
+        .is_some()
     }
 }

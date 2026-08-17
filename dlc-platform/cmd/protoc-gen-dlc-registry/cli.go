@@ -106,17 +106,18 @@ func checkCLIToken(name string) error {
 }
 
 type cliFlag struct {
-	name       string
-	short      string
-	field      uint32
-	kind       string // a clispec.Kind constant name
-	source     string // a clispec.Source constant name
-	repeated   bool
-	positional uint32
-	help       string
-	required   bool
-	def        string
-	enumValues []string
+	name        string
+	short       string
+	field       uint32
+	kind        string // a clispec.Kind constant name
+	source      string // a clispec.Source constant name
+	repeated    bool
+	positional  uint32
+	help        string
+	required    bool
+	def         string
+	enumValues  []string
+	enumNumbers []int32
 }
 
 type cliCommand struct {
@@ -271,6 +272,7 @@ func cliFlagOf(f *descriptorpb.FieldDescriptorProto, enums map[string]*descripto
 
 	var kind string
 	var enumValues []string
+	var enumNumbers []int32
 	switch f.GetType() {
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 		kind = "KindString"
@@ -290,9 +292,13 @@ func cliFlagOf(f *descriptorpb.FieldDescriptorProto, enums map[string]*descripto
 		kind = "KindEnum"
 		// Enum values double as the choices a menu-driven host would show, so
 		// they travel with the flag rather than being looked up again later.
+		// ONE LOOP, BOTH SLICES. They are index-aligned by construction, which
+		// is the whole reason the numbers can be a parallel field rather than a
+		// message of pairs — see SpecFlag.enum_numbers.
 		if e, ok := enums[shortName(f.GetTypeName())]; ok {
 			for _, v := range e.Value {
 				enumValues = append(enumValues, v.GetName())
+				enumNumbers = append(enumNumbers, v.GetNumber())
 			}
 		}
 	default:
@@ -346,17 +352,18 @@ func cliFlagOf(f *descriptorpb.FieldDescriptorProto, enums map[string]*descripto
 	}
 
 	return cliFlag{
-		source:     source,
-		name:       name,
-		positional: positional,
-		short:      short,
-		field:      uint32(f.GetNumber()),
-		kind:       kind,
-		repeated:   repeated,
-		help:       help,
-		required:   required,
-		def:        def,
-		enumValues: enumValues,
+		source:      source,
+		name:        name,
+		positional:  positional,
+		short:       short,
+		field:       uint32(f.GetNumber()),
+		kind:        kind,
+		repeated:    repeated,
+		help:        help,
+		required:    required,
+		def:         def,
+		enumValues:  enumValues,
+		enumNumbers: enumNumbers,
 	}, true, nil
 }
 
@@ -495,6 +502,14 @@ func renderCLI(file *descriptorpb.FileDescriptorProto, services []service, cmds 
 							fmt.Fprintf(&b, "%q", v)
 						}
 						fmt.Fprintf(&b, "}")
+						fmt.Fprintf(&b, ", EnumNumbers: []int32{")
+						for i, v := range f.enumNumbers {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%d", v)
+						}
+						fmt.Fprintf(&b, "}")
 					}
 					fmt.Fprintf(&b, "},\n")
 				}
@@ -587,6 +602,14 @@ func renderCLITS(file *descriptorpb.FileDescriptorProto, services []service, cmd
 								fmt.Fprintf(&b, ", ")
 							}
 							fmt.Fprintf(&b, "%q", v)
+						}
+						fmt.Fprintf(&b, "]")
+						fmt.Fprintf(&b, ", enumNumbers: [")
+						for i, v := range f.enumNumbers {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%d", v)
 						}
 						fmt.Fprintf(&b, "]")
 					}

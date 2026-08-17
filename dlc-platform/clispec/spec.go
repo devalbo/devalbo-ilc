@@ -83,6 +83,9 @@ type Flag struct {
 	// EnumValues are the permitted names for a KindEnum flag — also the menu a
 	// richer host would show.
 	EnumValues []string
+	// EnumNumbers are the wire numbers of EnumValues, index-aligned. An ordinal
+	// is not a value — see SpecFlag.enum_numbers in platform.proto.
+	EnumNumbers []int32
 }
 
 // Command is one rpc, as a subcommand.

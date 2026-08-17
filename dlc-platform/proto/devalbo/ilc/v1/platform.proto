@@ -354,6 +354,22 @@ message SpecFlag {
   // The permitted names for an enum flag — and the MENU a richer host shows.
   // The one place an app already declares its own choices.
   repeated string enum_values = 10;
+
+  // The WIRE NUMBER of each name above, in the same order.
+  //
+  // AN ORDINAL IS NOT A VALUE, and this field exists because that was assumed.
+  // A host encoding `op=multiply` by taking multiply's INDEX in `enum_values`
+  // is right only for an enum numbered densely from zero; `UNSPECIFIED = 0;
+  // OK = 1; FAILED = 5;` encodes FAILED as 2 and the app reads OK. Both are
+  // legal values, so nothing rejects it — the app simply does the wrong thing
+  // and reports success.
+  //
+  // PARALLEL TO `enum_values` rather than replacing it with pairs, because the
+  // names alone are what a CLI prints and a menu shows, and every existing
+  // reader wants exactly that. The two are emitted from ONE loop over the
+  // enum's descriptor, so they cannot fall out of step: an index valid in one
+  // is valid in the other by construction.
+  repeated int32 enum_numbers = 12;
   // Single-letter alias. CLI-shaped, carried because dropping it would make
   // this description lossy against the one the CLI compiles in.
   string short = 11;

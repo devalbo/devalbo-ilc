@@ -606,6 +606,21 @@ type SpecFlag struct {
 	// The permitted names for an enum flag — and the MENU a richer host shows.
 	// The one place an app already declares its own choices.
 	EnumValues []string `protobuf:"bytes,10,rep,name=enum_values,json=enumValues,proto3" json:"enumValues,omitempty"`
+	// The WIRE NUMBER of each name above, in the same order.
+	//
+	// AN ORDINAL IS NOT A VALUE, and this field exists because that was assumed.
+	// A host encoding `op=multiply` by taking multiply's INDEX in `enum_values`
+	// is right only for an enum numbered densely from zero; `UNSPECIFIED = 0;
+	// OK = 1; FAILED = 5;` encodes FAILED as 2 and the app reads OK. Both are
+	// legal values, so nothing rejects it — the app simply does the wrong thing
+	// and reports success.
+	//
+	// PARALLEL TO `enum_values` rather than replacing it with pairs, because the
+	// names alone are what a CLI prints and a menu shows, and every existing
+	// reader wants exactly that. The two are emitted from ONE loop over the
+	// enum's descriptor, so they cannot fall out of step: an index valid in one
+	// is valid in the other by construction.
+	EnumNumbers []int32 `protobuf:"varint,12,rep,packed,name=enum_numbers,json=enumNumbers,proto3" json:"enumNumbers,omitempty"`
 	// Single-letter alias. CLI-shaped, carried because dropping it would make
 	// this description lossy against the one the CLI compiles in.
 	Short string `protobuf:"bytes,11,opt,name=short,proto3" json:"short,omitempty"`
@@ -683,6 +698,13 @@ func (x *SpecFlag) GetPositional() uint32 {
 func (x *SpecFlag) GetEnumValues() []string {
 	if x != nil {
 		return x.EnumValues
+	}
+	return nil
+}
+
+func (x *SpecFlag) GetEnumNumbers() []int32 {
+	if x != nil {
+		return x.EnumNumbers
 	}
 	return nil
 }
@@ -1216,6 +1238,7 @@ func (m *SpecFlag) CloneVT() *SpecFlag {
 	r.Positional = m.Positional
 	r.Short = m.Short
 	r.EnumValues = protobuf_go_lite.CloneSlice(m.EnumValues)
+	r.EnumNumbers = protobuf_go_lite.CloneSlice(m.EnumNumbers)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -1656,6 +1679,9 @@ func (this *SpecFlag) EqualVT(that *SpecFlag) bool {
 		return false
 	}
 	if this.Short != that.Short {
+		return false
+	}
+	if !protobuf_go_lite.EqualSlice(this.EnumNumbers, that.EnumNumbers) {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -2661,6 +2687,11 @@ func (x *SpecFlag) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("short")
 		s.WriteString(x.Short)
 	}
+	if len(x.EnumNumbers) > 0 || s.HasField("enumNumbers") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("enumNumbers")
+		s.WriteInt32Array(x.EnumNumbers)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2715,6 +2746,13 @@ func (x *SpecFlag) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "short":
 			s.AddField("short")
 			x.Short = s.ReadString()
+		case "enum_numbers", "enumNumbers":
+			s.AddField("enum_numbers")
+			if s.ReadNil() {
+				x.EnumNumbers = nil
+				return
+			}
+			x.EnumNumbers = s.ReadInt32Array()
 		}
 	})
 }
@@ -3810,6 +3848,11 @@ func (m *SpecFlag) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if len(m.EnumNumbers) > 0 {
+		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.EnumNumbers)
+		i--
+		dAtA[i] = 0x62
+	}
 	if len(m.Short) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Short)
 		i--
@@ -4818,6 +4861,11 @@ func (m *SpecFlag) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if len(m.EnumNumbers) > 0 {
+		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.EnumNumbers)
+		i--
+		dAtA[i] = 0x62
+	}
 	if len(m.Short) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Short)
 		i--
@@ -5656,6 +5704,7 @@ func (m *SpecFlag) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Positional)
 	n += protobuf_go_lite.SizeStringSlice(1, m.EnumValues)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Short)
+	n += protobuf_go_lite.SizeVarintPacked(1, m.EnumNumbers)
 	n += len(m.unknownFields)
 	return n
 }
@@ -6027,6 +6076,14 @@ func (x *SpecFlag) MarshalProtoText() string {
 	if x.Short != "" {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "short")
 		protobuf_go_lite.TextWriteString(&sb, x.Short)
+	}
+	if len(x.EnumNumbers) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "enum_numbers")
+		for i, v := range x.EnumNumbers {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			protobuf_go_lite.TextWriteInt(&sb, v)
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -6780,6 +6837,36 @@ func (m *SpecFlag) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Short = v
+		case 12:
+			if wireType == 0 {
+				var v int32
+				v, iNdEx, err = protobuf_go_lite.DecodeVarintInt32(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				m.EnumNumbers = append(m.EnumNumbers, v)
+			} else if wireType == 2 {
+				packedStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				iNdEx = packedStart
+				var elementCount int
+				elementCount = protobuf_go_lite.PackedVarintElementCount(dAtA[iNdEx:postIndex])
+				if elementCount != 0 && len(m.EnumNumbers) == 0 {
+					m.EnumNumbers = make([]int32, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int32
+					v, iNdEx, err = protobuf_go_lite.DecodeVarintInt32(dAtA, iNdEx)
+					if err != nil {
+						return err
+					}
+					m.EnumNumbers = append(m.EnumNumbers, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnumNumbers", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -8251,6 +8338,36 @@ func (m *SpecFlag) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Short = v
+		case 12:
+			if wireType == 0 {
+				var v int32
+				v, iNdEx, err = protobuf_go_lite.DecodeVarintInt32(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				m.EnumNumbers = append(m.EnumNumbers, v)
+			} else if wireType == 2 {
+				packedStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				iNdEx = packedStart
+				var elementCount int
+				elementCount = protobuf_go_lite.PackedVarintElementCount(dAtA[iNdEx:postIndex])
+				if elementCount != 0 && len(m.EnumNumbers) == 0 {
+					m.EnumNumbers = make([]int32, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int32
+					v, iNdEx, err = protobuf_go_lite.DecodeVarintInt32(dAtA, iNdEx)
+					if err != nil {
+						return err
+					}
+					m.EnumNumbers = append(m.EnumNumbers, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnumNumbers", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

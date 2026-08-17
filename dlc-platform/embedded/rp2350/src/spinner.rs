@@ -50,8 +50,9 @@ use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_8X13};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
 use embedded_hal::digital::InputPin;
+
+use dlc_platform_embedded::control;
 
 use crate::display::Display;
 use crate::keyboard::Keys;
@@ -131,14 +132,24 @@ where
         // driven by the interrupt alone never beats while a widget is waiting,
         // which is most of the time a person is looking at the badge.
         crate::usblog::pump();
+        // A CONTROL CLIENT HAS ALREADY SUPPLIED THE INPUT, so asking a person for
+        // it is a thirty-second wait for something nobody is going to type. What
+        // is collected here is discarded either way — the turn runs on the
+        // client's bytes (D2).
+        if crate::passthrough::waiting() {
+            let _ = writeln!(log, "input: superseded by a control request");
+            break;
+        }
         elapsed += POLL_MS;
 
         // ACTIVE-LOW, and a failed read counts as not pressed — a stuck line
         // must not spin a value nobody is touching.
-        let a_now = keys.a.is_low().unwrap_or(false);
-        let b_now = keys.b.is_low().unwrap_or(false);
-        let c_now = keys.c.is_low().unwrap_or(false);
-        let down_now = keys.down.is_low().unwrap_or(false);
+        // OR THE CONTROL CHANNEL. A press consumed here is indistinguishable
+        // from a finger, which is D6's rule (see buttons.rs).
+        let a_now = keys.a.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_A);
+        let b_now = keys.b.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_B);
+        let c_now = keys.c.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_C);
+        let down_now = keys.down.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_DOWN);
 
         let (a_press, b_press, c_press, down_press) = (
             a_now && !was_a,
@@ -207,7 +218,7 @@ fn draw(prompt: &str, screen: &mut Option<Display>, value: i64, shape: Shape, st
     panel.fill(0x0000);
 
     let heading = MonoTextStyle::new(&FONT_8X13, HEADING);
-    let _ = Text::new(prompt, Point::new(0, TOP - LINE_H), heading).draw(panel.target());
+    panel.text(prompt, Point::new(0, TOP - LINE_H), heading);
 
     // THE VALUE, in the larger font. It is the only thing on this screen worth
     // reading from arm's length, and the panel has room.
@@ -221,7 +232,7 @@ fn draw(prompt: &str, screen: &mut Option<Display>, value: i64, shape: Shape, st
         }
     }
     let big = MonoTextStyle::new(&FONT_10X20, TEXT);
-    let _ = Text::new(shown.as_str(), Point::new(0, TOP + LINE_H), big).draw(panel.target());
+    panel.text(shown.as_str(), Point::new(0, TOP + LINE_H), big);
 
     let mut hint = Line::new();
     match shape {
@@ -233,7 +244,7 @@ fn draw(prompt: &str, screen: &mut Option<Display>, value: i64, shape: Shape, st
         }
     }
     let dim = MonoTextStyle::new(&FONT_8X13, DIM);
-    let _ = Text::new(hint.as_str(), Point::new(0, TOP + LINE_H * 3), dim).draw(panel.target());
+    panel.text(hint.as_str(), Point::new(0, TOP + LINE_H * 3), dim);
 }
 
 /// A stack line buffer, because formatting needs somewhere to land and this runs

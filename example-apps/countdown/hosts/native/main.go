@@ -50,7 +50,7 @@ func main() {
 	// the app — that is what `dlc` itself does, because `dlc new` has to scaffold
 	// where you are.
 	if err := platform.Boot(platform.BootOptions{
-		FSRoot:           platform.AppFSRoot(dlcconfig.Name),
+		FSRoot:         platform.AppFSRoot(dlcconfig.Name),
 		FilesystemKind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR,
 		// WHERE TEXT GOES, declared rather than assumed. Every tier provides
 		// `wasi:cli/stdout`, so an app cannot tell from the inside whether

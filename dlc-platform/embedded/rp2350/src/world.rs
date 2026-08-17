@@ -76,6 +76,14 @@ pub const WORLD: BadgeWorld = if cfg!(badge_world_minimal) {
 };
 
 impl BadgeWorld {
+    /// `WorldKind` in control.proto — what the control channel reports.
+    pub const fn code(self) -> u32 {
+        match self {
+            BadgeWorld::Normal => dlc_platform_embedded::control::WORLD_KIND_NORMAL,
+            BadgeWorld::Minimal => dlc_platform_embedded::control::WORLD_KIND_MINIMAL,
+        }
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             BadgeWorld::Normal => "normal",
@@ -259,21 +267,12 @@ impl Capability {
 /// The badge always has a UART on the clip pads, so `none` here is only ever a
 /// deliberate choice by a world with no text capability at all (`minimal`),
 /// never an accident of layout.
-/// How the panel is divided, as a word. For the control channel (D3): a caller
-/// asking what this world is should get the same answer the build flag chose.
+/// How the panel is divided, as a word — for the SCREEN and the log, where a
+/// person reads it.
 pub const fn screen_name() -> &'static str {
     match SCREEN {
         ScreenLayout::Split => "split",
         ScreenLayout::Full => "full",
-    }
-}
-
-/// Whether this world can collect text, as a word. Mirrors `BADGE_INPUT`.
-pub const fn input_name() -> &'static str {
-    if cfg!(badge_input_off) {
-        "off"
-    } else {
-        "keyboard"
     }
 }
 
@@ -284,6 +283,39 @@ pub const fn text_sink() -> &'static str {
         // The clip pads are always there, so text is not lost — just not shown
         // to anyone who is not looking for it.
         "uart"
+    }
+}
+
+// WHAT THE CONTROL CHANNEL SENDS, and it is deliberately NOT the words above.
+//
+// A caller asking what this world is used to get `"split"` and compare it to
+// `"split"`. Both ends had an enum; only the wire had prose, so a rename here
+// broke every assertion silently and nothing could list the legal values. These
+// return the numbers declared in control.proto instead.
+
+/// `ScreenLayout`.
+pub const fn screen_code() -> u32 {
+    match SCREEN {
+        ScreenLayout::Split => dlc_platform_embedded::control::SCREEN_LAYOUT_SPLIT,
+        ScreenLayout::Full => dlc_platform_embedded::control::SCREEN_LAYOUT_FULL,
+    }
+}
+
+/// `InputMode`. Mirrors `BADGE_INPUT`.
+pub const fn input_code() -> u32 {
+    if cfg!(badge_input_off) {
+        dlc_platform_embedded::control::INPUT_MODE_OFF
+    } else {
+        dlc_platform_embedded::control::INPUT_MODE_KEYBOARD
+    }
+}
+
+/// `TextOutlet` — the enum platform.proto already declares for this question.
+pub const fn text_code() -> u32 {
+    if crate::console::APP_ROWS > 0 {
+        dlc_platform_embedded::control::TEXT_OUTLET_DISPLAY
+    } else {
+        dlc_platform_embedded::control::TEXT_OUTLET_UART
     }
 }
 

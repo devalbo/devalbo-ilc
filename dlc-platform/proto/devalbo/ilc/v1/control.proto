@@ -4,6 +4,11 @@ package devalbo.ilc.v1;
 
 option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
 
+// For `TextOutlet`. WHERE AN APP'S TEXT COMES OUT is already declared there and
+// is the same question a world answers about itself — a second enum meaning the
+// same thing would be two vocabularies to keep in step.
+import "devalbo/ilc/v1/platform.proto";
+
 // Driving a WORLD from outside it (docs/BADGE-CONTROL-PLAN.md).
 //
 // Not a command surface. Every message here is a question about the WORLD — what
@@ -29,23 +34,39 @@ option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/
 // "is the badge stuck, or is the log stuck?" A one-way log cannot distinguish
 // those, and three debugging cycles went on that ambiguity in one session.
 message WorldState {
-  // Which world this firmware was built as — `normal`, `minimal`. A browser
-  // world reports what it is emulating.
-  string world = 1;
-  // The tier's own name: `rp2350`, `browser`. The same value an app sees as
-  // `ILC_TIER`, so a test can assert the world advertises what it claims here.
-  string tier = 2;
-  // Firmware or host version.
+  // WHAT THIS WORLD IS, as values rather than as words.
+  //
+  // These were `string world`, `string tier` and a `map<string, string> config`,
+  // and every one of them was an enum at BOTH ends: `BadgeWorld`, a tier name, a
+  // `ScreenLayout`. The world rendered them to prose, the wire carried prose,
+  // and the client compared prose — so a rename anywhere silently broke every
+  // assertion, and nothing could enumerate the legal values.
+  //
+  // The map carried the note "as strings so a new knob does not need a new
+  // field", which is the argument that always precedes losing the types. What it
+  // actually bought was that a typo in a key produced a world with no screen
+  // layout instead of a compile error.
+  // THE NUMBERS ARE RESERVED, THE NAMES ARE REUSED. A field number is the wire
+  // identity — reusing 1 would make an old client decode a `WorldKind` as the
+  // string it used to be. The NAME is just what the question is called, and it
+  // is still the right name; `config` is gone entirely.
+  reserved 1, 2, 4;
+
+  WorldKind world = 9;
+  Tier tier = 10;
+  // Firmware or host version. GENUINELY A STRING: a semver is not a closed set.
   string version = 3;
 
-  // Flash-time configuration, as strings so a new knob does not need a new
-  // field. These are the `BADGE_*` choices: screen layout, input mode, world.
-  map<string, string> config = 4;
+  // The flash-time choices, one field each.
+  ScreenLayout screen = 11;
+  InputMode input = 12;
+  TextOutlet text = 13;
 
   // WHAT IT IS DOING RIGHT NOW — the field this verb exists for.
   Activity activity = 5;
 
-  // The app currently instantiated, or empty.
+  // The app currently instantiated, or empty. A NAME, so a string: an app is
+  // whatever somebody dragged onto the payload region.
   string app = 6;
 
   // WHAT THE APP LAST SAID IT WAS DOING, or empty.
@@ -58,6 +79,10 @@ message WorldState {
   // event, which arrives WHILE the command runs because `emit` is an import. The
   // dispatcher publishes the command's name by default, so an app that never
   // mentions activity still reports something true.
+  //
+  // FREE TEXT ON PURPOSE, and the one place here that should be: the world
+  // cannot know an app's vocabulary, and inventing an enum for it would mean
+  // every app had to describe itself in the world's words.
   string app_activity = 8;
 
   // Milliseconds since boot. Lets a caller tell a world that is progressing
@@ -83,6 +108,222 @@ enum Activity {
   ACTIVITY_RUNNING = 4;
   // Finished, showing a result.
   ACTIVITY_RESTING = 5;
+}
+
+
+// Which world a firmware was built as. Mirrors `BadgeWorld` in world.rs.
+enum WorldKind {
+  WORLD_KIND_UNSPECIFIED = 0;
+  // Text: the app's output is meant to be READ.
+  WORLD_KIND_NORMAL = 1;
+  // One colour, meaning "how is it going" — a deliberate simulation of a world
+  // with almost no output capability.
+  WORLD_KIND_MINIMAL = 2;
+}
+
+// Which tier is answering. The same value an app sees as `ILC_TIER`, so a test
+// can assert that a world advertises what it claims.
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_RP2350 = 1;
+  TIER_BROWSER = 2;
+  TIER_NATIVE = 3;
+  TIER_QEMU_ARMV7M = 4;
+}
+
+// How a world divides its panel. Mirrors `ScreenLayout` in world.rs.
+enum ScreenLayout {
+  SCREEN_LAYOUT_UNSPECIFIED = 0;
+  // A world band across the top, the app underneath.
+  SCREEN_LAYOUT_SPLIT = 1;
+  // The app gets everything.
+  SCREEN_LAYOUT_FULL = 2;
+  // There is no panel.
+  SCREEN_LAYOUT_NONE = 3;
+}
+
+// Whether a world can collect text, and how. Mirrors `BADGE_INPUT`.
+enum InputMode {
+  INPUT_MODE_UNSPECIFIED = 0;
+  // The world will not ask for input, so an app that needs some cannot run here.
+  INPUT_MODE_OFF = 1;
+  // The character strip and the number spinner (WORLD-INPUT-PLAN D3).
+  INPUT_MODE_KEYBOARD = 2;
+}
+
+// A stage of the bring-up.
+//
+// AN ENUM, NOT THE ANNOUNCEMENT TEXT. `LogLine.stage` was a string carrying
+// `"instantiate countdown"` — which meant a test asserting on a stage was
+// matching prose that changes whenever somebody rewords a label, and no client
+// could enumerate the stages that exist. The PARAMETER (which app, which method)
+// stays in `text`, where a human reads it; the identity is here, where a machine
+// does.
+enum Stage {
+  STAGE_UNSPECIFIED = 0;
+  STAGE_CLOCKS = 1;
+  STAGE_DATA_BUS = 2;
+  STAGE_DISPLAY = 3;
+  STAGE_PSRAM = 4;
+  STAGE_PAYLOAD_REGION = 5;
+  STAGE_VERIFY_PAYLOAD = 6;
+  STAGE_INSTANTIATE = 7;
+  STAGE_MANIFEST = 8;
+  STAGE_EXECUTE = 9;
+}
+
+
+// A button on the world's own hardware (D3).
+//
+// THE WORLD'S BUTTONS, NOT AN APP'S ACTIONS. An app never learns that a press
+// was injected rather than pressed, and cannot ask — driving a world must be
+// indistinguishable from using it, or a test proves something about the test
+// harness instead of about the app (D6).
+//
+// HOME IS ABSENT DELIBERATELY. On this board it is the BOOTSEL button, wired
+// into the boot path rather than freely readable, so a value for it would be a
+// promise the badge cannot keep. A verb that accepts a button it will silently
+// ignore is worse than one that refuses.
+enum Button {
+  BUTTON_UNSPECIFIED = 0;
+  BUTTON_A = 1;
+  BUTTON_B = 2;
+  BUTTON_C = 3;
+  BUTTON_UP = 4;
+  BUTTON_DOWN = 5;
+}
+
+message PressButtonRequest {
+  Button button = 1;
+}
+
+// The panel's TEXT, not its pixels.
+//
+// A screenshot would be 153,600 bytes, would need a decoder to assert anything
+// about, and would make a test fail when a colour changed. What a test actually
+// wants to know is what the badge SAYS — so this is the character grid the world
+// drew, reconstructed from the same draw calls that reached the panel.
+message ScreenResponse {
+  // One string per non-empty row, in top-to-bottom order, trailing spaces
+  // trimmed. Column alignment is preserved WITHIN a row, because the badge's own
+  // report format uses it — `6*  instantiate ...  OK` reads as three columns and
+  // a test asserting on it should see the same.
+  repeated string rows = 1;
+  uint32 cols = 2;
+  // The full height, including rows that were blank and so are not in `rows`.
+  uint32 height = 3;
+}
+
+
+// Whether a payload's bytes still check out. Mirrors `catalog::Integrity`.
+enum Integrity {
+  INTEGRITY_UNSPECIFIED = 0;
+  // Checksum present and correct.
+  INTEGRITY_VERIFIED = 1;
+  // No checksum recorded — an image built before the field existed.
+  INTEGRITY_UNVERIFIED = 2;
+  // Checksum present and WRONG: a half-finished drag, a bad write, a truncated
+  // UF2.
+  INTEGRITY_CORRUPT = 3;
+  // Bytes intact, built against a DIFFERENT engine. Distinct from corrupt
+  // because the remedy differs: one means reflash the file, the other means
+  // rebuild it.
+  INTEGRITY_WRONG_ENGINE = 4;
+}
+
+// One installed app, as the world sees it.
+message PayloadInfo {
+  // Position in the menu, and what `SelectPayloadRequest` names.
+  uint32 index = 1;
+  // A LABEL, so genuinely a string: an app is whatever somebody dragged onto
+  // the payload region, and the world does not get to enumerate those.
+  string name = 2;
+  uint32 size = 3;
+  Integrity integrity = 4;
+  // Which command runs when this app is chosen. The app's own fact, carried
+  // with the app.
+  uint32 entry_method = 5;
+  // Marked as the one to run unattended.
+  bool is_default = 6;
+
+  // Whether the world will actually run it.
+  //
+  // DERIVABLE FROM `integrity` AND SENT ANYWAY, because the derivation is the
+  // WORLD'S POLICY, not arithmetic: today `WRONG_ENGINE` is refused exactly like
+  // `CORRUPT`, and that could reasonably change. A client that recomputed this
+  // would be asserting its own policy against a badge that had moved on.
+  bool runnable = 7;
+}
+
+message ListPayloadsResponse {
+  repeated PayloadInfo payloads = 1;
+  // Which one the world last ran or is running.
+  uint32 selected = 2;
+}
+
+// Choose the app the NEXT menu resolves to.
+//
+// A menu is only on screen between sessions, so this does not interrupt a
+// running app — it is remembered and consumed when the menu next appears, which
+// it then skips rather than waiting out its timeout.
+//
+// PRESSING BUTTONS WOULD ALSO WORK, and is worse for a test: `-press down` twice
+// means "two down from wherever the highlight happens to be", so a test asserting
+// on the result depends on the previous test's final position. An index does not.
+message SelectPayloadRequest {
+  uint32 index = 1;
+}
+
+
+// Run an app command, as though the world had collected the input itself (D2).
+//
+// # Why this is the verb the protocol most needed
+//
+// Everything else here asks about a WORLD. This one goes THROUGH it: the bytes
+// are the app's own request, in the app's own schema, which the world cannot
+// read and does not try to. That is why `ControlRequest.payload` is opaque bytes
+// rather than a oneof — a typed envelope could not have expressed this.
+//
+// # It supersedes the widgets rather than racing them
+//
+// A world normally collects a command's input by putting a keyboard or a spinner
+// on the panel. When a request arrives, that collection is pointless — the input
+// is already here — so any widget waiting for a finger gives up and the turn runs
+// with these bytes instead. Otherwise a test would have to press B on a spinner
+// it did not want in order to deliver a request that replaces its value.
+//
+// # The reply comes LATE, and that is not a timeout
+//
+// The engine lives on the world's main flow and the control channel is answered
+// from an interrupt, so this cannot be run where it is received. It is queued,
+// picked up at the top of the next turn, and answered when the app returns —
+// which is as long as the app takes. A caller's deadline has to cover the app's
+// runtime, not the link's.
+//
+// ONE AT A TIME. A second request while one is outstanding is refused rather than
+// queued: the protocol has no message ids yet, so a client matches a reply to its
+// request by there being only one in flight. Queuing two would silently pair the
+// wrong answer with the wrong question.
+message ExecuteRequest {
+  // Which command. The same id `PayloadInfo.entry_method` reports, and the same
+  // one an app's generated dispatcher switches on.
+  uint32 method_id = 1;
+  // The app's request, encoded in the app's own schema.
+  bytes request = 2;
+}
+
+message ExecuteResponse {
+  // WHETHER THE APP SUCCEEDED, which is not whether the world did.
+  //
+  // `ControlResponse.ok` says the world accepted the verb and ran something.
+  // This says what that something reported. A world can flawlessly run an app
+  // that fails, and collapsing the two would make "the badge could not run it"
+  // indistinguishable from "it ran and said no".
+  bool success = 1;
+  // The app's response, in the app's own schema.
+  bytes output = 2;
+  // What the app said went wrong, if anything.
+  string error = 3;
 }
 
 // The envelope every control exchange uses.
@@ -125,9 +366,9 @@ message LogLine {
   // 0 ms.
   uint64 uptime_ms = 1;
 
-  // The stage this belongs to, if any: `manifest`, `execute 10000`. Empty for a
-  // free-standing note.
-  string stage = 2;
+  // The stage this belongs to, if any. `STAGE_UNSPECIFIED` for a free-standing
+  // note. See `Stage` for why this stopped being the announcement text.
+  Stage stage = 2;
 
   // What happened.
   Level level = 3;
@@ -135,17 +376,54 @@ message LogLine {
   // The human-readable text, identical to what the text stream carried. Kept so
   // a frame reader never has LESS than a terminal would have shown.
   string text = 4;
+
+  // Whether this stage tells us anything the emulator could not have.
+  //
+  // Load-bearing, not decoration. The badge runs checks that QEMU also runs and
+  // checks only silicon can answer, and the second kind is the reason to plug a
+  // board in at all. A run where every hardware-only stage passes and an
+  // emulated one fails means the board and the emulator DISAGREE — a far more
+  // interesting result than a loose wire, and one a reader cannot reach for
+  // without this field.
+  Scope scope = 5;
 }
 
 enum Level {
   LEVEL_UNSPECIFIED = 0;
-  // A stage announced, resolved OK, or resolved FAIL. Named rather than a bool
-  // because "did not resolve" is a third state and the one that matters when a
-  // world hangs.
   LEVEL_STAGE_OK = 1;
   LEVEL_STAGE_FAIL = 2;
   // Detail under a stage.
   LEVEL_NOTE = 3;
+  // A stage ANNOUNCED and not yet resolved.
+  //
+  // THE STATE THAT MATTERS WHEN A WORLD HANGS, and it was missing. The enum
+  // above once carried a comment claiming "did not resolve" was a third state
+  // and the reason this was not a bool — while having no value for it. So the
+  // one case the field was reasoned about was the one case it could not express.
+  //
+  // It is worse than a gap on this tier, because of how a stage is WRITTEN: the
+  // world emits `6. instantiate countdown ... ` with no newline and closes the
+  // line with the result. A frame stream built on completed lines therefore said
+  // NOTHING AT ALL about a stage that hung — a reader saw five stages and
+  // silence, and could locate the hang only as "after 5", never by name.
+  //
+  // Emitted when the stage opens, so a client learns the name before the thing
+  // that might not finish is attempted.
+  LEVEL_STAGE_OPEN = 4;
+}
+
+// Whether a check could have been run anywhere, or only on the board.
+//
+// Mirrors `report::Scope` in the badge firmware, which is where the distinction
+// is enforced; this carries it to a reader that is not looking at the panel.
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  // Only the board can answer: PSRAM and its XIP-disabled init, the ST7789 on a
+  // bit-banged bus, flash-mapped payloads, the crystal, a Cortex-M33.
+  SCOPE_HARDWARE_ONLY = 1;
+  // Already proven green under `make qemu`. A failure here is not "does it
+  // work" but "does the BOARD disagree with the emulator".
+  SCOPE_EMULATED = 2;
 }
 
 // The verbs. Numbered permanently: a caller and a world may be built from
@@ -162,6 +440,59 @@ enum Verb {
   VERB_LIST_PAYLOADS = 5;
   VERB_SELECT_PAYLOAD = 6;
   VERB_REBOOT = 7;
+  // Ask to be sent notices. Payload is a `Subscription`; the reply echoes the
+  // set actually granted.
+  VERB_SUBSCRIBE = 8;
+}
+
+// What a client wants pushed to it (D8c).
+//
+// # Why a world is silent until asked
+//
+// The first attempt at framed logging emitted a `LogLine` for every line the
+// world wrote. That filled the outbound queue permanently, so the reply path
+// short-circuited on every service call and the TEXT log — the last-resort
+// diagnostic, the one that needs no tooling — was never transmitted at all. The
+// framing was right; pushing it at nobody was not.
+//
+// So notices cost nothing until a client asks, and a badge with no client on the
+// cable behaves exactly as it did before this existed.
+//
+// # Silence is about FRAMES, and subscribing is retroactive
+//
+// The world is never actually mute. It writes human-readable text to the same
+// wire unconditionally — including in builds compiled without this channel — and
+// it replays that text once when a host opens the port. Nothing that happens
+// before a client arrives is lost to someone holding a terminal.
+//
+// Frames would have had that gap, and a bring-up fails EARLY: the interesting
+// ten seconds are usually the ten before any tool has connected. So subscribing
+// to `NOTICE_LOG` does not mean "send me what happens next", it means "send me
+// the log", starting from the beginning of the run the world still has buffered.
+// A client that attaches late gets the failure it attached because of.
+//
+// The limit is the log buffer, not the subscription: once a run overflows it the
+// oldest lines are gone, and the world says so rather than quietly starting
+// mid-story. What no channel can carry is a fault that kills the board before
+// USB enumerates — that is what the screen and the UART are for.
+//
+// # Why the whole set, rather than add/remove
+//
+// This message declares what the subscription IS, not how it should change.
+// Subscribing twice therefore means the same thing as subscribing once, a
+// reconnecting client does not have to remember what it asked for last time, and
+// an empty set is a well-formed unsubscribe rather than a special verb.
+//
+// Add/remove would need the client and the world to agree about state that only
+// one of them can see, and they disagree the moment a badge reboots — which,
+// with a reset button on the front, it does constantly.
+message Subscription {
+  // The notices wanted. EMPTY MEANS NONE, which is how a client unsubscribes.
+  //
+  // A world grants what it supports and no more, and the reply says which — so a
+  // client built against a newer proto learns that it will not be getting
+  // something rather than waiting for it.
+  repeated Notice notices = 1;
 }
 
 // Frames a world sends WITHOUT being asked (D8).

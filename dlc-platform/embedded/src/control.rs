@@ -66,6 +66,36 @@ pub const MAX_PAYLOAD: usize = 8 * 1024;
 
 /// The verbs. Must match `Verb` in control.proto.
 pub const VERB_GET_WORLD_STATE: u32 = 1;
+pub const VERB_PRESS_BUTTON: u32 = 3;
+pub const VERB_GET_SCREEN: u32 = 4;
+pub const VERB_EXECUTE: u32 = 2;
+pub const VERB_LIST_PAYLOADS: u32 = 5;
+pub const VERB_SELECT_PAYLOAD: u32 = 6;
+pub const VERB_REBOOT: u32 = 7;
+pub const VERB_SUBSCRIBE: u32 = 8;
+
+/// `Button` in control.proto.
+///
+/// No `HOME`: on the badge that pin is BOOTSEL, wired into the boot path rather
+/// than freely readable, so accepting it would be a promise the world cannot
+/// keep.
+pub const BUTTON_A: u32 = 1;
+pub const BUTTON_B: u32 = 2;
+pub const BUTTON_C: u32 = 3;
+pub const BUTTON_UP: u32 = 4;
+pub const BUTTON_DOWN: u32 = 5;
+/// The highest button a world may be asked for; anything above is refused.
+pub const BUTTON_MAX: u32 = BUTTON_DOWN;
+
+/// `Notice` in control.proto.
+pub const NOTICE_LOG: u32 = 1;
+
+/// What this world will grant, as a bitmask of `1 << notice`.
+///
+/// A client may ask for anything; it gets the intersection, and the reply says
+/// what that was. Refusing loudly is what stops a caller built against a newer
+/// proto waiting forever for a notice nobody here can send.
+pub const NOTICES_SUPPORTED: u32 = 1 << NOTICE_LOG;
 
 /// Coarse activity. Must match `Activity` in control.proto.
 pub const ACTIVITY_STARTING: u32 = 1;
@@ -243,10 +273,425 @@ pub fn log_line(uptime_ms: u64, stage: &str, level: u32, text: &str) -> Vec<u8> 
     out
 }
 
+/// Decode a `PressButtonRequest` — a single varint field.
+pub fn parse_button(body: &[u8]) -> Option<u32> {
+    let mut at = 0usize;
+    let mut button = 0u32;
+    while at < body.len() {
+        let (tag, next) = varint(body, at)?;
+        at = next;
+        match ((tag >> 3) as u32, (tag & 0x7) as u8) {
+            (1, 0) => {
+                let (value, next) = varint(body, at)?;
+                at = next;
+                button = value as u32;
+            }
+            (_, 0) => at = varint(body, at)?.1,
+            (_, 2) => {
+                let (len, next) = varint(body, at)?;
+                at = next.checked_add(len as usize)?;
+                if at > body.len() {
+                    return None;
+                }
+            }
+            (_, 1) => at = at.checked_add(8)?,
+            (_, 5) => at = at.checked_add(4)?,
+            _ => return None,
+        }
+    }
+    Some(button)
+}
+
+/// Decode an `ExecuteRequest` into a method id and the app's request bytes.
+///
+/// The bytes are returned as a RANGE, not copied: they are an app's own message
+/// in an app's own schema, and this crate has no business looking inside one.
+pub fn parse_execute(body: &[u8]) -> Option<(u32, Option<(usize, usize)>)> {
+    let mut at = 0usize;
+    let mut method = 0u32;
+    let mut request = None;
+    while at < body.len() {
+        let (tag, next) = varint(body, at)?;
+        at = next;
+        match ((tag >> 3) as u32, (tag & 0x7) as u8) {
+            (1, 0) => {
+                let (value, next) = varint(body, at)?;
+                at = next;
+                method = value as u32;
+            }
+            (2, 2) => {
+                let (len, next) = varint(body, at)?;
+                let end = next.checked_add(len as usize)?;
+                if end > body.len() {
+                    return None;
+                }
+                request = Some((next, end));
+                at = end;
+            }
+            (_, 0) => at = varint(body, at)?.1,
+            (_, 2) => {
+                let (len, next) = varint(body, at)?;
+                at = next.checked_add(len as usize)?;
+                if at > body.len() {
+                    return None;
+                }
+            }
+            (_, 1) => at = at.checked_add(8)?,
+            (_, 5) => at = at.checked_add(4)?,
+            _ => return None,
+        }
+    }
+    Some((method, request))
+}
+
+/// Encode an `ExecuteResponse` — the app's own answer, carried verbatim.
+pub fn execute_response(success: bool, output: &[u8], error: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    put_varint_field(&mut out, 1, success as u64);
+    if !output.is_empty() {
+        tag(&mut out, 2, 2);
+        put_varint(&mut out, output.len() as u64);
+        out.extend_from_slice(output);
+    }
+    put_string(&mut out, 3, error);
+    out
+}
+
+/// One entry of a `ListPayloadsResponse`.
+///
+/// Encoded into a nested message and appended, so the caller can stream entries
+/// out of the registry's critical section without materialising them all first.
+#[allow(clippy::too_many_arguments)]
+pub fn payload_info(
+    out: &mut Vec<u8>,
+    index: u32,
+    name: &str,
+    size: u32,
+    integrity: u32,
+    entry_method: u32,
+    is_default: bool,
+    runnable: bool,
+) {
+    let mut entry = Vec::new();
+    put_varint_field(&mut entry, 1, index as u64);
+    put_string(&mut entry, 2, name);
+    put_varint_field(&mut entry, 3, size as u64);
+    put_varint_field(&mut entry, 4, integrity as u64);
+    put_varint_field(&mut entry, 5, entry_method as u64);
+    put_varint_field(&mut entry, 6, is_default as u64);
+    put_varint_field(&mut entry, 7, runnable as u64);
+    tag(out, 1, 2);
+    put_varint(out, entry.len() as u64);
+    out.extend_from_slice(&entry);
+}
+
+/// Close a `ListPayloadsResponse` with the entry the world last ran.
+pub fn payloads_selected(out: &mut Vec<u8>, selected: u32) {
+    put_varint_field(out, 2, selected as u64);
+}
+
+/// Decode a `SelectPayloadRequest` — the same shape as a button.
+pub fn parse_index(body: &[u8]) -> Option<u32> {
+    parse_button(body)
+}
+
+/// Append one row to a `ScreenResponse`.
+///
+/// A BUILDER RATHER THAN A STRUCT, because the rows live inside a critical
+/// section guarding the panel mirror and cannot be lent out as a slice of `&str`
+/// without copying the whole grid first.
+pub fn screen_row(out: &mut Vec<u8>, row: &str) {
+    put_string(out, 1, row);
+}
+
+/// Close a `ScreenResponse` with its dimensions.
+pub fn screen_dims(out: &mut Vec<u8>, cols: u32, height: u32) {
+    put_varint_field(out, 2, cols as u64);
+    put_varint_field(out, 3, height as u64);
+}
+
+/// Decode a `Subscription` into a bitmask of `1 << notice`.
+///
+/// A BITMASK because a world needs to answer "am I sending this one?" on every
+/// service call, and a set membership test that is one AND cannot be the reason
+/// a log line was late.
+///
+/// BOTH ENCODINGS OF A REPEATED ENUM are accepted. proto3 packs them by default
+/// (wire type 2), but the unpacked form (one varint per value, wire type 0) is
+/// legal, is what a hand-written encoder is most likely to emit, and is what a
+/// `no_std` client here would write if it ever needed to subscribe to a peer.
+/// Accepting only the form our own Go client happens to produce would be a
+/// protocol that works exactly until someone writes a second client.
+pub fn parse_subscription(body: &[u8]) -> Option<u32> {
+    let mut at = 0usize;
+    let mut wanted = 0u32;
+    while at < body.len() {
+        let (tag, next) = varint(body, at)?;
+        at = next;
+        let field = (tag >> 3) as u32;
+        let wire = (tag & 0x7) as u8;
+        match (field, wire) {
+            (1, 0) => {
+                let (value, next) = varint(body, at)?;
+                at = next;
+                wanted |= notice_bit(value);
+            }
+            (1, 2) => {
+                let (len, next) = varint(body, at)?;
+                let end = next.checked_add(len as usize)?;
+                if end > body.len() {
+                    return None;
+                }
+                let mut inner = next;
+                while inner < end {
+                    let (value, next) = varint(body, inner)?;
+                    inner = next;
+                    wanted |= notice_bit(value);
+                }
+                at = end;
+            }
+            // Unknown fields skipped by wire type, as everywhere else here.
+            (_, 0) => at = varint(body, at)?.1,
+            (_, 2) => {
+                let (len, next) = varint(body, at)?;
+                at = next.checked_add(len as usize)?;
+                if at > body.len() {
+                    return None;
+                }
+            }
+            (_, 1) => at = at.checked_add(8)?,
+            (_, 5) => at = at.checked_add(4)?,
+            _ => return None,
+        }
+    }
+    Some(wanted)
+}
+
+/// A notice number as a bit. Anything past the mask's width is DROPPED rather
+/// than wrapped — `1 << 33` is not a distinct bit, and silently aliasing an
+/// unknown notice onto a known one would grant a subscription nobody asked for.
+fn notice_bit(notice: u64) -> u32 {
+    if notice < 32 {
+        1 << notice
+    } else {
+        0
+    }
+}
+
+/// Encode a `Subscription`, for the reply that says what was granted.
+pub fn subscription(mask: u32) -> Vec<u8> {
+    let mut values = Vec::new();
+    for notice in 0..32u32 {
+        if mask & (1 << notice) != 0 {
+            put_varint(&mut values, notice as u64);
+        }
+    }
+    let mut out = Vec::new();
+    // PACKED, which is what a proto3 encoder produces, so the reply looks like
+    // any other and a generated client decodes it without a special case.
+    if !values.is_empty() {
+        tag(&mut out, 1, 2);
+        put_varint(&mut out, values.len() as u64);
+        out.extend_from_slice(&values);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Encoding without a heap
+// ---------------------------------------------------------------------------
+//
+// EVERYTHING ABOVE RETURNS `Vec`, AND A LOG LINE CANNOT.
+//
+// The badge writes its first log lines before it has a heap: PSRAM comes up at
+// stage 4, and stages 1 to 3 — clocks, the data bus, the display — have already
+// narrated themselves by then. Those are also the stages most likely to be the
+// reason somebody is reading the log at all.
+//
+// So a `LogLine` is encoded into a caller-provided buffer. It is the one message
+// on this protocol with that constraint, and it is not a general preference:
+// replies are answered long after boot, are occasional, and are clearer built
+// with a `Vec`.
+
+/// A write cursor over a fixed buffer, which refuses rather than truncates.
+///
+/// A SHORT WRITE IS NOT A SMALL FRAME. Half a protobuf field decodes as
+/// something else entirely, and a frame whose header disagrees with its body
+/// desynchronises every frame after it. So overflow poisons the cursor and the
+/// caller gets `None` — one check, at the end, instead of one per field.
+struct Cursor<'a> {
+    out: &'a mut [u8],
+    at: usize,
+    overflowed: bool,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(out: &'a mut [u8]) -> Self {
+        Self { out, at: 0, overflowed: false }
+    }
+
+    fn byte(&mut self, value: u8) {
+        if self.at < self.out.len() {
+            self.out[self.at] = value;
+            self.at += 1;
+        } else {
+            self.overflowed = true;
+        }
+    }
+
+    fn bytes(&mut self, values: &[u8]) {
+        for value in values {
+            self.byte(*value);
+        }
+    }
+
+    fn varint(&mut self, mut value: u64) {
+        while value >= 0x80 {
+            self.byte((value as u8) | 0x80);
+            value >>= 7;
+        }
+        self.byte(value as u8);
+    }
+
+    fn tag(&mut self, field: u32, wire: u8) {
+        self.varint(((field as u64) << 3) | wire as u64);
+    }
+
+    fn string(&mut self, field: u32, value: &str) {
+        if value.is_empty() {
+            return;
+        }
+        self.tag(field, 2);
+        self.varint(value.len() as u64);
+        self.bytes(value.as_bytes());
+    }
+
+    fn varint_field(&mut self, field: u32, value: u64) {
+        if value == 0 {
+            return;
+        }
+        self.tag(field, 0);
+        self.varint(value);
+    }
+
+    fn finish(self) -> Option<usize> {
+        if self.overflowed {
+            None
+        } else {
+            Some(self.at)
+        }
+    }
+}
+
+/// Encode a `LogLine` into `out`, returning its length.
+///
+/// Zero-valued fields are OMITTED, which is proto3's own rule and the reason an
+/// undated line can be honest: a zero `uptime_ms` decodes as unset rather than
+/// as "at boot".
+pub fn log_line_into(
+    out: &mut [u8],
+    uptime_ms: u64,
+    stage: u32,
+    level: u32,
+    scope: u32,
+    text: &str,
+) -> Option<usize> {
+    let mut cursor = Cursor::new(out);
+    cursor.varint_field(1, uptime_ms);
+    cursor.varint_field(2, stage as u64);
+    cursor.varint_field(3, level as u64);
+    cursor.string(4, text);
+    cursor.varint_field(5, scope as u64);
+    cursor.finish()
+}
+
+/// Encode a `ControlResponse` into `out`, returning its length.
+///
+/// The no-heap twin of [`response`], and it exists for ONE CASE: refusing a
+/// request that arrived before the world had a heap. The badge brings PSRAM up
+/// at stage 4, so a question asked during stages 1 to 3 — exactly the stages
+/// somebody debugging a bring-up would ask about — would otherwise allocate
+/// against an uninitialised allocator and take the board down with it. The
+/// answer that says "not yet" must not need the thing it is saying is missing.
+pub fn response_into(out: &mut [u8], ok: bool, error: &str) -> Option<usize> {
+    let mut cursor = Cursor::new(out);
+    if ok {
+        cursor.tag(1, 0);
+        cursor.varint(1);
+    }
+    cursor.string(2, error);
+    cursor.finish()
+}
+
+/// Wrap a payload in a frame, into `out`, returning its length.
+///
+/// The no-heap twin of [`frame`]. The two MUST agree byte for byte, which is
+/// what `frame_into_matches_frame` in the tests below exists to hold them to.
+pub fn frame_into(out: &mut [u8], kind: u8, payload: &[u8]) -> Option<usize> {
+    let mut cursor = Cursor::new(out);
+    cursor.bytes(&MAGIC);
+    cursor.byte(kind);
+    cursor.bytes(&(payload.len() as u16).to_le_bytes());
+    cursor.bytes(payload);
+    cursor.bytes(&crate::catalog::checksum(payload).to_le_bytes());
+    cursor.finish()
+}
+
 /// `Level` in control.proto.
 pub const LEVEL_STAGE_OK: u32 = 1;
 pub const LEVEL_STAGE_FAIL: u32 = 2;
 pub const LEVEL_NOTE: u32 = 3;
+/// A stage announced and not yet resolved — the state a hang leaves behind.
+pub const LEVEL_STAGE_OPEN: u32 = 4;
+
+/// `Scope` in control.proto.
+pub const SCOPE_HARDWARE_ONLY: u32 = 1;
+pub const SCOPE_EMULATED: u32 = 2;
+
+/// `Stage` in control.proto. The bring-up's steps, as values a test can name.
+pub const STAGE_CLOCKS: u32 = 1;
+pub const STAGE_DATA_BUS: u32 = 2;
+pub const STAGE_DISPLAY: u32 = 3;
+pub const STAGE_PSRAM: u32 = 4;
+pub const STAGE_PAYLOAD_REGION: u32 = 5;
+pub const STAGE_VERIFY_PAYLOAD: u32 = 6;
+pub const STAGE_INSTANTIATE: u32 = 7;
+pub const STAGE_MANIFEST: u32 = 8;
+pub const STAGE_EXECUTE: u32 = 9;
+
+/// `WorldKind`.
+pub const WORLD_KIND_NORMAL: u32 = 1;
+pub const WORLD_KIND_MINIMAL: u32 = 2;
+
+/// `Tier`.
+pub const TIER_RP2350: u32 = 1;
+
+/// `ScreenLayout`.
+pub const SCREEN_LAYOUT_SPLIT: u32 = 1;
+pub const SCREEN_LAYOUT_FULL: u32 = 2;
+pub const SCREEN_LAYOUT_NONE: u32 = 3;
+
+/// `InputMode`.
+pub const INPUT_MODE_OFF: u32 = 1;
+pub const INPUT_MODE_KEYBOARD: u32 = 2;
+
+/// `TextOutlet` in platform.proto, reused rather than redeclared.
+///
+/// TRANSCRIBED FROM platform.proto, NOT GUESSED — and it was guessed once. The
+/// first version of these three had `DISPLAY = 2, UART = 3`, which is the
+/// alphabetical order and not the declared one, so a badge writing to its screen
+/// told every client it was writing to a serial port. Nothing caught it: both
+/// values are legal, the frame checksummed, the enum name printed cleanly at the
+/// far end. Only a run where the log said `display` on the same line disagreed.
+///
+/// Which is the joke this file is currently telling at its own expense: the
+/// change these constants exist to support is "stop retyping the protocol by
+/// hand", and they are the protocol, retyped by hand. They are the last hand
+/// copy, because the no_std crate cannot run protoc — so if a fourth outlet ever
+/// appears, this is where it has to be added too.
+pub const TEXT_OUTLET_NONE: u32 = 1;
+pub const TEXT_OUTLET_UART: u32 = 2;
+pub const TEXT_OUTLET_DISPLAY: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Encoding answers
@@ -268,6 +713,16 @@ fn put_varint(out: &mut Vec<u8>, mut value: u64) {
     }
 }
 
+/// A varint field, OMITTED when zero — proto3's rule, and what lets an unset
+/// enum stay unset rather than becoming its zero variant on the wire.
+fn put_varint_field(out: &mut Vec<u8>, field: u32, value: u64) {
+    if value == 0 {
+        return;
+    }
+    tag(out, field, 0);
+    put_varint(out, value);
+}
+
 fn put_string(out: &mut Vec<u8>, field: u32, value: &str) {
     if value.is_empty() {
         // Proto3 default: an empty string encodes to nothing. Emitting it would
@@ -281,15 +736,24 @@ fn put_string(out: &mut Vec<u8>, field: u32, value: &str) {
 
 /// What a world is and what it is doing.
 pub struct WorldState<'a> {
-    pub world: &'a str,
-    pub tier: &'a str,
+    /// `WorldKind`, `Tier`, `ScreenLayout`, `InputMode`, `TextOutlet` — all
+    /// numbers, all closed sets declared in control.proto.
+    ///
+    /// These were `&str` fields and a `config` slice of string pairs, which meant
+    /// a world rendered an enum it already had to prose so that a client could
+    /// compare prose. Both ends knew the type; only the wire did not.
+    pub world: u32,
+    pub tier: u32,
+    /// GENUINELY A STRING: a version is not a closed set.
     pub version: &'a str,
-    /// Flash-time knobs, as key/value pairs. A slice rather than a map because a
-    /// world has a handful and `no_std` has no map worth the dependency.
-    pub config: &'a [(&'a str, &'a str)],
+    pub screen: u32,
+    pub input: u32,
+    pub text: u32,
     pub activity: u32,
     pub app: &'a str,
     /// What the app last said it was doing. See `activity.rs`.
+    ///
+    /// FREE TEXT ON PURPOSE — the world cannot know an app's vocabulary.
     pub app_activity: &'a str,
     pub uptime_ms: u64,
 }
@@ -298,28 +762,19 @@ impl WorldState<'_> {
     /// Encode as the proto message of the same name.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        put_string(&mut out, 1, self.world);
-        put_string(&mut out, 2, self.tier);
+        // Field numbers 1, 2 and 4 are RESERVED — they carried the string world,
+        // the string tier and the config map. Reusing them would make an older
+        // client decode a number as the text it used to be.
+        put_varint_field(&mut out, 9, self.world as u64);
+        put_varint_field(&mut out, 10, self.tier as u64);
         put_string(&mut out, 3, self.version);
-        for (key, value) in self.config {
-            // A protobuf map entry is a message with key=1, value=2.
-            let mut entry = Vec::new();
-            put_string(&mut entry, 1, key);
-            put_string(&mut entry, 2, value);
-            tag(&mut out, 4, 2);
-            put_varint(&mut out, entry.len() as u64);
-            out.extend_from_slice(&entry);
-        }
-        if self.activity != 0 {
-            tag(&mut out, 5, 0);
-            put_varint(&mut out, self.activity as u64);
-        }
+        put_varint_field(&mut out, 11, self.screen as u64);
+        put_varint_field(&mut out, 12, self.input as u64);
+        put_varint_field(&mut out, 13, self.text as u64);
+        put_varint_field(&mut out, 5, self.activity as u64);
         put_string(&mut out, 6, self.app);
         put_string(&mut out, 8, self.app_activity);
-        if self.uptime_ms != 0 {
-            tag(&mut out, 7, 0);
-            put_varint(&mut out, self.uptime_ms);
-        }
+        put_varint_field(&mut out, 7, self.uptime_ms);
         out
     }
 }
@@ -471,10 +926,12 @@ mod tests {
     #[test]
     fn a_world_state_encodes_and_frames() {
         let state = WorldState {
-            world: "normal",
-            tier: "rp2350",
+            world: WORLD_KIND_NORMAL,
+            tier: TIER_RP2350,
             version: "0.1.0",
-            config: &[("screen", "split"), ("input", "keyboard")],
+            screen: SCREEN_LAYOUT_SPLIT,
+            input: INPUT_MODE_KEYBOARD,
+            text: TEXT_OUTLET_DISPLAY,
             activity: ACTIVITY_RUNNING,
             app: "countdown",
             app_activity: "tick 3 of 5",
@@ -485,10 +942,182 @@ mod tests {
         // It is a frame, and it survives its own checksum.
         assert_eq!(&framed[..4], &MAGIC);
         assert!(matches!(scan(&framed), Found::Frame(_, _) | Found::Skip(_)));
-        // The strings are in there — a decoder-free smoke test that the fields
-        // were written at all.
-        assert!(framed.windows(6).any(|w| w == b"normal"));
+        // The strings that are still strings are in there — a decoder-free smoke
+        // test that the fields were written at all. `world` and `tier` are no
+        // longer among them, which is the point of this change.
+        assert!(!framed.windows(6).any(|w| w == b"normal"), "an enum must not travel as its name");
         assert!(framed.windows(9).any(|w| w == b"countdown"));
         assert!(framed.windows(11).any(|w| w == b"tick 3 of 5"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Subscriptions (D8c)
+    // -----------------------------------------------------------------------
+
+    /// A repeated enum encoded the way proto3 does it by default.
+    fn packed(notices: &[u32]) -> Vec<u8> {
+        let mut values = Vec::new();
+        for notice in notices {
+            put_varint(&mut values, *notice as u64);
+        }
+        let mut out = Vec::new();
+        tag(&mut out, 1, 2);
+        put_varint(&mut out, values.len() as u64);
+        out.extend_from_slice(&values);
+        out
+    }
+
+    /// The same set, one varint per value. Also legal, and what a hand-written
+    /// encoder is most likely to produce.
+    fn unpacked(notices: &[u32]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for notice in notices {
+            tag(&mut out, 1, 0);
+            put_varint(&mut out, *notice as u64);
+        }
+        out
+    }
+
+    #[test]
+    fn both_encodings_of_a_repeated_enum_decode_the_same() {
+        let wanted = 1 << NOTICE_LOG;
+        assert_eq!(parse_subscription(&packed(&[NOTICE_LOG])), Some(wanted));
+        assert_eq!(parse_subscription(&unpacked(&[NOTICE_LOG])), Some(wanted));
+    }
+
+    #[test]
+    fn an_empty_subscription_is_an_unsubscribe_not_an_error() {
+        // An empty `Subscription` encodes to zero bytes, so this is exactly what
+        // arrives when a client asks to be left alone.
+        assert_eq!(parse_subscription(&[]), Some(0));
+    }
+
+    #[test]
+    fn a_notice_this_world_does_not_know_is_refused_not_granted() {
+        // A caller built from a newer proto asks for something unknown. It must
+        // not be silently aliased onto a notice that does exist.
+        let asked = parse_subscription(&packed(&[NOTICE_LOG, 7])).unwrap();
+        assert_eq!(asked & NOTICES_SUPPORTED, 1 << NOTICE_LOG);
+        assert_eq!(NOTICES_SUPPORTED & (1 << 7), 0, "7 is not supported");
+    }
+
+    #[test]
+    fn a_notice_past_the_masks_width_cannot_alias_onto_a_real_one() {
+        // `1 << 33` wraps on a u32 shift and would land on bit 1 — which is the
+        // log. Granting a log subscription to someone who asked for notice 33
+        // would be the worst kind of wrong: plausible.
+        let asked = parse_subscription(&packed(&[33])).unwrap();
+        assert_eq!(asked, 0);
+    }
+
+    #[test]
+    fn a_granted_set_round_trips() {
+        let granted = 1 << NOTICE_LOG;
+        assert_eq!(parse_subscription(&subscription(granted)), Some(granted));
+    }
+
+    #[test]
+    fn granting_nothing_encodes_to_nothing() {
+        assert!(subscription(0).is_empty());
+        assert_eq!(parse_subscription(&subscription(0)), Some(0));
+    }
+
+    #[test]
+    fn a_subscribe_request_survives_framing() {
+        let body = {
+            let mut out = Vec::new();
+            tag(&mut out, 1, 0);
+            put_varint(&mut out, VERB_SUBSCRIBE as u64);
+            tag(&mut out, 2, 2);
+            let payload = packed(&[NOTICE_LOG]);
+            put_varint(&mut out, payload.len() as u64);
+            out.extend_from_slice(&payload);
+            out
+        };
+        let framed = frame(KIND_REQUEST, &body);
+        let Found::Frame(request, consumed) = scan(&framed) else {
+            panic!("a well-formed subscribe did not scan");
+        };
+        assert_eq!(consumed, framed.len());
+        assert_eq!(request.verb, VERB_SUBSCRIBE);
+        let (start, end) = request.payload.expect("subscribe carries a payload");
+        assert_eq!(
+            parse_subscription(&framed[start..end]),
+            Some(1 << NOTICE_LOG)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Encoding without a heap
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn frame_into_matches_frame() {
+        // The two encoders must be interchangeable: the badge uses the no-heap
+        // one for log lines and the allocating one for replies, and a reader has
+        // no idea which produced what.
+        let payload = b"the quick brown fox";
+        let allocated = frame(KIND_LOG, payload);
+        let mut fixed = [0u8; 64];
+        let len = frame_into(&mut fixed, KIND_LOG, payload).expect("fits");
+        assert_eq!(&fixed[..len], &allocated[..]);
+    }
+
+    #[test]
+    fn a_log_line_encoded_without_a_heap_scans_back() {
+        let mut body = [0u8; 128];
+        let len = log_line_into(
+            &mut body,
+            1234,
+            STAGE_INSTANTIATE,
+            LEVEL_STAGE_OK,
+            SCOPE_HARDWARE_ONLY,
+            "2914 KB heap",
+        )
+        .expect("fits");
+
+        let mut framed = [0u8; 192];
+        let total = frame_into(&mut framed, KIND_LOG, &body[..len]).expect("fits");
+        // Scanning proves the magic, the length and the checksum all agree.
+        assert!(matches!(scan(&framed[..total]), Found::Frame(_, _) | Found::Skip(_)));
+        assert_eq!(&framed[..4], &MAGIC);
+        assert_eq!(framed[4], KIND_LOG);
+    }
+
+    #[test]
+    fn a_buffer_too_small_refuses_rather_than_truncating() {
+        // A short write is not a small frame: half a protobuf field decodes as
+        // something else, and a header that disagrees with its body
+        // desynchronises everything after it.
+        let mut tiny = [0u8; 8];
+        assert_eq!(
+            log_line_into(&mut tiny, 1234, STAGE_INSTANTIATE, LEVEL_NOTE, 0, "a much longer line than eight bytes"),
+            None
+        );
+        assert_eq!(frame_into(&mut tiny, KIND_LOG, b"much longer than eight"), None);
+    }
+
+    #[test]
+    fn an_undated_line_omits_its_timestamp_rather_than_claiming_boot() {
+        // Backfilled history has no recoverable time. Zero must encode as ABSENT
+        // so it decodes as unset, not as "this happened at 0 ms".
+        let mut with = [0u8; 64];
+        let with_len = log_line_into(&mut with, 5, 0, LEVEL_NOTE, 0, "x").unwrap();
+        let mut without = [0u8; 64];
+        let without_len = log_line_into(&mut without, 0, 0, LEVEL_NOTE, 0, "x").unwrap();
+        assert!(
+            without_len < with_len,
+            "a zero uptime must take no bytes on the wire"
+        );
+    }
+
+    #[test]
+    fn a_stage_that_opens_and_never_resolves_is_expressible() {
+        // The case the whole field exists for: the world announced something and
+        // did not come back. This must encode without a result.
+        let mut body = [0u8; 96];
+        let len = log_line_into(&mut body, 42, STAGE_PSRAM, LEVEL_STAGE_OPEN, SCOPE_HARDWARE_ONLY, "")
+            .expect("fits");
+        assert!(len > 0);
     }
 }

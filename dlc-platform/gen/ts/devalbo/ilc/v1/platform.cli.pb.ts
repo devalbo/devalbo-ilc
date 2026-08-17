@@ -20,7 +20,7 @@ export const PlatformServiceCLI = [
     summary: "Bundle a subtree into one portable blob",
     flags: [
       { name: "prefix", field: 1, kind: "string", short: "p", help: "subtree to export (default: whole root)" },
-      { name: "format", field: 2, kind: "enum", short: "f", help: "bundle format", default: "BUNDLE_FORMAT_BFT", enumValues: ["BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"] },
+      { name: "format", field: 2, kind: "enum", short: "f", help: "bundle format", default: "BUNDLE_FORMAT_BFT", enumValues: ["BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"], enumNumbers: [0, 1, 2, 3] },
     ],
   },
   {
@@ -31,7 +31,7 @@ export const PlatformServiceCLI = [
     flags: [
       { name: "bundle", field: 1, kind: "bytes", source: "file", positional: 1, required: true, help: "bundle bytes to import" },
       { name: "prefix", field: 2, kind: "string", short: "p", help: "destination subtree" },
-      { name: "mode", field: 3, kind: "enum", help: "merge into the destination, or replace it", default: "IMPORT_MODE_MERGE", enumValues: ["IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"] },
+      { name: "mode", field: 3, kind: "enum", help: "merge into the destination, or replace it", default: "IMPORT_MODE_MERGE", enumValues: ["IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"], enumNumbers: [0, 1, 2] },
     ],
   },
   {

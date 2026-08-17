@@ -69,17 +69,367 @@ func (x Activity) String() string {
 	return strconv.Itoa(int(x))
 }
 
+// Which world a firmware was built as. Mirrors `BadgeWorld` in world.rs.
+type WorldKind int32
+
+const (
+	WorldKind_WORLD_KIND_UNSPECIFIED WorldKind = 0
+	// Text: the app's output is meant to be READ.
+	WorldKind_WORLD_KIND_NORMAL WorldKind = 1
+	// One colour, meaning "how is it going" — a deliberate simulation of a world
+	// with almost no output capability.
+	WorldKind_WORLD_KIND_MINIMAL WorldKind = 2
+)
+
+// Enum value maps for WorldKind.
+var (
+	WorldKind_name = map[int32]string{
+		0: "WORLD_KIND_UNSPECIFIED",
+		1: "WORLD_KIND_NORMAL",
+		2: "WORLD_KIND_MINIMAL",
+	}
+	WorldKind_value = map[string]int32{
+		"WORLD_KIND_UNSPECIFIED": 0,
+		"WORLD_KIND_NORMAL":      1,
+		"WORLD_KIND_MINIMAL":     2,
+	}
+)
+
+func (x WorldKind) Enum() *WorldKind {
+	p := new(WorldKind)
+	*p = x
+	return p
+}
+
+func (x WorldKind) String() string {
+	name, valid := WorldKind_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// Which tier is answering. The same value an app sees as `ILC_TIER`, so a test
+// can assert that a world advertises what it claims.
+type Tier int32
+
+const (
+	Tier_TIER_UNSPECIFIED Tier = 0
+	Tier_TIER_RP2350      Tier = 1
+	Tier_TIER_BROWSER     Tier = 2
+	Tier_TIER_NATIVE      Tier = 3
+	Tier_TIER_QEMU_ARMV7M Tier = 4
+)
+
+// Enum value maps for Tier.
+var (
+	Tier_name = map[int32]string{
+		0: "TIER_UNSPECIFIED",
+		1: "TIER_RP2350",
+		2: "TIER_BROWSER",
+		3: "TIER_NATIVE",
+		4: "TIER_QEMU_ARMV7M",
+	}
+	Tier_value = map[string]int32{
+		"TIER_UNSPECIFIED": 0,
+		"TIER_RP2350":      1,
+		"TIER_BROWSER":     2,
+		"TIER_NATIVE":      3,
+		"TIER_QEMU_ARMV7M": 4,
+	}
+)
+
+func (x Tier) Enum() *Tier {
+	p := new(Tier)
+	*p = x
+	return p
+}
+
+func (x Tier) String() string {
+	name, valid := Tier_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// How a world divides its panel. Mirrors `ScreenLayout` in world.rs.
+type ScreenLayout int32
+
+const (
+	ScreenLayout_SCREEN_LAYOUT_UNSPECIFIED ScreenLayout = 0
+	// A world band across the top, the app underneath.
+	ScreenLayout_SCREEN_LAYOUT_SPLIT ScreenLayout = 1
+	// The app gets everything.
+	ScreenLayout_SCREEN_LAYOUT_FULL ScreenLayout = 2
+	// There is no panel.
+	ScreenLayout_SCREEN_LAYOUT_NONE ScreenLayout = 3
+)
+
+// Enum value maps for ScreenLayout.
+var (
+	ScreenLayout_name = map[int32]string{
+		0: "SCREEN_LAYOUT_UNSPECIFIED",
+		1: "SCREEN_LAYOUT_SPLIT",
+		2: "SCREEN_LAYOUT_FULL",
+		3: "SCREEN_LAYOUT_NONE",
+	}
+	ScreenLayout_value = map[string]int32{
+		"SCREEN_LAYOUT_UNSPECIFIED": 0,
+		"SCREEN_LAYOUT_SPLIT":       1,
+		"SCREEN_LAYOUT_FULL":        2,
+		"SCREEN_LAYOUT_NONE":        3,
+	}
+)
+
+func (x ScreenLayout) Enum() *ScreenLayout {
+	p := new(ScreenLayout)
+	*p = x
+	return p
+}
+
+func (x ScreenLayout) String() string {
+	name, valid := ScreenLayout_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// Whether a world can collect text, and how. Mirrors `BADGE_INPUT`.
+type InputMode int32
+
+const (
+	InputMode_INPUT_MODE_UNSPECIFIED InputMode = 0
+	// The world will not ask for input, so an app that needs some cannot run here.
+	InputMode_INPUT_MODE_OFF InputMode = 1
+	// The character strip and the number spinner (WORLD-INPUT-PLAN D3).
+	InputMode_INPUT_MODE_KEYBOARD InputMode = 2
+)
+
+// Enum value maps for InputMode.
+var (
+	InputMode_name = map[int32]string{
+		0: "INPUT_MODE_UNSPECIFIED",
+		1: "INPUT_MODE_OFF",
+		2: "INPUT_MODE_KEYBOARD",
+	}
+	InputMode_value = map[string]int32{
+		"INPUT_MODE_UNSPECIFIED": 0,
+		"INPUT_MODE_OFF":         1,
+		"INPUT_MODE_KEYBOARD":    2,
+	}
+)
+
+func (x InputMode) Enum() *InputMode {
+	p := new(InputMode)
+	*p = x
+	return p
+}
+
+func (x InputMode) String() string {
+	name, valid := InputMode_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// A stage of the bring-up.
+//
+// AN ENUM, NOT THE ANNOUNCEMENT TEXT. `LogLine.stage` was a string carrying
+// `"instantiate countdown"` — which meant a test asserting on a stage was
+// matching prose that changes whenever somebody rewords a label, and no client
+// could enumerate the stages that exist. The PARAMETER (which app, which method)
+// stays in `text`, where a human reads it; the identity is here, where a machine
+// does.
+type Stage int32
+
+const (
+	Stage_STAGE_UNSPECIFIED    Stage = 0
+	Stage_STAGE_CLOCKS         Stage = 1
+	Stage_STAGE_DATA_BUS       Stage = 2
+	Stage_STAGE_DISPLAY        Stage = 3
+	Stage_STAGE_PSRAM          Stage = 4
+	Stage_STAGE_PAYLOAD_REGION Stage = 5
+	Stage_STAGE_VERIFY_PAYLOAD Stage = 6
+	Stage_STAGE_INSTANTIATE    Stage = 7
+	Stage_STAGE_MANIFEST       Stage = 8
+	Stage_STAGE_EXECUTE        Stage = 9
+)
+
+// Enum value maps for Stage.
+var (
+	Stage_name = map[int32]string{
+		0: "STAGE_UNSPECIFIED",
+		1: "STAGE_CLOCKS",
+		2: "STAGE_DATA_BUS",
+		3: "STAGE_DISPLAY",
+		4: "STAGE_PSRAM",
+		5: "STAGE_PAYLOAD_REGION",
+		6: "STAGE_VERIFY_PAYLOAD",
+		7: "STAGE_INSTANTIATE",
+		8: "STAGE_MANIFEST",
+		9: "STAGE_EXECUTE",
+	}
+	Stage_value = map[string]int32{
+		"STAGE_UNSPECIFIED":    0,
+		"STAGE_CLOCKS":         1,
+		"STAGE_DATA_BUS":       2,
+		"STAGE_DISPLAY":        3,
+		"STAGE_PSRAM":          4,
+		"STAGE_PAYLOAD_REGION": 5,
+		"STAGE_VERIFY_PAYLOAD": 6,
+		"STAGE_INSTANTIATE":    7,
+		"STAGE_MANIFEST":       8,
+		"STAGE_EXECUTE":        9,
+	}
+)
+
+func (x Stage) Enum() *Stage {
+	p := new(Stage)
+	*p = x
+	return p
+}
+
+func (x Stage) String() string {
+	name, valid := Stage_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// A button on the world's own hardware (D3).
+//
+// THE WORLD'S BUTTONS, NOT AN APP'S ACTIONS. An app never learns that a press
+// was injected rather than pressed, and cannot ask — driving a world must be
+// indistinguishable from using it, or a test proves something about the test
+// harness instead of about the app (D6).
+//
+// HOME IS ABSENT DELIBERATELY. On this board it is the BOOTSEL button, wired
+// into the boot path rather than freely readable, so a value for it would be a
+// promise the badge cannot keep. A verb that accepts a button it will silently
+// ignore is worse than one that refuses.
+type Button int32
+
+const (
+	Button_BUTTON_UNSPECIFIED Button = 0
+	Button_BUTTON_A           Button = 1
+	Button_BUTTON_B           Button = 2
+	Button_BUTTON_C           Button = 3
+	Button_BUTTON_UP          Button = 4
+	Button_BUTTON_DOWN        Button = 5
+)
+
+// Enum value maps for Button.
+var (
+	Button_name = map[int32]string{
+		0: "BUTTON_UNSPECIFIED",
+		1: "BUTTON_A",
+		2: "BUTTON_B",
+		3: "BUTTON_C",
+		4: "BUTTON_UP",
+		5: "BUTTON_DOWN",
+	}
+	Button_value = map[string]int32{
+		"BUTTON_UNSPECIFIED": 0,
+		"BUTTON_A":           1,
+		"BUTTON_B":           2,
+		"BUTTON_C":           3,
+		"BUTTON_UP":          4,
+		"BUTTON_DOWN":        5,
+	}
+)
+
+func (x Button) Enum() *Button {
+	p := new(Button)
+	*p = x
+	return p
+}
+
+func (x Button) String() string {
+	name, valid := Button_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// Whether a payload's bytes still check out. Mirrors `catalog::Integrity`.
+type Integrity int32
+
+const (
+	Integrity_INTEGRITY_UNSPECIFIED Integrity = 0
+	// Checksum present and correct.
+	Integrity_INTEGRITY_VERIFIED Integrity = 1
+	// No checksum recorded — an image built before the field existed.
+	Integrity_INTEGRITY_UNVERIFIED Integrity = 2
+	// Checksum present and WRONG: a half-finished drag, a bad write, a truncated
+	// UF2.
+	Integrity_INTEGRITY_CORRUPT Integrity = 3
+	// Bytes intact, built against a DIFFERENT engine. Distinct from corrupt
+	// because the remedy differs: one means reflash the file, the other means
+	// rebuild it.
+	Integrity_INTEGRITY_WRONG_ENGINE Integrity = 4
+)
+
+// Enum value maps for Integrity.
+var (
+	Integrity_name = map[int32]string{
+		0: "INTEGRITY_UNSPECIFIED",
+		1: "INTEGRITY_VERIFIED",
+		2: "INTEGRITY_UNVERIFIED",
+		3: "INTEGRITY_CORRUPT",
+		4: "INTEGRITY_WRONG_ENGINE",
+	}
+	Integrity_value = map[string]int32{
+		"INTEGRITY_UNSPECIFIED":  0,
+		"INTEGRITY_VERIFIED":     1,
+		"INTEGRITY_UNVERIFIED":   2,
+		"INTEGRITY_CORRUPT":      3,
+		"INTEGRITY_WRONG_ENGINE": 4,
+	}
+)
+
+func (x Integrity) Enum() *Integrity {
+	p := new(Integrity)
+	*p = x
+	return p
+}
+
+func (x Integrity) String() string {
+	name, valid := Integrity_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 type Level int32
 
 const (
 	Level_LEVEL_UNSPECIFIED Level = 0
-	// A stage announced, resolved OK, or resolved FAIL. Named rather than a bool
-	// because "did not resolve" is a third state and the one that matters when a
-	// world hangs.
-	Level_LEVEL_STAGE_OK   Level = 1
-	Level_LEVEL_STAGE_FAIL Level = 2
+	Level_LEVEL_STAGE_OK    Level = 1
+	Level_LEVEL_STAGE_FAIL  Level = 2
 	// Detail under a stage.
 	Level_LEVEL_NOTE Level = 3
+	// A stage ANNOUNCED and not yet resolved.
+	//
+	// THE STATE THAT MATTERS WHEN A WORLD HANGS, and it was missing. The enum
+	// above once carried a comment claiming "did not resolve" was a third state
+	// and the reason this was not a bool — while having no value for it. So the
+	// one case the field was reasoned about was the one case it could not express.
+	//
+	// It is worse than a gap on this tier, because of how a stage is WRITTEN: the
+	// world emits `6. instantiate countdown ... ` with no newline and closes the
+	// line with the result. A frame stream built on completed lines therefore said
+	// NOTHING AT ALL about a stage that hung — a reader saw five stages and
+	// silence, and could locate the hang only as "after 5", never by name.
+	//
+	// Emitted when the stage opens, so a client learns the name before the thing
+	// that might not finish is attempted.
+	Level_LEVEL_STAGE_OPEN Level = 4
 )
 
 // Enum value maps for Level.
@@ -89,12 +439,14 @@ var (
 		1: "LEVEL_STAGE_OK",
 		2: "LEVEL_STAGE_FAIL",
 		3: "LEVEL_NOTE",
+		4: "LEVEL_STAGE_OPEN",
 	}
 	Level_value = map[string]int32{
 		"LEVEL_UNSPECIFIED": 0,
 		"LEVEL_STAGE_OK":    1,
 		"LEVEL_STAGE_FAIL":  2,
 		"LEVEL_NOTE":        3,
+		"LEVEL_STAGE_OPEN":  4,
 	}
 )
 
@@ -106,6 +458,50 @@ func (x Level) Enum() *Level {
 
 func (x Level) String() string {
 	name, valid := Level_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// Whether a check could have been run anywhere, or only on the board.
+//
+// Mirrors `report::Scope` in the badge firmware, which is where the distinction
+// is enforced; this carries it to a reader that is not looking at the panel.
+type Scope int32
+
+const (
+	Scope_SCOPE_UNSPECIFIED Scope = 0
+	// Only the board can answer: PSRAM and its XIP-disabled init, the ST7789 on a
+	// bit-banged bus, flash-mapped payloads, the crystal, a Cortex-M33.
+	Scope_SCOPE_HARDWARE_ONLY Scope = 1
+	// Already proven green under `make qemu`. A failure here is not "does it
+	// work" but "does the BOARD disagree with the emulator".
+	Scope_SCOPE_EMULATED Scope = 2
+)
+
+// Enum value maps for Scope.
+var (
+	Scope_name = map[int32]string{
+		0: "SCOPE_UNSPECIFIED",
+		1: "SCOPE_HARDWARE_ONLY",
+		2: "SCOPE_EMULATED",
+	}
+	Scope_value = map[string]int32{
+		"SCOPE_UNSPECIFIED":   0,
+		"SCOPE_HARDWARE_ONLY": 1,
+		"SCOPE_EMULATED":      2,
+	}
+)
+
+func (x Scope) Enum() *Scope {
+	p := new(Scope)
+	*p = x
+	return p
+}
+
+func (x Scope) String() string {
+	name, valid := Scope_name[int32(x)]
 	if valid {
 		return name
 	}
@@ -128,6 +524,9 @@ const (
 	Verb_VERB_LIST_PAYLOADS  Verb = 5
 	Verb_VERB_SELECT_PAYLOAD Verb = 6
 	Verb_VERB_REBOOT         Verb = 7
+	// Ask to be sent notices. Payload is a `Subscription`; the reply echoes the
+	// set actually granted.
+	Verb_VERB_SUBSCRIBE Verb = 8
 )
 
 // Enum value maps for Verb.
@@ -141,6 +540,7 @@ var (
 		5: "VERB_LIST_PAYLOADS",
 		6: "VERB_SELECT_PAYLOAD",
 		7: "VERB_REBOOT",
+		8: "VERB_SUBSCRIBE",
 	}
 	Verb_value = map[string]int32{
 		"VERB_UNSPECIFIED":     0,
@@ -151,6 +551,7 @@ var (
 		"VERB_LIST_PAYLOADS":   5,
 		"VERB_SELECT_PAYLOAD":  6,
 		"VERB_REBOOT":          7,
+		"VERB_SUBSCRIBE":       8,
 	}
 )
 
@@ -215,20 +616,18 @@ func (x Notice) String() string {
 // those, and three debugging cycles went on that ambiguity in one session.
 type WorldState struct {
 	unknownFields []byte
-	// Which world this firmware was built as — `normal`, `minimal`. A browser
-	// world reports what it is emulating.
-	World string `protobuf:"bytes,1,opt,name=world,proto3" json:"world,omitempty"`
-	// The tier's own name: `rp2350`, `browser`. The same value an app sees as
-	// `ILC_TIER`, so a test can assert the world advertises what it claims here.
-	Tier string `protobuf:"bytes,2,opt,name=tier,proto3" json:"tier,omitempty"`
-	// Firmware or host version.
+	World         WorldKind `protobuf:"varint,9,opt,name=world,proto3" json:"world,omitempty"`
+	Tier          Tier      `protobuf:"varint,10,opt,name=tier,proto3" json:"tier,omitempty"`
+	// Firmware or host version. GENUINELY A STRING: a semver is not a closed set.
 	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	// Flash-time configuration, as strings so a new knob does not need a new
-	// field. These are the `BADGE_*` choices: screen layout, input mode, world.
-	Config map[string]string `protobuf:"bytes,4,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	// The flash-time choices, one field each.
+	Screen ScreenLayout `protobuf:"varint,11,opt,name=screen,proto3" json:"screen,omitempty"`
+	Input  InputMode    `protobuf:"varint,12,opt,name=input,proto3" json:"input,omitempty"`
+	Text   TextOutlet   `protobuf:"varint,13,opt,name=text,proto3" json:"text,omitempty"`
 	// WHAT IT IS DOING RIGHT NOW — the field this verb exists for.
 	Activity Activity `protobuf:"varint,5,opt,name=activity,proto3" json:"activity,omitempty"`
-	// The app currently instantiated, or empty.
+	// The app currently instantiated, or empty. A NAME, so a string: an app is
+	// whatever somebody dragged onto the payload region.
 	App string `protobuf:"bytes,6,opt,name=app,proto3" json:"app,omitempty"`
 	// WHAT THE APP LAST SAID IT WAS DOING, or empty.
 	//
@@ -240,6 +639,10 @@ type WorldState struct {
 	// event, which arrives WHILE the command runs because `emit` is an import. The
 	// dispatcher publishes the command's name by default, so an app that never
 	// mentions activity still reports something true.
+	//
+	// FREE TEXT ON PURPOSE, and the one place here that should be: the world
+	// cannot know an app's vocabulary, and inventing an enum for it would mean
+	// every app had to describe itself in the world's words.
 	AppActivity string `protobuf:"bytes,8,opt,name=app_activity,json=appActivity,proto3" json:"appActivity,omitempty"`
 	// Milliseconds since boot. Lets a caller tell a world that is progressing
 	// slowly from one that has stopped, without watching two answers arrive.
@@ -252,18 +655,18 @@ func (x *WorldState) Reset() {
 
 func (*WorldState) ProtoMessage() {}
 
-func (x *WorldState) GetWorld() string {
+func (x *WorldState) GetWorld() WorldKind {
 	if x != nil {
 		return x.World
 	}
-	return ""
+	return WorldKind_WORLD_KIND_UNSPECIFIED
 }
 
-func (x *WorldState) GetTier() string {
+func (x *WorldState) GetTier() Tier {
 	if x != nil {
 		return x.Tier
 	}
-	return ""
+	return Tier_TIER_UNSPECIFIED
 }
 
 func (x *WorldState) GetVersion() string {
@@ -273,11 +676,25 @@ func (x *WorldState) GetVersion() string {
 	return ""
 }
 
-func (x *WorldState) GetConfig() map[string]string {
+func (x *WorldState) GetScreen() ScreenLayout {
 	if x != nil {
-		return x.Config
+		return x.Screen
 	}
-	return nil
+	return ScreenLayout_SCREEN_LAYOUT_UNSPECIFIED
+}
+
+func (x *WorldState) GetInput() InputMode {
+	if x != nil {
+		return x.Input
+	}
+	return InputMode_INPUT_MODE_UNSPECIFIED
+}
+
+func (x *WorldState) GetText() TextOutlet {
+	if x != nil {
+		return x.Text
+	}
+	return TextOutlet_TEXT_OUTLET_UNSPECIFIED
 }
 
 func (x *WorldState) GetActivity() Activity {
@@ -306,6 +723,302 @@ func (x *WorldState) GetUptimeMs() uint64 {
 		return x.UptimeMs
 	}
 	return 0
+}
+
+type PressButtonRequest struct {
+	unknownFields []byte
+	Button        Button `protobuf:"varint,1,opt,name=button,proto3" json:"button,omitempty"`
+}
+
+func (x *PressButtonRequest) Reset() {
+	*x = PressButtonRequest{}
+}
+
+func (*PressButtonRequest) ProtoMessage() {}
+
+func (x *PressButtonRequest) GetButton() Button {
+	if x != nil {
+		return x.Button
+	}
+	return Button_BUTTON_UNSPECIFIED
+}
+
+// The panel's TEXT, not its pixels.
+//
+// A screenshot would be 153,600 bytes, would need a decoder to assert anything
+// about, and would make a test fail when a colour changed. What a test actually
+// wants to know is what the badge SAYS — so this is the character grid the world
+// drew, reconstructed from the same draw calls that reached the panel.
+type ScreenResponse struct {
+	unknownFields []byte
+	// One string per non-empty row, in top-to-bottom order, trailing spaces
+	// trimmed. Column alignment is preserved WITHIN a row, because the badge's own
+	// report format uses it — `6*  instantiate ...  OK` reads as three columns and
+	// a test asserting on it should see the same.
+	Rows []string `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	Cols uint32   `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
+	// The full height, including rows that were blank and so are not in `rows`.
+	Height uint32 `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`
+}
+
+func (x *ScreenResponse) Reset() {
+	*x = ScreenResponse{}
+}
+
+func (*ScreenResponse) ProtoMessage() {}
+
+func (x *ScreenResponse) GetRows() []string {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
+func (x *ScreenResponse) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *ScreenResponse) GetHeight() uint32 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+// One installed app, as the world sees it.
+type PayloadInfo struct {
+	unknownFields []byte
+	// Position in the menu, and what `SelectPayloadRequest` names.
+	Index uint32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// A LABEL, so genuinely a string: an app is whatever somebody dragged onto
+	// the payload region, and the world does not get to enumerate those.
+	Name      string    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Size      uint32    `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	Integrity Integrity `protobuf:"varint,4,opt,name=integrity,proto3" json:"integrity,omitempty"`
+	// Which command runs when this app is chosen. The app's own fact, carried
+	// with the app.
+	EntryMethod uint32 `protobuf:"varint,5,opt,name=entry_method,json=entryMethod,proto3" json:"entryMethod,omitempty"`
+	// Marked as the one to run unattended.
+	IsDefault bool `protobuf:"varint,6,opt,name=is_default,json=isDefault,proto3" json:"isDefault,omitempty"`
+	// Whether the world will actually run it.
+	//
+	// DERIVABLE FROM `integrity` AND SENT ANYWAY, because the derivation is the
+	// WORLD'S POLICY, not arithmetic: today `WRONG_ENGINE` is refused exactly like
+	// `CORRUPT`, and that could reasonably change. A client that recomputed this
+	// would be asserting its own policy against a badge that had moved on.
+	Runnable bool `protobuf:"varint,7,opt,name=runnable,proto3" json:"runnable,omitempty"`
+}
+
+func (x *PayloadInfo) Reset() {
+	*x = PayloadInfo{}
+}
+
+func (*PayloadInfo) ProtoMessage() {}
+
+func (x *PayloadInfo) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *PayloadInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PayloadInfo) GetSize() uint32 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *PayloadInfo) GetIntegrity() Integrity {
+	if x != nil {
+		return x.Integrity
+	}
+	return Integrity_INTEGRITY_UNSPECIFIED
+}
+
+func (x *PayloadInfo) GetEntryMethod() uint32 {
+	if x != nil {
+		return x.EntryMethod
+	}
+	return 0
+}
+
+func (x *PayloadInfo) GetIsDefault() bool {
+	if x != nil {
+		return x.IsDefault
+	}
+	return false
+}
+
+func (x *PayloadInfo) GetRunnable() bool {
+	if x != nil {
+		return x.Runnable
+	}
+	return false
+}
+
+type ListPayloadsResponse struct {
+	unknownFields []byte
+	Payloads      []*PayloadInfo `protobuf:"bytes,1,rep,name=payloads,proto3" json:"payloads,omitempty"`
+	// Which one the world last ran or is running.
+	Selected uint32 `protobuf:"varint,2,opt,name=selected,proto3" json:"selected,omitempty"`
+}
+
+func (x *ListPayloadsResponse) Reset() {
+	*x = ListPayloadsResponse{}
+}
+
+func (*ListPayloadsResponse) ProtoMessage() {}
+
+func (x *ListPayloadsResponse) GetPayloads() []*PayloadInfo {
+	if x != nil {
+		return x.Payloads
+	}
+	return nil
+}
+
+func (x *ListPayloadsResponse) GetSelected() uint32 {
+	if x != nil {
+		return x.Selected
+	}
+	return 0
+}
+
+// Choose the app the NEXT menu resolves to.
+//
+// A menu is only on screen between sessions, so this does not interrupt a
+// running app — it is remembered and consumed when the menu next appears, which
+// it then skips rather than waiting out its timeout.
+//
+// PRESSING BUTTONS WOULD ALSO WORK, and is worse for a test: `-press down` twice
+// means "two down from wherever the highlight happens to be", so a test asserting
+// on the result depends on the previous test's final position. An index does not.
+type SelectPayloadRequest struct {
+	unknownFields []byte
+	Index         uint32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+}
+
+func (x *SelectPayloadRequest) Reset() {
+	*x = SelectPayloadRequest{}
+}
+
+func (*SelectPayloadRequest) ProtoMessage() {}
+
+func (x *SelectPayloadRequest) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+// Run an app command, as though the world had collected the input itself (D2).
+//
+// # Why this is the verb the protocol most needed
+//
+// Everything else here asks about a WORLD. This one goes THROUGH it: the bytes
+// are the app's own request, in the app's own schema, which the world cannot
+// read and does not try to. That is why `ControlRequest.payload` is opaque bytes
+// rather than a oneof — a typed envelope could not have expressed this.
+//
+// # It supersedes the widgets rather than racing them
+//
+// A world normally collects a command's input by putting a keyboard or a spinner
+// on the panel. When a request arrives, that collection is pointless — the input
+// is already here — so any widget waiting for a finger gives up and the turn runs
+// with these bytes instead. Otherwise a test would have to press B on a spinner
+// it did not want in order to deliver a request that replaces its value.
+//
+// # The reply comes LATE, and that is not a timeout
+//
+// The engine lives on the world's main flow and the control channel is answered
+// from an interrupt, so this cannot be run where it is received. It is queued,
+// picked up at the top of the next turn, and answered when the app returns —
+// which is as long as the app takes. A caller's deadline has to cover the app's
+// runtime, not the link's.
+//
+// ONE AT A TIME. A second request while one is outstanding is refused rather than
+// queued: the protocol has no message ids yet, so a client matches a reply to its
+// request by there being only one in flight. Queuing two would silently pair the
+// wrong answer with the wrong question.
+type ExecuteRequest struct {
+	unknownFields []byte
+	// Which command. The same id `PayloadInfo.entry_method` reports, and the same
+	// one an app's generated dispatcher switches on.
+	MethodId uint32 `protobuf:"varint,1,opt,name=method_id,json=methodId,proto3" json:"methodId,omitempty"`
+	// The app's request, encoded in the app's own schema.
+	Request []byte `protobuf:"bytes,2,opt,name=request,proto3" json:"request,omitempty"`
+}
+
+func (x *ExecuteRequest) Reset() {
+	*x = ExecuteRequest{}
+}
+
+func (*ExecuteRequest) ProtoMessage() {}
+
+func (x *ExecuteRequest) GetMethodId() uint32 {
+	if x != nil {
+		return x.MethodId
+	}
+	return 0
+}
+
+func (x *ExecuteRequest) GetRequest() []byte {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+type ExecuteResponse struct {
+	unknownFields []byte
+	// WHETHER THE APP SUCCEEDED, which is not whether the world did.
+	//
+	// `ControlResponse.ok` says the world accepted the verb and ran something.
+	// This says what that something reported. A world can flawlessly run an app
+	// that fails, and collapsing the two would make "the badge could not run it"
+	// indistinguishable from "it ran and said no".
+	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	// The app's response, in the app's own schema.
+	Output []byte `protobuf:"bytes,2,opt,name=output,proto3" json:"output,omitempty"`
+	// What the app said went wrong, if anything.
+	Error string `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+}
+
+func (x *ExecuteResponse) Reset() {
+	*x = ExecuteResponse{}
+}
+
+func (*ExecuteResponse) ProtoMessage() {}
+
+func (x *ExecuteResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ExecuteResponse) GetOutput() []byte {
+	if x != nil {
+		return x.Output
+	}
+	return nil
+}
+
+func (x *ExecuteResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
 }
 
 // The envelope every control exchange uses.
@@ -397,14 +1110,23 @@ type LogLine struct {
 	// moment it happened to read — which is how a countdown was once measured at
 	// 0 ms.
 	UptimeMs uint64 `protobuf:"varint,1,opt,name=uptime_ms,json=uptimeMs,proto3" json:"uptimeMs,omitempty"`
-	// The stage this belongs to, if any: `manifest`, `execute 10000`. Empty for a
-	// free-standing note.
-	Stage string `protobuf:"bytes,2,opt,name=stage,proto3" json:"stage,omitempty"`
+	// The stage this belongs to, if any. `STAGE_UNSPECIFIED` for a free-standing
+	// note. See `Stage` for why this stopped being the announcement text.
+	Stage Stage `protobuf:"varint,2,opt,name=stage,proto3" json:"stage,omitempty"`
 	// What happened.
 	Level Level `protobuf:"varint,3,opt,name=level,proto3" json:"level,omitempty"`
 	// The human-readable text, identical to what the text stream carried. Kept so
 	// a frame reader never has LESS than a terminal would have shown.
 	Text string `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	// Whether this stage tells us anything the emulator could not have.
+	//
+	// Load-bearing, not decoration. The badge runs checks that QEMU also runs and
+	// checks only silicon can answer, and the second kind is the reason to plug a
+	// board in at all. A run where every hardware-only stage passes and an
+	// emulated one fails means the board and the emulator DISAGREE — a far more
+	// interesting result than a loose wire, and one a reader cannot reach for
+	// without this field.
+	Scope Scope `protobuf:"varint,5,opt,name=scope,proto3" json:"scope,omitempty"`
 }
 
 func (x *LogLine) Reset() {
@@ -420,11 +1142,11 @@ func (x *LogLine) GetUptimeMs() uint64 {
 	return 0
 }
 
-func (x *LogLine) GetStage() string {
+func (x *LogLine) GetStage() Stage {
 	if x != nil {
 		return x.Stage
 	}
-	return ""
+	return Stage_STAGE_UNSPECIFIED
 }
 
 func (x *LogLine) GetLevel() Level {
@@ -441,30 +1163,75 @@ func (x *LogLine) GetText() string {
 	return ""
 }
 
-type WorldState_ConfigEntry struct {
+func (x *LogLine) GetScope() Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return Scope_SCOPE_UNSPECIFIED
+}
+
+// What a client wants pushed to it (D8c).
+//
+// # Why a world is silent until asked
+//
+// The first attempt at framed logging emitted a `LogLine` for every line the
+// world wrote. That filled the outbound queue permanently, so the reply path
+// short-circuited on every service call and the TEXT log — the last-resort
+// diagnostic, the one that needs no tooling — was never transmitted at all. The
+// framing was right; pushing it at nobody was not.
+//
+// So notices cost nothing until a client asks, and a badge with no client on the
+// cable behaves exactly as it did before this existed.
+//
+// # Silence is about FRAMES, and subscribing is retroactive
+//
+// The world is never actually mute. It writes human-readable text to the same
+// wire unconditionally — including in builds compiled without this channel — and
+// it replays that text once when a host opens the port. Nothing that happens
+// before a client arrives is lost to someone holding a terminal.
+//
+// Frames would have had that gap, and a bring-up fails EARLY: the interesting
+// ten seconds are usually the ten before any tool has connected. So subscribing
+// to `NOTICE_LOG` does not mean "send me what happens next", it means "send me
+// the log", starting from the beginning of the run the world still has buffered.
+// A client that attaches late gets the failure it attached because of.
+//
+// The limit is the log buffer, not the subscription: once a run overflows it the
+// oldest lines are gone, and the world says so rather than quietly starting
+// mid-story. What no channel can carry is a fault that kills the board before
+// USB enumerates — that is what the screen and the UART are for.
+//
+// # Why the whole set, rather than add/remove
+//
+// This message declares what the subscription IS, not how it should change.
+// Subscribing twice therefore means the same thing as subscribing once, a
+// reconnecting client does not have to remember what it asked for last time, and
+// an empty set is a well-formed unsubscribe rather than a special verb.
+//
+// Add/remove would need the client and the world to agree about state that only
+// one of them can see, and they disagree the moment a badge reboots — which,
+// with a reset button on the front, it does constantly.
+type Subscription struct {
 	unknownFields []byte
-	Key           string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	// The notices wanted. EMPTY MEANS NONE, which is how a client unsubscribes.
+	//
+	// A world grants what it supports and no more, and the reply says which — so a
+	// client built against a newer proto learns that it will not be getting
+	// something rather than waiting for it.
+	Notices []Notice `protobuf:"varint,1,rep,packed,name=notices,proto3" json:"notices,omitempty"`
 }
 
-func (x *WorldState_ConfigEntry) Reset() {
-	*x = WorldState_ConfigEntry{}
+func (x *Subscription) Reset() {
+	*x = Subscription{}
 }
 
-func (*WorldState_ConfigEntry) ProtoMessage() {}
+func (*Subscription) ProtoMessage() {}
 
-func (x *WorldState_ConfigEntry) GetKey() string {
+func (x *Subscription) GetNotices() []Notice {
 	if x != nil {
-		return x.Key
+		return x.Notices
 	}
-	return ""
-}
-
-func (x *WorldState_ConfigEntry) GetValue() string {
-	if x != nil {
-		return x.Value
-	}
-	return ""
+	return nil
 }
 
 func (m *WorldState) CloneVT() *WorldState {
@@ -475,11 +1242,13 @@ func (m *WorldState) CloneVT() *WorldState {
 	r.World = m.World
 	r.Tier = m.Tier
 	r.Version = m.Version
+	r.Screen = m.Screen
+	r.Input = m.Input
+	r.Text = m.Text
 	r.Activity = m.Activity
 	r.App = m.App
 	r.AppActivity = m.AppActivity
 	r.UptimeMs = m.UptimeMs
-	r.Config = protobuf_go_lite.CloneMap(m.Config)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -487,6 +1256,130 @@ func (m *WorldState) CloneVT() *WorldState {
 }
 
 func (m *WorldState) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *PressButtonRequest) CloneVT() *PressButtonRequest {
+	if m == nil {
+		return (*PressButtonRequest)(nil)
+	}
+	r := new(PressButtonRequest)
+	r.Button = m.Button
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *PressButtonRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *ScreenResponse) CloneVT() *ScreenResponse {
+	if m == nil {
+		return (*ScreenResponse)(nil)
+	}
+	r := new(ScreenResponse)
+	r.Cols = m.Cols
+	r.Height = m.Height
+	r.Rows = protobuf_go_lite.CloneSlice(m.Rows)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *ScreenResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *PayloadInfo) CloneVT() *PayloadInfo {
+	if m == nil {
+		return (*PayloadInfo)(nil)
+	}
+	r := new(PayloadInfo)
+	r.Index = m.Index
+	r.Name = m.Name
+	r.Size = m.Size
+	r.Integrity = m.Integrity
+	r.EntryMethod = m.EntryMethod
+	r.IsDefault = m.IsDefault
+	r.Runnable = m.Runnable
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *PayloadInfo) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *ListPayloadsResponse) CloneVT() *ListPayloadsResponse {
+	if m == nil {
+		return (*ListPayloadsResponse)(nil)
+	}
+	r := new(ListPayloadsResponse)
+	r.Selected = m.Selected
+	r.Payloads = protobuf_go_lite.CloneVTSlice(m.Payloads)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *ListPayloadsResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *SelectPayloadRequest) CloneVT() *SelectPayloadRequest {
+	if m == nil {
+		return (*SelectPayloadRequest)(nil)
+	}
+	r := new(SelectPayloadRequest)
+	r.Index = m.Index
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *SelectPayloadRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *ExecuteRequest) CloneVT() *ExecuteRequest {
+	if m == nil {
+		return (*ExecuteRequest)(nil)
+	}
+	r := new(ExecuteRequest)
+	r.MethodId = m.MethodId
+	r.Request = protobuf_go_lite.CloneBytes(m.Request)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *ExecuteRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *ExecuteResponse) CloneVT() *ExecuteResponse {
+	if m == nil {
+		return (*ExecuteResponse)(nil)
+	}
+	r := new(ExecuteResponse)
+	r.Success = m.Success
+	r.Error = m.Error
+	r.Output = protobuf_go_lite.CloneBytes(m.Output)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *ExecuteResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
@@ -534,6 +1427,7 @@ func (m *LogLine) CloneVT() *LogLine {
 	r.Stage = m.Stage
 	r.Level = m.Level
 	r.Text = m.Text
+	r.Scope = m.Scope
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -544,22 +1438,29 @@ func (m *LogLine) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
+func (m *Subscription) CloneVT() *Subscription {
+	if m == nil {
+		return (*Subscription)(nil)
+	}
+	r := new(Subscription)
+	r.Notices = protobuf_go_lite.CloneSlice(m.Notices)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *Subscription) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
 func (this *WorldState) EqualVT(that *WorldState) bool {
 	if this == that {
 		return true
 	} else if this == nil || that == nil {
 		return false
 	}
-	if this.World != that.World {
-		return false
-	}
-	if this.Tier != that.Tier {
-		return false
-	}
 	if this.Version != that.Version {
-		return false
-	}
-	if !protobuf_go_lite.EqualMap(this.Config, that.Config) {
 		return false
 	}
 	if this.Activity != that.Activity {
@@ -574,11 +1475,195 @@ func (this *WorldState) EqualVT(that *WorldState) bool {
 	if this.AppActivity != that.AppActivity {
 		return false
 	}
+	if this.World != that.World {
+		return false
+	}
+	if this.Tier != that.Tier {
+		return false
+	}
+	if this.Screen != that.Screen {
+		return false
+	}
+	if this.Input != that.Input {
+		return false
+	}
+	if this.Text != that.Text {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
 func (this *WorldState) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*WorldState)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *PressButtonRequest) EqualVT(that *PressButtonRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Button != that.Button {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *PressButtonRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*PressButtonRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ScreenResponse) EqualVT(that *ScreenResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !protobuf_go_lite.EqualSlice(this.Rows, that.Rows) {
+		return false
+	}
+	if this.Cols != that.Cols {
+		return false
+	}
+	if this.Height != that.Height {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ScreenResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*ScreenResponse)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *PayloadInfo) EqualVT(that *PayloadInfo) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Index != that.Index {
+		return false
+	}
+	if this.Name != that.Name {
+		return false
+	}
+	if this.Size != that.Size {
+		return false
+	}
+	if this.Integrity != that.Integrity {
+		return false
+	}
+	if this.EntryMethod != that.EntryMethod {
+		return false
+	}
+	if this.IsDefault != that.IsDefault {
+		return false
+	}
+	if this.Runnable != that.Runnable {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *PayloadInfo) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*PayloadInfo)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ListPayloadsResponse) EqualVT(that *ListPayloadsResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !protobuf_go_lite.EqualVTSliceImplicit(this.Payloads, that.Payloads, func() *PayloadInfo { return &PayloadInfo{} }) {
+		return false
+	}
+	if this.Selected != that.Selected {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ListPayloadsResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*ListPayloadsResponse)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *SelectPayloadRequest) EqualVT(that *SelectPayloadRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Index != that.Index {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *SelectPayloadRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*SelectPayloadRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ExecuteRequest) EqualVT(that *ExecuteRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.MethodId != that.MethodId {
+		return false
+	}
+	if !protobuf_go_lite.EqualBytes(this.Request, that.Request) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ExecuteRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*ExecuteRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ExecuteResponse) EqualVT(that *ExecuteResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Success != that.Success {
+		return false
+	}
+	if !protobuf_go_lite.EqualBytes(this.Output, that.Output) {
+		return false
+	}
+	if this.Error != that.Error {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ExecuteResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*ExecuteResponse)
 	if !ok {
 		return false
 	}
@@ -649,11 +1734,33 @@ func (this *LogLine) EqualVT(that *LogLine) bool {
 	if this.Text != that.Text {
 		return false
 	}
+	if this.Scope != that.Scope {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
 func (this *LogLine) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*LogLine)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *Subscription) EqualVT(that *Subscription) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !protobuf_go_lite.EqualSlice(this.Notices, that.Notices) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *Subscription) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*Subscription)
 	if !ok {
 		return false
 	}
@@ -700,6 +1807,286 @@ func (x *Activity) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the WorldKind to JSON.
+func (x WorldKind) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), WorldKind_name)
+}
+
+// MarshalText marshals the WorldKind to text.
+func (x WorldKind) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), WorldKind_name)), nil
+}
+
+// MarshalJSON marshals the WorldKind to JSON.
+func (x WorldKind) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the WorldKind from JSON.
+func (x *WorldKind) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(WorldKind_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read WorldKind enum: %v", err)
+		return
+	}
+	*x = WorldKind(v)
+}
+
+// UnmarshalText unmarshals the WorldKind from text.
+func (x *WorldKind) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), WorldKind_value)
+	if err != nil {
+		return err
+	}
+	*x = WorldKind(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the WorldKind from JSON.
+func (x *WorldKind) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Tier to JSON.
+func (x Tier) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Tier_name)
+}
+
+// MarshalText marshals the Tier to text.
+func (x Tier) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Tier_name)), nil
+}
+
+// MarshalJSON marshals the Tier to JSON.
+func (x Tier) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Tier from JSON.
+func (x *Tier) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Tier_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Tier enum: %v", err)
+		return
+	}
+	*x = Tier(v)
+}
+
+// UnmarshalText unmarshals the Tier from text.
+func (x *Tier) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Tier_value)
+	if err != nil {
+		return err
+	}
+	*x = Tier(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Tier from JSON.
+func (x *Tier) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the ScreenLayout to JSON.
+func (x ScreenLayout) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), ScreenLayout_name)
+}
+
+// MarshalText marshals the ScreenLayout to text.
+func (x ScreenLayout) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), ScreenLayout_name)), nil
+}
+
+// MarshalJSON marshals the ScreenLayout to JSON.
+func (x ScreenLayout) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the ScreenLayout from JSON.
+func (x *ScreenLayout) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(ScreenLayout_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read ScreenLayout enum: %v", err)
+		return
+	}
+	*x = ScreenLayout(v)
+}
+
+// UnmarshalText unmarshals the ScreenLayout from text.
+func (x *ScreenLayout) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), ScreenLayout_value)
+	if err != nil {
+		return err
+	}
+	*x = ScreenLayout(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the ScreenLayout from JSON.
+func (x *ScreenLayout) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the InputMode to JSON.
+func (x InputMode) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), InputMode_name)
+}
+
+// MarshalText marshals the InputMode to text.
+func (x InputMode) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), InputMode_name)), nil
+}
+
+// MarshalJSON marshals the InputMode to JSON.
+func (x InputMode) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the InputMode from JSON.
+func (x *InputMode) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(InputMode_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read InputMode enum: %v", err)
+		return
+	}
+	*x = InputMode(v)
+}
+
+// UnmarshalText unmarshals the InputMode from text.
+func (x *InputMode) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), InputMode_value)
+	if err != nil {
+		return err
+	}
+	*x = InputMode(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the InputMode from JSON.
+func (x *InputMode) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Stage to JSON.
+func (x Stage) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Stage_name)
+}
+
+// MarshalText marshals the Stage to text.
+func (x Stage) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Stage_name)), nil
+}
+
+// MarshalJSON marshals the Stage to JSON.
+func (x Stage) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Stage from JSON.
+func (x *Stage) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Stage_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Stage enum: %v", err)
+		return
+	}
+	*x = Stage(v)
+}
+
+// UnmarshalText unmarshals the Stage from text.
+func (x *Stage) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Stage_value)
+	if err != nil {
+		return err
+	}
+	*x = Stage(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Stage from JSON.
+func (x *Stage) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Button to JSON.
+func (x Button) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Button_name)
+}
+
+// MarshalText marshals the Button to text.
+func (x Button) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Button_name)), nil
+}
+
+// MarshalJSON marshals the Button to JSON.
+func (x Button) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Button from JSON.
+func (x *Button) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Button_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Button enum: %v", err)
+		return
+	}
+	*x = Button(v)
+}
+
+// UnmarshalText unmarshals the Button from text.
+func (x *Button) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Button_value)
+	if err != nil {
+		return err
+	}
+	*x = Button(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Button from JSON.
+func (x *Button) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Integrity to JSON.
+func (x Integrity) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Integrity_name)
+}
+
+// MarshalText marshals the Integrity to text.
+func (x Integrity) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Integrity_name)), nil
+}
+
+// MarshalJSON marshals the Integrity to JSON.
+func (x Integrity) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Integrity from JSON.
+func (x *Integrity) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Integrity_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Integrity enum: %v", err)
+		return
+	}
+	*x = Integrity(v)
+}
+
+// UnmarshalText unmarshals the Integrity from text.
+func (x *Integrity) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Integrity_value)
+	if err != nil {
+		return err
+	}
+	*x = Integrity(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Integrity from JSON.
+func (x *Integrity) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the Level to JSON.
 func (x Level) MarshalProtoJSON(s *json.MarshalState) {
 	s.WriteEnum(int32(x), Level_name)
@@ -737,6 +2124,46 @@ func (x *Level) UnmarshalText(b []byte) error {
 
 // UnmarshalJSON unmarshals the Level from JSON.
 func (x *Level) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Scope to JSON.
+func (x Scope) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Scope_name)
+}
+
+// MarshalText marshals the Scope to text.
+func (x Scope) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Scope_name)), nil
+}
+
+// MarshalJSON marshals the Scope to JSON.
+func (x Scope) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Scope from JSON.
+func (x *Scope) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Scope_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Scope enum: %v", err)
+		return
+	}
+	*x = Scope(v)
+}
+
+// UnmarshalText unmarshals the Scope from text.
+func (x *Scope) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Scope_value)
+	if err != nil {
+		return err
+	}
+	*x = Scope(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Scope from JSON.
+func (x *Scope) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -820,56 +2247,6 @@ func (x *Notice) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
-// MarshalProtoJSON marshals the WorldState_ConfigEntry message to JSON.
-func (x *WorldState_ConfigEntry) MarshalProtoJSON(s *json.MarshalState) {
-	if x == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	var wroteField bool
-	if x.Key != "" || s.HasField("key") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("key")
-		s.WriteString(x.Key)
-	}
-	if x.Value != "" || s.HasField("value") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("value")
-		s.WriteString(x.Value)
-	}
-	s.WriteObjectEnd()
-}
-
-// MarshalJSON marshals the WorldState_ConfigEntry to JSON.
-func (x *WorldState_ConfigEntry) MarshalJSON() ([]byte, error) {
-	return json.DefaultMarshalerConfig.Marshal(x)
-}
-
-// UnmarshalProtoJSON unmarshals the WorldState_ConfigEntry message from JSON.
-func (x *WorldState_ConfigEntry) UnmarshalProtoJSON(s *json.UnmarshalState) {
-	if s.ReadNil() {
-		return
-	}
-	s.ReadObject(func(key string) {
-		switch key {
-		default:
-			s.Skip() // ignore unknown field
-		case "key":
-			s.AddField("key")
-			x.Key = s.ReadString()
-		case "value":
-			s.AddField("value")
-			x.Value = s.ReadString()
-		}
-	})
-}
-
-// UnmarshalJSON unmarshals the WorldState_ConfigEntry from JSON.
-func (x *WorldState_ConfigEntry) UnmarshalJSON(b []byte) error {
-	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
-}
-
 // MarshalProtoJSON marshals the WorldState message to JSON.
 func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 	if x == nil {
@@ -878,32 +2255,10 @@ func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 	}
 	s.WriteObjectStart()
 	var wroteField bool
-	if x.World != "" || s.HasField("world") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("world")
-		s.WriteString(x.World)
-	}
-	if x.Tier != "" || s.HasField("tier") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("tier")
-		s.WriteString(x.Tier)
-	}
 	if x.Version != "" || s.HasField("version") {
 		s.WriteMoreIf(&wroteField)
 		s.WriteObjectField("version")
 		s.WriteString(x.Version)
-	}
-	if x.Config != nil || s.HasField("config") {
-		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("config")
-		s.WriteObjectStart()
-		var wroteElement bool
-		for k, v := range x.Config {
-			s.WriteMoreIf(&wroteElement)
-			s.WriteObjectStringField(k)
-			s.WriteString(v)
-		}
-		s.WriteObjectEnd()
 	}
 	if x.Activity != 0 || s.HasField("activity") {
 		s.WriteMoreIf(&wroteField)
@@ -925,6 +2280,31 @@ func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("appActivity")
 		s.WriteString(x.AppActivity)
 	}
+	if x.World != 0 || s.HasField("world") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("world")
+		x.World.MarshalProtoJSON(s)
+	}
+	if x.Tier != 0 || s.HasField("tier") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("tier")
+		x.Tier.MarshalProtoJSON(s)
+	}
+	if x.Screen != 0 || s.HasField("screen") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("screen")
+		x.Screen.MarshalProtoJSON(s)
+	}
+	if x.Input != 0 || s.HasField("input") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("input")
+		x.Input.MarshalProtoJSON(s)
+	}
+	if x.Text != 0 || s.HasField("text") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("text")
+		x.Text.MarshalProtoJSON(s)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -942,25 +2322,9 @@ func (x *WorldState) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		switch key {
 		default:
 			s.Skip() // ignore unknown field
-		case "world":
-			s.AddField("world")
-			x.World = s.ReadString()
-		case "tier":
-			s.AddField("tier")
-			x.Tier = s.ReadString()
 		case "version":
 			s.AddField("version")
 			x.Version = s.ReadString()
-		case "config":
-			s.AddField("config")
-			if s.ReadNil() {
-				x.Config = nil
-				return
-			}
-			x.Config = make(map[string]string)
-			s.ReadStringMap(func(key string) {
-				x.Config[key] = s.ReadString()
-			})
 		case "activity":
 			s.AddField("activity")
 			x.Activity.UnmarshalProtoJSON(s)
@@ -973,12 +2337,442 @@ func (x *WorldState) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "app_activity", "appActivity":
 			s.AddField("app_activity")
 			x.AppActivity = s.ReadString()
+		case "world":
+			s.AddField("world")
+			x.World.UnmarshalProtoJSON(s)
+		case "tier":
+			s.AddField("tier")
+			x.Tier.UnmarshalProtoJSON(s)
+		case "screen":
+			s.AddField("screen")
+			x.Screen.UnmarshalProtoJSON(s)
+		case "input":
+			s.AddField("input")
+			x.Input.UnmarshalProtoJSON(s)
+		case "text":
+			s.AddField("text")
+			x.Text.UnmarshalProtoJSON(s)
 		}
 	})
 }
 
 // UnmarshalJSON unmarshals the WorldState from JSON.
 func (x *WorldState) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the PressButtonRequest message to JSON.
+func (x *PressButtonRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Button != 0 || s.HasField("button") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("button")
+		x.Button.MarshalProtoJSON(s)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the PressButtonRequest to JSON.
+func (x *PressButtonRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the PressButtonRequest message from JSON.
+func (x *PressButtonRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "button":
+			s.AddField("button")
+			x.Button.UnmarshalProtoJSON(s)
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the PressButtonRequest from JSON.
+func (x *PressButtonRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the ScreenResponse message to JSON.
+func (x *ScreenResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if len(x.Rows) > 0 || s.HasField("rows") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("rows")
+		s.WriteStringArray(x.Rows)
+	}
+	if x.Cols != 0 || s.HasField("cols") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("cols")
+		s.WriteUint32(x.Cols)
+	}
+	if x.Height != 0 || s.HasField("height") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("height")
+		s.WriteUint32(x.Height)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the ScreenResponse to JSON.
+func (x *ScreenResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the ScreenResponse message from JSON.
+func (x *ScreenResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "rows":
+			s.AddField("rows")
+			if s.ReadNil() {
+				x.Rows = nil
+				return
+			}
+			x.Rows = s.ReadStringArray()
+		case "cols":
+			s.AddField("cols")
+			x.Cols = s.ReadUint32()
+		case "height":
+			s.AddField("height")
+			x.Height = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the ScreenResponse from JSON.
+func (x *ScreenResponse) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the PayloadInfo message to JSON.
+func (x *PayloadInfo) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Index != 0 || s.HasField("index") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("index")
+		s.WriteUint32(x.Index)
+	}
+	if x.Name != "" || s.HasField("name") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("name")
+		s.WriteString(x.Name)
+	}
+	if x.Size != 0 || s.HasField("size") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("size")
+		s.WriteUint32(x.Size)
+	}
+	if x.Integrity != 0 || s.HasField("integrity") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("integrity")
+		x.Integrity.MarshalProtoJSON(s)
+	}
+	if x.EntryMethod != 0 || s.HasField("entryMethod") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("entryMethod")
+		s.WriteUint32(x.EntryMethod)
+	}
+	if x.IsDefault || s.HasField("isDefault") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("isDefault")
+		s.WriteBool(x.IsDefault)
+	}
+	if x.Runnable || s.HasField("runnable") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("runnable")
+		s.WriteBool(x.Runnable)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the PayloadInfo to JSON.
+func (x *PayloadInfo) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the PayloadInfo message from JSON.
+func (x *PayloadInfo) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "index":
+			s.AddField("index")
+			x.Index = s.ReadUint32()
+		case "name":
+			s.AddField("name")
+			x.Name = s.ReadString()
+		case "size":
+			s.AddField("size")
+			x.Size = s.ReadUint32()
+		case "integrity":
+			s.AddField("integrity")
+			x.Integrity.UnmarshalProtoJSON(s)
+		case "entry_method", "entryMethod":
+			s.AddField("entry_method")
+			x.EntryMethod = s.ReadUint32()
+		case "is_default", "isDefault":
+			s.AddField("is_default")
+			x.IsDefault = s.ReadBool()
+		case "runnable":
+			s.AddField("runnable")
+			x.Runnable = s.ReadBool()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the PayloadInfo from JSON.
+func (x *PayloadInfo) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the ListPayloadsResponse message to JSON.
+func (x *ListPayloadsResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if len(x.Payloads) > 0 || s.HasField("payloads") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("payloads")
+		s.WriteArrayStart()
+		var wroteElement bool
+		for _, element := range x.Payloads {
+			s.WriteMoreIf(&wroteElement)
+			element.MarshalProtoJSON(s.WithField("payloads"))
+		}
+		s.WriteArrayEnd()
+	}
+	if x.Selected != 0 || s.HasField("selected") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("selected")
+		s.WriteUint32(x.Selected)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the ListPayloadsResponse to JSON.
+func (x *ListPayloadsResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the ListPayloadsResponse message from JSON.
+func (x *ListPayloadsResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "payloads":
+			s.AddField("payloads")
+			if s.ReadNil() {
+				x.Payloads = nil
+				return
+			}
+			s.ReadArray(func() {
+				if s.ReadNil() {
+					x.Payloads = append(x.Payloads, nil)
+					return
+				}
+				v := &PayloadInfo{}
+				v.UnmarshalProtoJSON(s.WithField("payloads", false))
+				if s.Err() != nil {
+					return
+				}
+				x.Payloads = append(x.Payloads, v)
+			})
+		case "selected":
+			s.AddField("selected")
+			x.Selected = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the ListPayloadsResponse from JSON.
+func (x *ListPayloadsResponse) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the SelectPayloadRequest message to JSON.
+func (x *SelectPayloadRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Index != 0 || s.HasField("index") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("index")
+		s.WriteUint32(x.Index)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the SelectPayloadRequest to JSON.
+func (x *SelectPayloadRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SelectPayloadRequest message from JSON.
+func (x *SelectPayloadRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "index":
+			s.AddField("index")
+			x.Index = s.ReadUint32()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the SelectPayloadRequest from JSON.
+func (x *SelectPayloadRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the ExecuteRequest message to JSON.
+func (x *ExecuteRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.MethodId != 0 || s.HasField("methodId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("methodId")
+		s.WriteUint32(x.MethodId)
+	}
+	if len(x.Request) > 0 || s.HasField("request") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("request")
+		s.WriteBytes(x.Request)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the ExecuteRequest to JSON.
+func (x *ExecuteRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the ExecuteRequest message from JSON.
+func (x *ExecuteRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "method_id", "methodId":
+			s.AddField("method_id")
+			x.MethodId = s.ReadUint32()
+		case "request":
+			s.AddField("request")
+			x.Request = s.ReadBytes()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the ExecuteRequest from JSON.
+func (x *ExecuteRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the ExecuteResponse message to JSON.
+func (x *ExecuteResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Success || s.HasField("success") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("success")
+		s.WriteBool(x.Success)
+	}
+	if len(x.Output) > 0 || s.HasField("output") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("output")
+		s.WriteBytes(x.Output)
+	}
+	if x.Error != "" || s.HasField("error") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("error")
+		s.WriteString(x.Error)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the ExecuteResponse to JSON.
+func (x *ExecuteResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the ExecuteResponse message from JSON.
+func (x *ExecuteResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "success":
+			s.AddField("success")
+			x.Success = s.ReadBool()
+		case "output":
+			s.AddField("output")
+			x.Output = s.ReadBytes()
+		case "error":
+			s.AddField("error")
+			x.Error = s.ReadString()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the ExecuteResponse from JSON.
+func (x *ExecuteResponse) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -1103,10 +2897,10 @@ func (x *LogLine) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("uptimeMs")
 		s.WriteUint64(x.UptimeMs)
 	}
-	if x.Stage != "" || s.HasField("stage") {
+	if x.Stage != 0 || s.HasField("stage") {
 		s.WriteMoreIf(&wroteField)
 		s.WriteObjectField("stage")
-		s.WriteString(x.Stage)
+		x.Stage.MarshalProtoJSON(s)
 	}
 	if x.Level != 0 || s.HasField("level") {
 		s.WriteMoreIf(&wroteField)
@@ -1117,6 +2911,11 @@ func (x *LogLine) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteMoreIf(&wroteField)
 		s.WriteObjectField("text")
 		s.WriteString(x.Text)
+	}
+	if x.Scope != 0 || s.HasField("scope") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("scope")
+		x.Scope.MarshalProtoJSON(s)
 	}
 	s.WriteObjectEnd()
 }
@@ -1140,19 +2939,78 @@ func (x *LogLine) UnmarshalProtoJSON(s *json.UnmarshalState) {
 			x.UptimeMs = s.ReadUint64()
 		case "stage":
 			s.AddField("stage")
-			x.Stage = s.ReadString()
+			x.Stage.UnmarshalProtoJSON(s)
 		case "level":
 			s.AddField("level")
 			x.Level.UnmarshalProtoJSON(s)
 		case "text":
 			s.AddField("text")
 			x.Text = s.ReadString()
+		case "scope":
+			s.AddField("scope")
+			x.Scope.UnmarshalProtoJSON(s)
 		}
 	})
 }
 
 // UnmarshalJSON unmarshals the LogLine from JSON.
 func (x *LogLine) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Subscription message to JSON.
+func (x *Subscription) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if len(x.Notices) > 0 || s.HasField("notices") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("notices")
+		s.WriteArrayStart()
+		var wroteElement bool
+		for _, element := range x.Notices {
+			s.WriteMoreIf(&wroteElement)
+			element.MarshalProtoJSON(s)
+		}
+		s.WriteArrayEnd()
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the Subscription to JSON.
+func (x *Subscription) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Subscription message from JSON.
+func (x *Subscription) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "notices":
+			s.AddField("notices")
+			if s.ReadNil() {
+				x.Notices = nil
+				return
+			}
+			s.ReadArray(func() {
+				var v Notice
+				v.UnmarshalProtoJSON(s)
+				x.Notices = append(x.Notices, v)
+			})
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the Subscription from JSON.
+func (x *Subscription) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -1185,6 +3043,31 @@ func (m *WorldState) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Text != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Text))
+		i--
+		dAtA[i] = 0x68
+	}
+	if m.Input != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Input))
+		i--
+		dAtA[i] = 0x60
+	}
+	if m.Screen != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Screen))
+		i--
+		dAtA[i] = 0x58
+	}
+	if m.Tier != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Tier))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.World != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.World))
+		i--
+		dAtA[i] = 0x48
+	}
 	if len(m.AppActivity) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.AppActivity)
 		i--
@@ -1205,35 +3088,338 @@ func (m *WorldState) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x28
 	}
-	if len(m.Config) > 0 {
-		for k := range m.Config {
-			v := m.Config[k]
-			baseI := i
-			i = protobuf_go_lite.EncodeString(dAtA, i, v)
-			i--
-			dAtA[i] = 0x12
-			i = protobuf_go_lite.EncodeString(dAtA, i, k)
-			i--
-			dAtA[i] = 0xa
-			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(baseI-i))
-			i--
-			dAtA[i] = 0x22
-		}
-	}
 	if len(m.Version) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Version)
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.Tier) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.Tier)
+	return len(dAtA) - i, nil
+}
+
+func (m *PressButtonRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *PressButtonRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *PressButtonRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Button != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Button))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ScreenResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ScreenResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ScreenResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Height != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Height))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Cols != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Cols))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Rows) > 0 {
+		for iNdEx := len(m.Rows) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.Rows[iNdEx])
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *PayloadInfo) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *PayloadInfo) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *PayloadInfo) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Runnable {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Runnable)
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.IsDefault {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.IsDefault)
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EntryMethod != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.EntryMethod))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.Integrity != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Integrity))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Size != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Size))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
 		i--
 		dAtA[i] = 0x12
 	}
-	if len(m.World) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.World)
+	if m.Index != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Index))
 		i--
-		dAtA[i] = 0xa
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ListPayloadsResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ListPayloadsResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ListPayloadsResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Selected != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Selected))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Payloads) > 0 {
+		for iNdEx := len(m.Payloads) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Payloads[iNdEx].MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *SelectPayloadRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SelectPayloadRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *SelectPayloadRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Index != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Index))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExecuteRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExecuteRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ExecuteRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Request) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Request)
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExecuteResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExecuteResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ExecuteResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Error) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Error)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Output) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Output)
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.Success {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Success)
+		i--
+		dAtA[i] = 0x8
 	}
 	return len(dAtA) - i, nil
 }
@@ -1356,6 +3542,11 @@ func (m *LogLine) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Scope != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Scope))
+		i--
+		dAtA[i] = 0x28
+	}
 	if len(m.Text) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Text)
 		i--
@@ -1366,15 +3557,52 @@ func (m *LogLine) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x18
 	}
-	if len(m.Stage) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.Stage)
+	if m.Stage != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Stage))
 		i--
-		dAtA[i] = 0x12
+		dAtA[i] = 0x10
 	}
 	if m.UptimeMs != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.UptimeMs))
 		i--
 		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *Subscription) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *Subscription) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *Subscription) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Notices) > 0 {
+		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.Notices)
+		i--
+		dAtA[i] = 0xa
 	}
 	return len(dAtA) - i, nil
 }
@@ -1408,6 +3636,31 @@ func (m *WorldState) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Text != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Text))
+		i--
+		dAtA[i] = 0x68
+	}
+	if m.Input != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Input))
+		i--
+		dAtA[i] = 0x60
+	}
+	if m.Screen != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Screen))
+		i--
+		dAtA[i] = 0x58
+	}
+	if m.Tier != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Tier))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.World != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.World))
+		i--
+		dAtA[i] = 0x48
+	}
 	if len(m.AppActivity) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.AppActivity)
 		i--
@@ -1428,35 +3681,338 @@ func (m *WorldState) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x28
 	}
-	if len(m.Config) > 0 {
-		for k := range m.Config {
-			v := m.Config[k]
-			baseI := i
-			i = protobuf_go_lite.EncodeString(dAtA, i, v)
-			i--
-			dAtA[i] = 0x12
-			i = protobuf_go_lite.EncodeString(dAtA, i, k)
-			i--
-			dAtA[i] = 0xa
-			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(baseI-i))
-			i--
-			dAtA[i] = 0x22
-		}
-	}
 	if len(m.Version) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Version)
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.Tier) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.Tier)
+	return len(dAtA) - i, nil
+}
+
+func (m *PressButtonRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *PressButtonRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *PressButtonRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Button != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Button))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ScreenResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ScreenResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *ScreenResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Height != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Height))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Cols != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Cols))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Rows) > 0 {
+		for iNdEx := len(m.Rows) - 1; iNdEx >= 0; iNdEx-- {
+			i = protobuf_go_lite.EncodeString(dAtA, i, m.Rows[iNdEx])
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *PayloadInfo) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *PayloadInfo) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *PayloadInfo) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Runnable {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Runnable)
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.IsDefault {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.IsDefault)
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EntryMethod != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.EntryMethod))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.Integrity != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Integrity))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Size != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Size))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Name) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Name)
 		i--
 		dAtA[i] = 0x12
 	}
-	if len(m.World) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.World)
+	if m.Index != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Index))
 		i--
-		dAtA[i] = 0xa
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ListPayloadsResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ListPayloadsResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *ListPayloadsResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Selected != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Selected))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Payloads) > 0 {
+		for iNdEx := len(m.Payloads) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.Payloads[iNdEx].MarshalToSizedBufferVTStrict(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *SelectPayloadRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SelectPayloadRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *SelectPayloadRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Index != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Index))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExecuteRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExecuteRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *ExecuteRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Request) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Request)
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExecuteResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExecuteResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *ExecuteResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Error) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Error)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Output) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Output)
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.Success {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.Success)
+		i--
+		dAtA[i] = 0x8
 	}
 	return len(dAtA) - i, nil
 }
@@ -1579,6 +4135,11 @@ func (m *LogLine) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.Scope != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Scope))
+		i--
+		dAtA[i] = 0x28
+	}
 	if len(m.Text) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Text)
 		i--
@@ -1589,15 +4150,52 @@ func (m *LogLine) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x18
 	}
-	if len(m.Stage) > 0 {
-		i = protobuf_go_lite.EncodeString(dAtA, i, m.Stage)
+	if m.Stage != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Stage))
 		i--
-		dAtA[i] = 0x12
+		dAtA[i] = 0x10
 	}
 	if m.UptimeMs != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.UptimeMs))
 		i--
 		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *Subscription) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *Subscription) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *Subscription) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Notices) > 0 {
+		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.Notices)
+		i--
+		dAtA[i] = 0xa
 	}
 	return len(dAtA) - i, nil
 }
@@ -1608,19 +4206,108 @@ func (m *WorldState) SizeVT() (n int) {
 	}
 	var l int
 	_ = l
-	n += protobuf_go_lite.SizeStringNonEmpty(1, m.World)
-	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Tier)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Version)
-	for k, v := range m.Config {
-		_ = k
-		_ = v
-		mapEntrySize := protobuf_go_lite.SizeStringValue(1, k) + protobuf_go_lite.SizeStringValue(1, v)
-		n += protobuf_go_lite.SizeMessage(1, mapEntrySize)
-	}
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Activity)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.App)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.UptimeMs)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.AppActivity)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.World)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Tier)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Screen)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Input)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Text)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *PressButtonRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Button)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ScreenResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeStringSlice(1, m.Rows)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Cols)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Height)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *PayloadInfo) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Index)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Name)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Size)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Integrity)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.EntryMethod)
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.IsDefault)
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.Runnable)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ListPayloadsResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	for _, e := range m.Payloads {
+		l = e.SizeVT()
+		n += protobuf_go_lite.SizeMessage(1, l)
+	}
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Selected)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *SelectPayloadRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Index)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ExecuteRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.MethodId)
+	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Request)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ExecuteResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeBoolNonZero(1, m.Success)
+	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Output)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Error)
 	n += len(m.unknownFields)
 	return n
 }
@@ -1657,9 +4344,21 @@ func (m *LogLine) SizeVT() (n int) {
 	var l int
 	_ = l
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.UptimeMs)
-	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Stage)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Stage)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Level)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Text)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.Scope)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *Subscription) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeVarintPacked(1, m.Notices)
 	n += len(m.unknownFields)
 	return n
 }
@@ -1667,7 +4366,31 @@ func (m *LogLine) SizeVT() (n int) {
 func (x Activity) MarshalProtoText() string {
 	return x.String()
 }
+func (x WorldKind) MarshalProtoText() string {
+	return x.String()
+}
+func (x Tier) MarshalProtoText() string {
+	return x.String()
+}
+func (x ScreenLayout) MarshalProtoText() string {
+	return x.String()
+}
+func (x InputMode) MarshalProtoText() string {
+	return x.String()
+}
+func (x Stage) MarshalProtoText() string {
+	return x.String()
+}
+func (x Button) MarshalProtoText() string {
+	return x.String()
+}
+func (x Integrity) MarshalProtoText() string {
+	return x.String()
+}
 func (x Level) MarshalProtoText() string {
+	return x.String()
+}
+func (x Scope) MarshalProtoText() string {
 	return x.String()
 }
 func (x Verb) MarshalProtoText() string {
@@ -1676,48 +4399,12 @@ func (x Verb) MarshalProtoText() string {
 func (x Notice) MarshalProtoText() string {
 	return x.String()
 }
-func (x *WorldState_ConfigEntry) MarshalProtoText() string {
-	var sb protobuf_go_lite.TextBuilder
-	initialLen := protobuf_go_lite.TextStartMessage(&sb, "ConfigEntry")
-	if x.Key != "" {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "key")
-		protobuf_go_lite.TextWriteString(&sb, x.Key)
-	}
-	if x.Value != "" {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "value")
-		protobuf_go_lite.TextWriteString(&sb, x.Value)
-	}
-	return protobuf_go_lite.TextFinishMessage(&sb)
-}
-
-func (x *WorldState_ConfigEntry) String() string {
-	return x.MarshalProtoText()
-}
 func (x *WorldState) MarshalProtoText() string {
 	var sb protobuf_go_lite.TextBuilder
 	initialLen := protobuf_go_lite.TextStartMessage(&sb, "WorldState")
-	if x.World != "" {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "world")
-		protobuf_go_lite.TextWriteString(&sb, x.World)
-	}
-	if x.Tier != "" {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "tier")
-		protobuf_go_lite.TextWriteString(&sb, x.Tier)
-	}
 	if x.Version != "" {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "version")
 		protobuf_go_lite.TextWriteString(&sb, x.Version)
-	}
-	if len(x.Config) > 0 {
-		protobuf_go_lite.TextWriteMapStart(&sb, initialLen, "config")
-		for _, k := range protobuf_go_lite.TextSortedMapKeys(x.Config) {
-			v := x.Config[k]
-			protobuf_go_lite.TextWriteMapEntryPrefix(&sb)
-			protobuf_go_lite.TextWriteString(&sb, k)
-			protobuf_go_lite.TextWriteMapKeyValueSeparator(&sb)
-			protobuf_go_lite.TextWriteString(&sb, v)
-		}
-		protobuf_go_lite.TextWriteMapEnd(&sb)
 	}
 	if x.Activity != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "activity")
@@ -1735,10 +4422,181 @@ func (x *WorldState) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "app_activity")
 		protobuf_go_lite.TextWriteString(&sb, x.AppActivity)
 	}
+	if x.World != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "world")
+		protobuf_go_lite.TextWriteStringer(&sb, WorldKind(x.World))
+	}
+	if x.Tier != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "tier")
+		protobuf_go_lite.TextWriteStringer(&sb, Tier(x.Tier))
+	}
+	if x.Screen != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "screen")
+		protobuf_go_lite.TextWriteStringer(&sb, ScreenLayout(x.Screen))
+	}
+	if x.Input != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "input")
+		protobuf_go_lite.TextWriteStringer(&sb, InputMode(x.Input))
+	}
+	if x.Text != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "text")
+		protobuf_go_lite.TextWriteStringer(&sb, TextOutlet(x.Text))
+	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
 
 func (x *WorldState) String() string {
+	return x.MarshalProtoText()
+}
+func (x *PressButtonRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "PressButtonRequest")
+	if x.Button != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "button")
+		protobuf_go_lite.TextWriteStringer(&sb, Button(x.Button))
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *PressButtonRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *ScreenResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "ScreenResponse")
+	if len(x.Rows) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "rows")
+		for i, v := range x.Rows {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			protobuf_go_lite.TextWriteString(&sb, v)
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	if x.Cols != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "cols")
+		protobuf_go_lite.TextWriteUint(&sb, x.Cols)
+	}
+	if x.Height != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "height")
+		protobuf_go_lite.TextWriteUint(&sb, x.Height)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *ScreenResponse) String() string {
+	return x.MarshalProtoText()
+}
+func (x *PayloadInfo) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "PayloadInfo")
+	if x.Index != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "index")
+		protobuf_go_lite.TextWriteUint(&sb, x.Index)
+	}
+	if x.Name != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "name")
+		protobuf_go_lite.TextWriteString(&sb, x.Name)
+	}
+	if x.Size != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "size")
+		protobuf_go_lite.TextWriteUint(&sb, x.Size)
+	}
+	if x.Integrity != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "integrity")
+		protobuf_go_lite.TextWriteStringer(&sb, Integrity(x.Integrity))
+	}
+	if x.EntryMethod != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "entry_method")
+		protobuf_go_lite.TextWriteUint(&sb, x.EntryMethod)
+	}
+	if x.IsDefault != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "is_default")
+		protobuf_go_lite.TextWriteBool(&sb, x.IsDefault)
+	}
+	if x.Runnable != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "runnable")
+		protobuf_go_lite.TextWriteBool(&sb, x.Runnable)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *PayloadInfo) String() string {
+	return x.MarshalProtoText()
+}
+func (x *ListPayloadsResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "ListPayloadsResponse")
+	if len(x.Payloads) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "payloads")
+		for i, v := range x.Payloads {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			if v == nil {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, &PayloadInfo{})
+			} else {
+				protobuf_go_lite.TextWriteTextMarshaler(&sb, v)
+			}
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	if x.Selected != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "selected")
+		protobuf_go_lite.TextWriteUint(&sb, x.Selected)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *ListPayloadsResponse) String() string {
+	return x.MarshalProtoText()
+}
+func (x *SelectPayloadRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "SelectPayloadRequest")
+	if x.Index != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "index")
+		protobuf_go_lite.TextWriteUint(&sb, x.Index)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *SelectPayloadRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *ExecuteRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "ExecuteRequest")
+	if x.MethodId != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "method_id")
+		protobuf_go_lite.TextWriteUint(&sb, x.MethodId)
+	}
+	if len(x.Request) != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "request")
+		protobuf_go_lite.TextWriteBytes(&sb, x.Request)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *ExecuteRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *ExecuteResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "ExecuteResponse")
+	if x.Success != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "success")
+		protobuf_go_lite.TextWriteBool(&sb, x.Success)
+	}
+	if len(x.Output) != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "output")
+		protobuf_go_lite.TextWriteBytes(&sb, x.Output)
+	}
+	if x.Error != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "error")
+		protobuf_go_lite.TextWriteString(&sb, x.Error)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *ExecuteResponse) String() string {
 	return x.MarshalProtoText()
 }
 func (x *ControlRequest) MarshalProtoText() string {
@@ -1786,9 +4644,9 @@ func (x *LogLine) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "uptime_ms")
 		protobuf_go_lite.TextWriteUint(&sb, x.UptimeMs)
 	}
-	if x.Stage != "" {
+	if x.Stage != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "stage")
-		protobuf_go_lite.TextWriteString(&sb, x.Stage)
+		protobuf_go_lite.TextWriteStringer(&sb, Stage(x.Stage))
 	}
 	if x.Level != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "level")
@@ -1798,10 +4656,31 @@ func (x *LogLine) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "text")
 		protobuf_go_lite.TextWriteString(&sb, x.Text)
 	}
+	if x.Scope != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "scope")
+		protobuf_go_lite.TextWriteStringer(&sb, Scope(x.Scope))
+	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
 
 func (x *LogLine) String() string {
+	return x.MarshalProtoText()
+}
+func (x *Subscription) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "Subscription")
+	if len(x.Notices) > 0 {
+		protobuf_go_lite.TextWriteListStart(&sb, initialLen, "notices")
+		for i, v := range x.Notices {
+			protobuf_go_lite.TextWriteListSeparator(&sb, i)
+			protobuf_go_lite.TextWriteStringer(&sb, Notice(v))
+		}
+		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *Subscription) String() string {
 	return x.MarshalProtoText()
 }
 func (m *WorldState) UnmarshalVT(dAtA []byte) error {
@@ -1824,26 +4703,6 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 			return fmt.Errorf("proto: WorldState: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field World", wireType)
-			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			m.World = v
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Tier", wireType)
-			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			m.Tier = v
 		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
@@ -1854,48 +4713,6 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Version = v
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Config", wireType)
-			}
-			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			iNdEx = msgStart
-			if m.Config == nil {
-				m.Config = make(map[string]string)
-			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-				if err != nil {
-					return err
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					mapkey, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
-					if err != nil {
-						return err
-					}
-				} else if fieldNum == 2 {
-					mapvalue, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
-					if err != nil {
-						return err
-					}
-				} else {
-					iNdEx = entryPreIndex
-					iNdEx, err = protobuf_go_lite.SkipWithin(dAtA, iNdEx, postIndex)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			m.Config[mapkey] = mapvalue
-			iNdEx = postIndex
 		case 5:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Activity", wireType)
@@ -1936,6 +4753,538 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.AppActivity = v
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field World", wireType)
+			}
+			m.World = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.World = WorldKind(_v)
+			if err != nil {
+				return err
+			}
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Tier", wireType)
+			}
+			m.Tier = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Tier = Tier(_v)
+			if err != nil {
+				return err
+			}
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Screen", wireType)
+			}
+			m.Screen = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Screen = ScreenLayout(_v)
+			if err != nil {
+				return err
+			}
+		case 12:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Input", wireType)
+			}
+			m.Input = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Input = InputMode(_v)
+			if err != nil {
+				return err
+			}
+		case 13:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Text", wireType)
+			}
+			m.Text = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Text = TextOutlet(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *PressButtonRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: PressButtonRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: PressButtonRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Button", wireType)
+			}
+			m.Button = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Button = Button(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ScreenResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ScreenResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ScreenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Rows", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Rows = append(m.Rows, v)
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Cols", wireType)
+			}
+			m.Cols = 0
+			m.Cols, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Height", wireType)
+			}
+			m.Height = 0
+			m.Height, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *PayloadInfo) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: PayloadInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: PayloadInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			m.Index, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Size", wireType)
+			}
+			m.Size = 0
+			m.Size, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Integrity", wireType)
+			}
+			m.Integrity = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Integrity = Integrity(_v)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EntryMethod", wireType)
+			}
+			m.EntryMethod = 0
+			m.EntryMethod, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IsDefault", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.IsDefault = bool(v)
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Runnable", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Runnable = bool(v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ListPayloadsResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ListPayloadsResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ListPayloadsResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Payloads", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Payloads = append(m.Payloads, &PayloadInfo{})
+			if err := m.Payloads[len(m.Payloads)-1].UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Selected", wireType)
+			}
+			m.Selected = 0
+			m.Selected, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SelectPayloadRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SelectPayloadRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SelectPayloadRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			m.Index, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExecuteRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExecuteRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExecuteRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			m.Request, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Request, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExecuteResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExecuteResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExecuteResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Success", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Success = bool(v)
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Output", wireType)
+			}
+			m.Output, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Output, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Error", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Error = v
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -2119,15 +5468,16 @@ func (m *LogLine) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 		case 2:
-			if wireType != 2 {
+			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Stage", wireType)
 			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			m.Stage = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Stage = Stage(_v)
 			if err != nil {
 				return err
 			}
-			m.Stage = v
 		case 3:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Level", wireType)
@@ -2149,6 +5499,93 @@ func (m *LogLine) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Text = v
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Scope", wireType)
+			}
+			m.Scope = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Scope = Scope(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *Subscription) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: Subscription: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: Subscription: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType == 0 {
+				var v Notice
+				var _v uint64
+				_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+				v = Notice(_v)
+				if err != nil {
+					return err
+				}
+				m.Notices = append(m.Notices, v)
+			} else if wireType == 2 {
+				packedStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				iNdEx = packedStart
+				var elementCount int
+				elementCount = protobuf_go_lite.PackedVarintElementCount(dAtA[iNdEx:postIndex])
+				if elementCount != 0 && len(m.Notices) == 0 {
+					m.Notices = make([]Notice, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v Notice
+					var _v uint64
+					_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+					v = Notice(_v)
+					if err != nil {
+						return err
+					}
+					m.Notices = append(m.Notices, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field Notices", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -2191,26 +5628,6 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 			return fmt.Errorf("proto: WorldState: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field World", wireType)
-			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			m.World = v
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Tier", wireType)
-			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			m.Tier = v
 		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
@@ -2221,48 +5638,6 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Version = v
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Config", wireType)
-			}
-			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
-			if err != nil {
-				return err
-			}
-			iNdEx = msgStart
-			if m.Config == nil {
-				m.Config = make(map[string]string)
-			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-				if err != nil {
-					return err
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					mapkey, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
-					if err != nil {
-						return err
-					}
-				} else if fieldNum == 2 {
-					mapvalue, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
-					if err != nil {
-						return err
-					}
-				} else {
-					iNdEx = entryPreIndex
-					iNdEx, err = protobuf_go_lite.SkipWithin(dAtA, iNdEx, postIndex)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			m.Config[mapkey] = mapvalue
-			iNdEx = postIndex
 		case 5:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Activity", wireType)
@@ -2303,6 +5678,538 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.AppActivity = v
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field World", wireType)
+			}
+			m.World = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.World = WorldKind(_v)
+			if err != nil {
+				return err
+			}
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Tier", wireType)
+			}
+			m.Tier = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Tier = Tier(_v)
+			if err != nil {
+				return err
+			}
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Screen", wireType)
+			}
+			m.Screen = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Screen = ScreenLayout(_v)
+			if err != nil {
+				return err
+			}
+		case 12:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Input", wireType)
+			}
+			m.Input = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Input = InputMode(_v)
+			if err != nil {
+				return err
+			}
+		case 13:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Text", wireType)
+			}
+			m.Text = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Text = TextOutlet(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *PressButtonRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: PressButtonRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: PressButtonRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Button", wireType)
+			}
+			m.Button = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Button = Button(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ScreenResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ScreenResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ScreenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Rows", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Rows = append(m.Rows, v)
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Cols", wireType)
+			}
+			m.Cols = 0
+			m.Cols, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Height", wireType)
+			}
+			m.Height = 0
+			m.Height, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *PayloadInfo) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: PayloadInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: PayloadInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			m.Index, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Size", wireType)
+			}
+			m.Size = 0
+			m.Size, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Integrity", wireType)
+			}
+			m.Integrity = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Integrity = Integrity(_v)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EntryMethod", wireType)
+			}
+			m.EntryMethod = 0
+			m.EntryMethod, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IsDefault", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.IsDefault = bool(v)
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Runnable", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Runnable = bool(v)
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ListPayloadsResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ListPayloadsResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ListPayloadsResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Payloads", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Payloads = append(m.Payloads, &PayloadInfo{})
+			if err := m.Payloads[len(m.Payloads)-1].UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Selected", wireType)
+			}
+			m.Selected = 0
+			m.Selected, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SelectPayloadRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SelectPayloadRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SelectPayloadRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Index", wireType)
+			}
+			m.Index = 0
+			m.Index, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExecuteRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExecuteRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExecuteRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			m.Request, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExecuteResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExecuteResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExecuteResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Success", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Success = bool(v)
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Output", wireType)
+			}
+			m.Output, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Error", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Error = v
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -2486,15 +6393,16 @@ func (m *LogLine) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 		case 2:
-			if wireType != 2 {
+			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Stage", wireType)
 			}
-			var v string
-			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			m.Stage = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Stage = Stage(_v)
 			if err != nil {
 				return err
 			}
-			m.Stage = v
 		case 3:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Level", wireType)
@@ -2516,6 +6424,93 @@ func (m *LogLine) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Text = v
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Scope", wireType)
+			}
+			m.Scope = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Scope = Scope(_v)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *Subscription) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: Subscription: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: Subscription: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType == 0 {
+				var v Notice
+				var _v uint64
+				_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+				v = Notice(_v)
+				if err != nil {
+					return err
+				}
+				m.Notices = append(m.Notices, v)
+			} else if wireType == 2 {
+				packedStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+				if err != nil {
+					return err
+				}
+				iNdEx = packedStart
+				var elementCount int
+				elementCount = protobuf_go_lite.PackedVarintElementCount(dAtA[iNdEx:postIndex])
+				if elementCount != 0 && len(m.Notices) == 0 {
+					m.Notices = make([]Notice, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v Notice
+					var _v uint64
+					_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+					v = Notice(_v)
+					if err != nil {
+						return err
+					}
+					m.Notices = append(m.Notices, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field Notices", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

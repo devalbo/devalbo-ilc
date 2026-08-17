@@ -45,6 +45,32 @@ func init() {
 	platform.RegisterCommandSpec(countdownv1.AppServiceCLI)
 }
 
+// phrase renders one tick in the style the caller asked for.
+//
+// THE APP OWNS ITS OWN WORDS. A world that offered "plain or rocket" as a
+// built-in would be guessing at a vocabulary; here the enum travels with the
+// command spec, a badge shows the names the app declared, and this turns the
+// chosen one into text.
+func phrase(style countdownv1.Style, remaining int) string {
+	switch style {
+	case countdownv1.Style_STYLE_ROCKET:
+		return fmt.Sprintf("T-minus %d", remaining)
+	case countdownv1.Style_STYLE_WORDS:
+		// Only as far as this app counts down from in words; beyond that the
+		// digits are clearer anyway.
+		words := []string{"zero", "one", "two", "three", "four", "five",
+			"six", "seven", "eight", "nine", "ten"}
+		if remaining < len(words) {
+			return words[remaining]
+		}
+		return fmt.Sprintf("%d", remaining)
+	default:
+		// STYLE_UNSPECIFIED lands here too: an absent field takes the behaviour
+		// the app had before the field existed (Decision 33).
+		return fmt.Sprintf("%d...", remaining)
+	}
+}
+
 // itoa without fmt: this runs once per tick and `fmt` pulls formatting machinery
 // into a component that has to fit on a badge. Writes into a caller-owned buffer
 // so nothing allocates on a path an app may run in a loop.
@@ -90,7 +116,7 @@ func handleCount(req *countdownv1.CountRequest) (*countdownv1.CountResponse, err
 	// That is the whole demonstration: output during a command, paced by the app.
 	for remaining := from; remaining > 0; remaining-- {
 		if platform.CanShowText() {
-			fmt.Printf("%d...\n", remaining)
+			fmt.Println(phrase(req.Style, remaining))
 		}
 		// STATUS ON EVERY TICK, so a world with only an LED still sees motion.
 		// Slot 2 is the short-term value — a tier can render change as a blink,

@@ -40,6 +40,26 @@ pub struct Flag {
     /// have used anyway and confirming immediately means the same as not
     /// answering.
     pub default_value: Option<(usize, usize)>,
+    /// The kebab-cased field name, as a range.
+    ///
+    /// COSMETIC FOR ENCODING and load-bearing for ASKING: with more than one
+    /// field to collect, "which one is this?" is the question a prompt has to
+    /// answer, and `help` is optional where a name always exists.
+    pub name: Option<(usize, usize)>,
+    /// The flag's own byte range, so its repeated fields can be re-walked.
+    ///
+    /// A CHOICE LIST CANNOT LIVE IN A FIXED STRUCT: an enum has as many values
+    /// as the app declared, and this crate has no allocator at the point a flag
+    /// is parsed. Keeping the span and reading it again on demand costs a second
+    /// pass over a few dozen bytes and removes the arbitrary cap that storing
+    /// them would need.
+    pub span: (usize, usize),
+    /// 1-based argument position, or 0 for flag-only.
+    ///
+    /// THE ORDER TO ASK IN, and it comes from the app rather than from the order
+    /// fields happen to appear. A calculator's `left op right` reads in that
+    /// order for the same reason it does on a command line.
+    pub positional: u32,
     /// Byte range of the help text within the response, or `None`.
     ///
     /// A RANGE rather than a `&str` because this crate is `no_std` and the
@@ -55,6 +75,9 @@ const FLAG_KIND: u32 = 3;
 const FLAG_SOURCE: u32 = 4;
 const FLAG_HELP: u32 = 5;
 const FLAG_DEFAULT: u32 = 7;
+const FLAG_POSITIONAL: u32 = 9;
+const FLAG_ENUM_VALUES: u32 = 10;
+const FLAG_ENUM_NUMBERS: u32 = 12;
 
 /// Field numbers in `SpecCommand` and the response.
 const COMMAND_FLAGS: u32 = 4;
@@ -67,6 +90,10 @@ pub const KIND_INT32: u32 = 3;
 pub const KIND_INT64: u32 = 4;
 pub const KIND_UINT32: u32 = 5;
 pub const KIND_UINT64: u32 = 6;
+/// A closed set of choices the APP declared — the one kind whose options come
+/// from the app rather than from the world's idea of a value.
+pub const KIND_ENUM: u32 = 7;
+pub const KIND_BYTES: u32 = 8;
 
 /// Whether this kind is a whole number, and so wants the spinner.
 pub fn is_integer(kind: u32) -> bool {
@@ -93,6 +120,170 @@ pub fn first_flag(response: &[u8]) -> Option<Flag> {
         }
     }
     None
+}
+
+impl Flag {
+    /// A blank flag, for sizing a fixed array before `flags_into` fills it.
+    pub const EMPTY: Flag = Flag {
+        field: 0,
+        kind: 0,
+        source: 0,
+        help: None,
+        default_value: None,
+        name: None,
+        positional: 0,
+        span: (0, 0),
+    };
+}
+
+/// Every flag of every command in the response, in the order to ASK for them.
+///
+/// # Why this replaced `first_flag`
+///
+/// The badge collected exactly one field per command, which was right while the
+/// only app took one. It is not a simplification a calculator survives:
+/// `left op right` would have prompted for `left` and let the app take proto
+/// defaults for the rest, computing `5 UNSPECIFIED 0` and reporting success.
+///
+/// # The order is the APP's, not this buffer's
+///
+/// Sorted by `positional` where the app declared one, which is the same order a
+/// command line would take them in — so `5 + 3` reads as an expression rather
+/// than as three unrelated prompts. Fields with no position keep their
+/// declaration order, after the positional ones.
+///
+/// Returns how many were written. Any beyond `out.len()` are DROPPED, and the
+/// caller is expected to say so: silently collecting four of five fields is the
+/// same class of failure as collecting one of three.
+pub fn flags_into(response: &[u8], out: &mut [Flag]) -> usize {
+    let mut count = 0usize;
+    let mut cursor = Cursor::new(response);
+    while let Some((field, wire)) = cursor.tag() {
+        if field == RESPONSE_COMMANDS && wire == 2 {
+            let Some(command) = cursor.bytes() else {
+                break;
+            };
+            let mut inner = Cursor::at(response, command);
+            while let Some((field, wire)) = inner.tag() {
+                if field == COMMAND_FLAGS && wire == 2 {
+                    let Some(span) = inner.bytes() else {
+                        break;
+                    };
+                    if let Some(flag) = parse_flag(response, span) {
+                        if count < out.len() {
+                            out[count] = flag;
+                            count += 1;
+                        }
+                    }
+                } else if inner.skip(wire).is_none() {
+                    break;
+                }
+            }
+        } else if cursor.skip(wire).is_none() {
+            break;
+        }
+    }
+
+    // INSERTION SORT, because this is at most a handful of entries and a sort
+    // that allocates is not available here. Stable, so unpositioned fields keep
+    // the order the app declared them in.
+    for index in 1..count {
+        let mut at = index;
+        while at > 0 && rank(&out[at - 1]) > rank(&out[at]) {
+            out.swap(at - 1, at);
+            at -= 1;
+        }
+    }
+    count
+}
+
+/// Where a flag sorts. Unpositioned fields go last, in declaration order.
+fn rank(flag: &Flag) -> u32 {
+    if flag.positional == 0 {
+        u32::MAX
+    } else {
+        flag.positional
+    }
+}
+
+/// How many choices an enum flag offers.
+pub fn enum_count(response: &[u8], flag: &Flag) -> usize {
+    let mut count = 0usize;
+    let mut cursor = Cursor::at(response, flag.span);
+    while let Some((field, wire)) = cursor.tag() {
+        if field == FLAG_ENUM_VALUES && wire == 2 {
+            if cursor.bytes().is_none() {
+                break;
+            }
+            count += 1;
+        } else if cursor.skip(wire).is_none() {
+            break;
+        }
+    }
+    count
+}
+
+/// The `index`-th choice: its name, and the WIRE NUMBER to encode.
+///
+/// # Why the number is not the index
+///
+/// It was, and that was a bug waiting for the first enum that is not numbered
+/// densely from zero. `UNSPECIFIED = 0; OK = 1; FAILED = 5;` has FAILED at index
+/// 2, so encoding the index sends 2 — a legal value that the app reads as OK.
+/// Nothing rejects it, nothing logs it, and the app does the wrong thing and
+/// reports success.
+///
+/// `enum_numbers` carries the real values, emitted from the same loop over the
+/// descriptor that produced the names. Where a spec predates that field, the
+/// index is used and is right for the common dense case — the fallback is the
+/// old behaviour, not a new guess.
+pub fn enum_choice<'a>(response: &'a [u8], flag: &Flag, index: usize) -> Option<(&'a str, i64)> {
+    let mut names = 0usize;
+    let mut name = None;
+    let mut number = None;
+    let mut numbers = 0usize;
+
+    let mut cursor = Cursor::at(response, flag.span);
+    while let Some((field, wire)) = cursor.tag() {
+        match (field, wire) {
+            (FLAG_ENUM_VALUES, 2) => {
+                let span = cursor.bytes()?;
+                if names == index {
+                    name = core::str::from_utf8(response.get(span.0..span.1)?).ok();
+                }
+                names += 1;
+            }
+            // PACKED OR NOT. proto3 packs a repeated int32 by default, and a
+            // hand-written encoder may not — accepting only one of them would be
+            // a decoder that works until somebody writes a second generator.
+            (FLAG_ENUM_NUMBERS, 2) => {
+                let (start, end) = cursor.bytes()?;
+                let mut inner = Cursor::at(response, (start, end));
+                while let Some(value) = inner.varint() {
+                    if numbers == index {
+                        number = Some(value as i64);
+                    }
+                    numbers += 1;
+                }
+            }
+            (FLAG_ENUM_NUMBERS, 0) => {
+                let value = cursor.varint()?;
+                if numbers == index {
+                    number = Some(value as i64);
+                }
+                numbers += 1;
+            }
+            _ => cursor.skip(wire)?,
+        }
+    }
+
+    Some((name?, number.unwrap_or(index as i64)))
+}
+
+/// Resolve a flag's name against the buffer it was parsed from.
+pub fn name_of<'a>(response: &'a [u8], flag: &Flag) -> Option<&'a str> {
+    let (start, end) = flag.name?;
+    core::str::from_utf8(response.get(start..end)?).ok()
 }
 
 /// Resolve a flag's help text against the buffer it was parsed from.
@@ -152,7 +343,16 @@ fn first_flag_of_command(base: &[u8], command: (usize, usize)) -> Option<Flag> {
 
 fn parse_flag(base: &[u8], span: (usize, usize)) -> Option<Flag> {
     let mut cursor = Cursor::at(base, span);
-    let mut flag = Flag { field: 0, kind: 0, source: 0, help: None, default_value: None };
+    let mut flag = Flag {
+        field: 0,
+        kind: 0,
+        source: 0,
+        help: None,
+        default_value: None,
+        name: None,
+        positional: 0,
+        span,
+    };
     while let Some((field, wire)) = cursor.tag() {
         match (field, wire) {
             (FLAG_FIELD, 0) => flag.field = cursor.varint()? as u32,
@@ -160,9 +360,8 @@ fn parse_flag(base: &[u8], span: (usize, usize)) -> Option<Flag> {
             (FLAG_SOURCE, 0) => flag.source = cursor.varint()? as u32,
             (FLAG_HELP, 2) => flag.help = Some(cursor.bytes()?),
             (FLAG_DEFAULT, 2) => flag.default_value = Some(cursor.bytes()?),
-            (FLAG_NAME, 2) => {
-                cursor.bytes()?;
-            }
+            (FLAG_NAME, 2) => flag.name = Some(cursor.bytes()?),
+            (FLAG_POSITIONAL, 0) => flag.positional = cursor.varint()? as u32,
             // UNKNOWN FIELDS ARE SKIPPED BY WIRE TYPE, which is what keeps a
             // firmware readable by a spec that grew fields after it shipped.
             _ => cursor.skip(wire)?,
@@ -448,5 +647,175 @@ mod tests {
         let mut out = Vec::new();
         delimited(&mut out, RESPONSE_COMMANDS, &command);
         assert_eq!(first_flag(&out), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // More than one field (the calculator case)
+    // -----------------------------------------------------------------------
+
+    /// A command with several flags, as `left op right` would arrive.
+    fn multi(flags: &[(u32, u32, &str, u32)]) -> Vec<u8> {
+        let mut command = Vec::new();
+        delimited(&mut command, 1, b"calc");
+        for (field, kind, name, positional) in flags {
+            let mut flag = Vec::new();
+            delimited(&mut flag, FLAG_NAME, name.as_bytes());
+            tag(&mut flag, FLAG_FIELD, 0);
+            varint(&mut flag, *field as u64);
+            tag(&mut flag, FLAG_KIND, 0);
+            varint(&mut flag, *kind as u64);
+            if *positional != 0 {
+                tag(&mut flag, FLAG_POSITIONAL, 0);
+                varint(&mut flag, *positional as u64);
+            }
+            delimited(&mut command, COMMAND_FLAGS, &flag);
+        }
+        let mut out = Vec::new();
+        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        out
+    }
+
+    fn empty_flag() -> Flag {
+        Flag::EMPTY
+    }
+
+    #[test]
+    fn every_field_of_a_command_is_collected() {
+        // The failure this replaces: a calculator prompted for `left` only, and
+        // the app took proto defaults for the rest — computing `5 UNSPECIFIED 0`
+        // and reporting success.
+        let response = multi(&[(1, 4, "left", 1), (2, 7, "op", 2), (3, 4, "right", 3)]);
+        let mut flags = [empty_flag(); 8];
+        let count = flags_into(&response, &mut flags);
+        assert_eq!(count, 3);
+        assert_eq!(flags[0].field, 1);
+        assert_eq!(flags[1].field, 2);
+        assert_eq!(flags[2].field, 3);
+    }
+
+    #[test]
+    fn the_order_asked_is_the_order_the_app_declared() {
+        // Field numbers deliberately at odds with the positions: an expression
+        // reads `left op right` whatever order the proto happens to number them.
+        let response = multi(&[(3, 4, "right", 3), (1, 4, "left", 1), (2, 7, "op", 2)]);
+        let mut flags = [empty_flag(); 8];
+        let count = flags_into(&response, &mut flags);
+        assert_eq!(count, 3);
+        assert_eq!(name_of(&response, &flags[0]), Some("left"));
+        assert_eq!(name_of(&response, &flags[1]), Some("op"));
+        assert_eq!(name_of(&response, &flags[2]), Some("right"));
+    }
+
+    #[test]
+    fn unpositioned_fields_keep_their_declared_order_and_come_last() {
+        let response = multi(&[(1, 1, "alpha", 0), (2, 1, "beta", 0), (3, 1, "gamma", 1)]);
+        let mut flags = [empty_flag(); 8];
+        let count = flags_into(&response, &mut flags);
+        assert_eq!(count, 3);
+        assert_eq!(name_of(&response, &flags[0]), Some("gamma"), "positional leads");
+        // Stability matters: without it two unpositioned fields could swap on a
+        // rebuild and a world would ask for them in a different order each time.
+        assert_eq!(name_of(&response, &flags[1]), Some("alpha"));
+        assert_eq!(name_of(&response, &flags[2]), Some("beta"));
+    }
+
+    #[test]
+    fn more_fields_than_room_are_dropped_not_wrapped() {
+        let response = multi(&[(1, 1, "a", 1), (2, 1, "b", 2), (3, 1, "c", 3)]);
+        let mut flags = [empty_flag(); 2];
+        assert_eq!(flags_into(&response, &mut flags), 2);
+    }
+
+    #[test]
+    fn one_field_still_works() {
+        // The countdown, unchanged: the case that used to be the only one.
+        let response = response(1, 3, 3, "count down from this number", "from");
+        let mut flags = [empty_flag(); 8];
+        assert_eq!(flags_into(&response, &mut flags), 1);
+        assert_eq!(flags[0].field, 1);
+        assert_eq!(name_of(&response, &flags[0]), Some("from"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Enum choices, and why an ordinal is not a value
+    // -----------------------------------------------------------------------
+
+    /// A flag offering choices, with the wire numbers the app declared.
+    fn with_choices(names: &[&str], numbers: &[i64], packed: bool) -> Vec<u8> {
+        let mut flag = Vec::new();
+        delimited(&mut flag, FLAG_NAME, b"op");
+        tag(&mut flag, FLAG_FIELD, 0);
+        varint(&mut flag, 2);
+        tag(&mut flag, FLAG_KIND, 0);
+        varint(&mut flag, KIND_ENUM as u64);
+        for name in names {
+            delimited(&mut flag, FLAG_ENUM_VALUES, name.as_bytes());
+        }
+        if !numbers.is_empty() {
+            if packed {
+                let mut body = Vec::new();
+                for number in numbers {
+                    varint(&mut body, *number as u64);
+                }
+                delimited(&mut flag, FLAG_ENUM_NUMBERS, &body);
+            } else {
+                for number in numbers {
+                    tag(&mut flag, FLAG_ENUM_NUMBERS, 0);
+                    varint(&mut flag, *number as u64);
+                }
+            }
+        }
+        let mut command = Vec::new();
+        delimited(&mut command, 1, b"calc");
+        delimited(&mut command, COMMAND_FLAGS, &flag);
+        let mut out = Vec::new();
+        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        out
+    }
+
+    fn only_flag(response: &[u8]) -> Flag {
+        let mut flags = [Flag::EMPTY; 4];
+        assert_eq!(flags_into(response, &mut flags), 1);
+        flags[0]
+    }
+
+    #[test]
+    fn a_sparse_enum_encodes_its_declared_number_not_its_position() {
+        // THE BUG THIS EXISTS FOR. `failed` sits at index 2 and its value is 5.
+        // Encoding the index sends 2, which is `ok` — a legal value, so nothing
+        // rejects it and the app cheerfully does the opposite of what was asked.
+        let response = with_choices(&["unspecified", "ok", "failed"], &[0, 1, 5], true);
+        let flag = only_flag(&response);
+        assert_eq!(enum_count(&response, &flag), 3);
+        assert_eq!(enum_choice(&response, &flag, 2), Some(("failed", 5)));
+    }
+
+    #[test]
+    fn both_encodings_of_the_numbers_are_read() {
+        // proto3 packs a repeated int32 by default; a hand-written encoder may
+        // not. Accepting one is a decoder that works until a second generator.
+        for packed in [true, false] {
+            let response = with_choices(&["a", "b", "c"], &[0, 3, 9], packed);
+            let flag = only_flag(&response);
+            assert_eq!(enum_choice(&response, &flag, 1), Some(("b", 3)), "packed={packed}");
+            assert_eq!(enum_choice(&response, &flag, 2), Some(("c", 9)), "packed={packed}");
+        }
+    }
+
+    #[test]
+    fn a_spec_without_numbers_falls_back_to_the_position() {
+        // An older spec, from before `enum_numbers` existed. The index is right
+        // for the dense case, which is what those specs describe — the fallback
+        // is the OLD behaviour, not a new guess.
+        let response = with_choices(&["zero", "one", "two"], &[], true);
+        let flag = only_flag(&response);
+        assert_eq!(enum_choice(&response, &flag, 2), Some(("two", 2)));
+    }
+
+    #[test]
+    fn asking_past_the_end_gives_nothing() {
+        let response = with_choices(&["a", "b"], &[0, 1], true);
+        let flag = only_flag(&response);
+        assert_eq!(enum_choice(&response, &flag, 2), None);
     }
 }

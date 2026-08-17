@@ -8,6 +8,7 @@
 export const MethodVersion = 1;
 export const MethodSetEnvironment = 2;
 export const MethodGetCommandSurface = 4;
+export const MethodGetCommandSpec = 5;
 export const MethodExportFs = 100;
 export const MethodImportFs = 101;
 export const MethodResetFs = 102;
@@ -18,6 +19,7 @@ export const PlatformServiceMethods = {
   Version: 1,
   SetEnvironment: 2,
   GetCommandSurface: 4,
+  GetCommandSpec: 5,
   ExportFs: 100,
   ImportFs: 101,
   ResetFs: 102,

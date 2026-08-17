@@ -27,7 +27,7 @@ var PlatformServiceCLI = []clispec.Command{
 		Summary: "Bundle a subtree into one portable blob",
 		Flags: []clispec.Flag{
 			{Name: "prefix", Field: 1, Kind: clispec.KindString, Short: "p", Help: "subtree to export (default: whole root)"},
-			{Name: "format", Field: 2, Kind: clispec.KindEnum, Short: "f", Help: "bundle format", Default: "BUNDLE_FORMAT_BFT", EnumValues: []string{"BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"}},
+			{Name: "format", Field: 2, Kind: clispec.KindEnum, Short: "f", Help: "bundle format", Default: "BUNDLE_FORMAT_BFT", EnumValues: []string{"BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"}, EnumNumbers: []int32{0, 1, 2, 3}},
 		},
 	},
 	{
@@ -38,7 +38,7 @@ var PlatformServiceCLI = []clispec.Command{
 		Flags: []clispec.Flag{
 			{Name: "bundle", Field: 1, Kind: clispec.KindBytes, Source: clispec.SourceFile, Positional: 1, Required: true, Help: "bundle bytes to import"},
 			{Name: "prefix", Field: 2, Kind: clispec.KindString, Short: "p", Help: "destination subtree"},
-			{Name: "mode", Field: 3, Kind: clispec.KindEnum, Help: "merge into the destination, or replace it", Default: "IMPORT_MODE_MERGE", EnumValues: []string{"IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"}},
+			{Name: "mode", Field: 3, Kind: clispec.KindEnum, Help: "merge into the destination, or replace it", Default: "IMPORT_MODE_MERGE", EnumValues: []string{"IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"}, EnumNumbers: []int32{0, 1, 2}},
 		},
 	},
 	{

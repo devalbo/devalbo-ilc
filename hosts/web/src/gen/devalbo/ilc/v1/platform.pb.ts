@@ -132,6 +132,176 @@ export const Isolation_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Iso
 ]);
 
 /**
+ * Where an app's printed text actually goes.
+ *
+ * **Presence of stdout proves nothing**, which is why this exists. Every tier
+ * PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
+ * component whose stdout is missing never instantiates — so an app learns
+ * nothing by checking whether it is there. Only the host knows whether the bytes
+ * reach a person.
+ *
+ * @generated from enum devalbo.ilc.v1.TextOutlet
+ */
+export enum TextOutlet {
+  /**
+   * nobody said; FAILS OPEN, see below
+   *
+   * @generated from enum value: TEXT_OUTLET_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * printing reaches no one
+   *
+   * @generated from enum value: TEXT_OUTLET_NONE = 1;
+   */
+  NONE = 1,
+
+  /**
+   * a serial console someone may be watching
+   *
+   * @generated from enum value: TEXT_OUTLET_UART = 2;
+   */
+  UART = 2,
+
+  /**
+   * a screen the host renders text onto
+   *
+   * @generated from enum value: TEXT_OUTLET_DISPLAY = 3;
+   */
+  DISPLAY = 3,
+
+  /**
+   * an ordinary stdout
+   *
+   * @generated from enum value: TEXT_OUTLET_TERMINAL = 4;
+   */
+  TERMINAL = 4,
+}
+
+export const TextOutlet_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.TextOutlet", [
+  [0, "TEXT_OUTLET_UNSPECIFIED"],
+  [1, "TEXT_OUTLET_NONE"],
+  [2, "TEXT_OUTLET_UART"],
+  [3, "TEXT_OUTLET_DISPLAY"],
+  [4, "TEXT_OUTLET_TERMINAL"],
+]);
+
+/**
+ * Where a flag's value comes from, as opposed to what type it is.
+ *
+ * Mirrors `devalbo.options.v1.CliSource` and `clispec.Source`. Kept separate
+ * from `kind` because they vary independently: a `bytes` field is almost always
+ * a file, but a long `string` may equally well be piped in, and a host must not
+ * have to guess which.
+ *
+ * STDIN IS THE ONE THAT TRAVELS FURTHEST. On a terminal it means a pipe; in a
+ * browser a text area; on a badge it is what makes the on-screen keyboard
+ * appear. The app declares "this value is typed by a person" once, and each
+ * world answers it with what it has.
+ *
+ * @generated from enum devalbo.ilc.v1.SpecSource
+ */
+export enum SpecSource {
+  /**
+   * literal — the argument is the value
+   *
+   * @generated from enum value: SPEC_SOURCE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: SPEC_SOURCE_LITERAL = 1;
+   */
+  LITERAL = 1,
+
+  /**
+   * @generated from enum value: SPEC_SOURCE_FILE = 2;
+   */
+  FILE = 2,
+
+  /**
+   * @generated from enum value: SPEC_SOURCE_STDIN = 3;
+   */
+  STDIN = 3,
+}
+
+export const SpecSource_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.SpecSource", [
+  [0, "SPEC_SOURCE_UNSPECIFIED"],
+  [1, "SPEC_SOURCE_LITERAL"],
+  [2, "SPEC_SOURCE_FILE"],
+  [3, "SPEC_SOURCE_STDIN"],
+]);
+
+/**
+ * A flag's wire type — what a host needs to parse a value and encode the field.
+ *
+ * Mirrors `clispec.Kind`. A host that meets a kind it cannot render skips the
+ * field and the app takes its default, which is a no-op rather than an error
+ * (Decision 33).
+ *
+ * @generated from enum devalbo.ilc.v1.SpecKind
+ */
+export enum SpecKind {
+  /**
+   * @generated from enum value: SPEC_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: SPEC_KIND_STRING = 1;
+   */
+  STRING = 1,
+
+  /**
+   * @generated from enum value: SPEC_KIND_BOOL = 2;
+   */
+  BOOL = 2,
+
+  /**
+   * @generated from enum value: SPEC_KIND_INT32 = 3;
+   */
+  INT32 = 3,
+
+  /**
+   * @generated from enum value: SPEC_KIND_INT64 = 4;
+   */
+  INT64 = 4,
+
+  /**
+   * @generated from enum value: SPEC_KIND_UINT32 = 5;
+   */
+  UINT32 = 5,
+
+  /**
+   * @generated from enum value: SPEC_KIND_UINT64 = 6;
+   */
+  UINT64 = 6,
+
+  /**
+   * @generated from enum value: SPEC_KIND_ENUM = 7;
+   */
+  ENUM = 7,
+
+  /**
+   * @generated from enum value: SPEC_KIND_BYTES = 8;
+   */
+  BYTES = 8,
+}
+
+export const SpecKind_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.SpecKind", [
+  [0, "SPEC_KIND_UNSPECIFIED"],
+  [1, "SPEC_KIND_STRING"],
+  [2, "SPEC_KIND_BOOL"],
+  [3, "SPEC_KIND_INT32"],
+  [4, "SPEC_KIND_INT64"],
+  [5, "SPEC_KIND_UINT32"],
+  [6, "SPEC_KIND_UINT64"],
+  [7, "SPEC_KIND_ENUM"],
+  [8, "SPEC_KIND_BYTES"],
+]);
+
+/**
  * Filesystem export/import — the first-class platform primitive (§7.3). An
  * app's whole state is a filesystem tree, so one bundle moves it between the
  * terminal, the browser, and an embedded device.
@@ -296,6 +466,44 @@ export const Filesystem: MessageType<Filesystem> = /* @__PURE__ */ createMessage
 });
 
 /**
+ * The app's text budget, as of the enclosing manifest's `revision`.
+ *
+ * @generated from message devalbo.ilc.v1.TextOut
+ */
+export interface TextOut {
+  /**
+   * @generated from field: devalbo.ilc.v1.TextOutlet outlet = 2;
+   */
+  outlet?: TextOutlet;
+  /**
+   * The space the app HAS, not the space the tier could offer. Zero means
+   * unknown — a terminal whose width the host did not measure — and an app must
+   * read zero as "wrap however you like", never as "you have no room".
+   *
+   * A wrong non-zero number is worse than no number, so a host that does not
+   * know must send zero rather than guess 80.
+   *
+   * @generated from field: uint32 cols = 3;
+   */
+  cols?: number;
+  /**
+   * @generated from field: uint32 rows = 4;
+   */
+  rows?: number;
+
+};
+
+export const TextOut: MessageType<TextOut> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.TextOut",
+    fields: [
+        { no: 2, name: "outlet", kind: "enum", T: TextOutlet_Enum },
+        { no: 3, name: "cols", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 4, name: "rows", kind: "scalar", T: ScalarType.UINT32 },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * Environment is what the host can do, as of `revision`.
  *
  * Deliberately small (plan D6): a field here is a branch somewhere, and a
@@ -324,6 +532,30 @@ export interface Environment {
    * @generated from field: devalbo.ilc.v1.Filesystem filesystem = 2;
    */
   filesystem?: Filesystem;
+  /**
+   * Where printed text lands, and how much room the app has RIGHT NOW.
+   *
+   * THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
+   * when the host starts; this one is an ALLOCATION, and a world that takes
+   * screen back for an alert or a menu changes it mid-session. That is exactly
+   * why it belongs here rather than in `wasi:cli/environment`: the wasi env is
+   * read once during `_initialize` and can never be re-read, so an allocation
+   * announced there is frozen at the value it had before the app ever ran.
+   *
+   * Putting it in the manifest gets both halves for free, because the manifest
+   * already has them. POLL: `platform.Env()` is a cached synchronous read, no
+   * import, no round trip. NOTIFY: the host re-sends with a bumped revision and
+   * the engine fires registered callbacks. Neither needed a new capability,
+   * which is the D6 test this had to pass.
+   *
+   * The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
+   * They stay as the startup bootstrap for a tier that cannot push a manifest at
+   * all — today's badge is exactly that — and an app reads them only when this
+   * field is UNSPECIFIED.
+   *
+   * @generated from field: devalbo.ilc.v1.TextOut text_out = 4;
+   */
+  textOut?: TextOut;
 
 };
 
@@ -332,6 +564,214 @@ export const Environment: MessageType<Environment> = /* @__PURE__ */ createMessa
     fields: [
         { no: 1, name: "revision", kind: "scalar", T: ScalarType.UINT32 },
         { no: 2, name: "filesystem", kind: "message", T: () => Filesystem },
+        { no: 4, name: "text_out", kind: "message", T: () => TextOut },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * One field of a request message, as an input a host can collect.
+ *
+ * @generated from message devalbo.ilc.v1.SpecFlag
+ */
+export interface SpecFlag {
+  /**
+   * The kebab-cased field name. Cosmetic — `field` is the wire.
+   *
+   * @generated from field: string name = 1;
+   */
+  name?: string;
+  /**
+   * The proto field NUMBER. A host encodes by number, never by name, for the
+   * same reason dispatch keys on method_id.
+   *
+   * @generated from field: uint32 field = 2;
+   */
+  field?: number;
+  /**
+   * @generated from field: devalbo.ilc.v1.SpecKind kind = 3;
+   */
+  kind?: SpecKind;
+  /**
+   * @generated from field: devalbo.ilc.v1.SpecSource source = 4;
+   */
+  source?: SpecSource;
+  /**
+   * @generated from field: string help = 5;
+   */
+  help?: string;
+  /**
+   * @generated from field: bool required = 6;
+   */
+  required?: boolean;
+  /**
+   * In string form, parsed by the host to the field's wire type.
+   *
+   * @generated from field: string default_value = 7;
+   */
+  defaultValue?: string;
+  /**
+   * @generated from field: bool repeated = 8;
+   */
+  repeated?: boolean;
+  /**
+   * 1-based argument position, or 0 for flag-only.
+   *
+   * @generated from field: uint32 positional = 9;
+   */
+  positional?: number;
+  /**
+   * The permitted names for an enum flag — and the MENU a richer host shows.
+   * The one place an app already declares its own choices.
+   *
+   * @generated from field: repeated string enum_values = 10;
+   */
+  enumValues?: string[];
+  /**
+   * The WIRE NUMBER of each name above, in the same order.
+   *
+   * AN ORDINAL IS NOT A VALUE, and this field exists because that was assumed.
+   * A host encoding `op=multiply` by taking multiply's INDEX in `enum_values`
+   * is right only for an enum numbered densely from zero; `UNSPECIFIED = 0;
+   * OK = 1; FAILED = 5;` encodes FAILED as 2 and the app reads OK. Both are
+   * legal values, so nothing rejects it — the app simply does the wrong thing
+   * and reports success.
+   *
+   * PARALLEL TO `enum_values` rather than replacing it with pairs, because the
+   * names alone are what a CLI prints and a menu shows, and every existing
+   * reader wants exactly that. The two are emitted from ONE loop over the
+   * enum's descriptor, so they cannot fall out of step: an index valid in one
+   * is valid in the other by construction.
+   *
+   * @generated from field: repeated int32 enum_numbers = 12;
+   */
+  enumNumbers?: number[];
+  /**
+   * Single-letter alias. CLI-shaped, carried because dropping it would make
+   * this description lossy against the one the CLI compiles in.
+   *
+   * @generated from field: string short = 11;
+   */
+  short?: string;
+
+};
+
+export const SpecFlag: MessageType<SpecFlag> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.SpecFlag",
+    fields: [
+        { no: 1, name: "name", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "field", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 3, name: "kind", kind: "enum", T: SpecKind_Enum },
+        { no: 4, name: "source", kind: "enum", T: SpecSource_Enum },
+        { no: 5, name: "help", kind: "scalar", T: ScalarType.STRING },
+        { no: 6, name: "required", kind: "scalar", T: ScalarType.BOOL },
+        { no: 7, name: "default_value", kind: "scalar", T: ScalarType.STRING },
+        { no: 8, name: "repeated", kind: "scalar", T: ScalarType.BOOL },
+        { no: 9, name: "positional", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 10, name: "enum_values", kind: "scalar", T: ScalarType.STRING, repeated: true },
+        { no: 12, name: "enum_numbers", kind: "scalar", T: ScalarType.INT32, repeated: true },
+        { no: 11, name: "short", kind: "scalar", T: ScalarType.STRING },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * One rpc, as a command a host can offer.
+ *
+ * @generated from message devalbo.ilc.v1.SpecCommand
+ */
+export interface SpecCommand {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name?: string;
+  /**
+   * @generated from field: uint32 method = 2;
+   */
+  method?: number;
+  /**
+   * @generated from field: string summary = 3;
+   */
+  summary?: string;
+  /**
+   * @generated from field: repeated devalbo.ilc.v1.SpecFlag flags = 4;
+   */
+  flags?: SpecFlag[];
+  /**
+   * Request message name, for diagnostics only.
+   *
+   * @generated from field: string request = 5;
+   */
+  request?: string;
+  /**
+   * A verb the HOST handles rather than the engine (Decision 30).
+   *
+   * @generated from field: bool local = 6;
+   */
+  local?: boolean;
+  /**
+   * Request fields this description cannot express — nested messages, maps,
+   * repeated non-scalars. LISTED rather than dropped: a command that silently
+   * ignores a field is worse than one that says it cannot set it.
+   *
+   * @generated from field: repeated string unsupported = 7;
+   */
+  unsupported?: string[];
+
+};
+
+export const SpecCommand: MessageType<SpecCommand> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.SpecCommand",
+    fields: [
+        { no: 1, name: "name", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "method", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 3, name: "summary", kind: "scalar", T: ScalarType.STRING },
+        { no: 4, name: "flags", kind: "message", T: () => SpecFlag, repeated: true },
+        { no: 5, name: "request", kind: "scalar", T: ScalarType.STRING },
+        { no: 6, name: "local", kind: "scalar", T: ScalarType.BOOL },
+        { no: 7, name: "unsupported", kind: "scalar", T: ScalarType.STRING, repeated: true },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * @generated from message devalbo.ilc.v1.GetCommandSpecRequest
+ */
+export interface GetCommandSpecRequest {
+  /**
+   * Zero means EVERY command. A badge asks for one; a browser building a whole
+   * surface asks for all of them, and paying for a round trip per command would
+   * be the only reason to hand-cache it host-side.
+   *
+   * @generated from field: uint32 method_id = 1;
+   */
+  methodId?: number;
+
+};
+
+export const GetCommandSpecRequest: MessageType<GetCommandSpecRequest> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.GetCommandSpecRequest",
+    fields: [
+        { no: 1, name: "method_id", kind: "scalar", T: ScalarType.UINT32 },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * @generated from message devalbo.ilc.v1.GetCommandSpecResponse
+ */
+export interface GetCommandSpecResponse {
+  /**
+   * @generated from field: repeated devalbo.ilc.v1.SpecCommand commands = 1;
+   */
+  commands?: SpecCommand[];
+
+};
+
+export const GetCommandSpecResponse: MessageType<GetCommandSpecResponse> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.GetCommandSpecResponse",
+    fields: [
+        { no: 1, name: "commands", kind: "message", T: () => SpecCommand, repeated: true },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

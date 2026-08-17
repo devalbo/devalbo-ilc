@@ -49,7 +49,6 @@ use embedded_graphics::mono_font::ascii::FONT_8X13;
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
 
 use embedded_hal::digital::InputPin;
 
@@ -57,6 +56,8 @@ use dlc_platform_embedded::catalog::Payload;
 use dlc_platform_embedded::names;
 
 use crate::board;
+use dlc_platform_embedded::control;
+
 use crate::display::Display;
 use crate::payload::Payloads;
 
@@ -112,6 +113,15 @@ where
     DOWN: InputPin,
     A: InputPin,
 {
+    // ALREADY CHOSEN, over the cable (D3). Checked before the shortcuts below,
+    // because a client that named an index meant it even on a badge with one app
+    // or no screen — and answering "0" to "run 2" would be a lie a test could not
+    // see through.
+    if let Some(index) = crate::installed::take_request() {
+        let _ = writeln!(log, "menu: {index} selected over the control channel");
+        return index;
+    }
+
     // One app is not a choice. Nor is a badge with no screen, where a menu would
     // be an invisible prompt for a button nobody knows to press.
     if payloads.len() < 2 || screen.is_none() {
@@ -148,9 +158,11 @@ where
         // ACTIVE-LOW: pulled up, and a press shorts to ground. `unwrap_or(false)`
         // stays "not pressed" on an error, which is the safe default here — a
         // stuck read must not confirm a selection.
-        let up = buttons.up.is_low().unwrap_or(false);
-        let down = buttons.down.is_low().unwrap_or(false);
-        let confirm = buttons.a.is_low().unwrap_or(false);
+        // OR THE CONTROL CHANNEL. A press consumed here is indistinguishable
+        // from a finger, which is D6's rule (see buttons.rs).
+        let up = buttons.up.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_UP);
+        let down = buttons.down.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_DOWN);
+        let confirm = buttons.a.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_A);
 
         if confirm {
             // GUARD ONE. Refuse rather than launch; the highlight should never be
@@ -284,7 +296,7 @@ fn draw(payloads: &Payloads, screen: &mut Option<Display>, selected: usize, elap
 
 fn text(panel: &mut Display, x: i32, y: i32, s: &str, color: Rgb565) {
     let style = MonoTextStyle::new(&FONT_8X13, color);
-    let _ = Text::new(s, Point::new(x, y), style).draw(panel.target());
+    panel.text(s, Point::new(x, y), style);
 }
 
 /// A stack line buffer — the menu runs before anything should be allocating, and

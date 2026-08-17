@@ -67,7 +67,6 @@ use embedded_graphics::mono_font::ascii::FONT_8X13;
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
 
 use crate::display::Display;
 use crate::world::Status;
@@ -109,6 +108,18 @@ pub enum Scope {
     Emulated,
 }
 
+impl Scope {
+    /// `Scope` in control.proto. Written out rather than cast: this enum's
+    /// discriminants are a local detail, and the proto numbers are a wire
+    /// contract that must not follow a reordering here.
+    pub const fn code(self) -> u32 {
+        match self {
+            Scope::HardwareOnly => dlc_platform_embedded::control::SCOPE_HARDWARE_ONLY,
+            Scope::Emulated => dlc_platform_embedded::control::SCOPE_EMULATED,
+        }
+    }
+}
+
 /// Narrates the bring-up to a screen and a UART at once.
 ///
 /// Owns neither the flow nor the checks: `main.rs` still runs them in order,
@@ -125,6 +136,9 @@ pub struct Report<'a, U: Write> {
     hardware_checks: u32,
     hardware_passed: u32,
     last_was_hardware: bool,
+    /// The open stage's `Scope`, as the proto number, so a note under it is
+    /// attributed the same way its stage was.
+    scope_code: u32,
     sys_hz: u32,
 }
 
@@ -143,6 +157,7 @@ impl<'a, U: Write> Report<'a, U> {
             failures: 0,
             hardware_checks: 0,
             hardware_passed: 0,
+            scope_code: 0,
             last_was_hardware: false,
             sys_hz,
         };
@@ -168,7 +183,7 @@ impl<'a, U: Write> Report<'a, U> {
         let mut buffer = TextBuffer::new();
         let _ = core::fmt::write(&mut buffer, text);
         let style = MonoTextStyle::new(&FONT_8X13, color);
-        let _ = Text::new(buffer.as_str(), Point::new(col * 8, y), style).draw(panel.target());
+        panel.text(buffer.as_str(), Point::new(col * 8, y), style);
     }
 
     fn pause(&self) {
@@ -193,9 +208,18 @@ impl<'a, U: Write> Report<'a, U> {
     /// until [`Open::ok`] or [`Open::fail`] closes it, which is what makes a note
     /// written into the middle of a stage a compile error rather than a mangled
     /// line (see the module header).
-    pub fn stage(&mut self, scope: Scope, name: Arguments<'_>) -> Open<'_, 'a, U> {
+    pub fn stage(&mut self, which: u32, scope: Scope, name: Arguments<'_>) -> Open<'_, 'a, U> {
         self.stage += 1;
         self.last_was_hardware = scope == Scope::HardwareOnly;
+        self.scope_code = scope.code();
+        // ANNOUNCE IT BEFORE ATTEMPTING IT. If this stage hangs, this frame is
+        // the last thing a control client hears, and it NAMES what the world was
+        // doing — the one diagnosis a stream of completed lines cannot give,
+        // because a hung stage never completes its line.
+        #[cfg(badge_control)]
+        crate::usblog::stage_opened(which, self.scope_code);
+        #[cfg(not(badge_control))]
+        let _ = which;
         if self.last_was_hardware {
             self.hardware_checks += 1;
         }
@@ -217,6 +241,11 @@ impl<'a, U: Write> Report<'a, U> {
 
     /// The stage worked. `detail` goes to the UART and, if it fits, the screen.
     fn resolve_ok(&mut self, detail: Arguments<'_>) {
+        #[cfg(badge_control)]
+        crate::usblog::mark(
+            dlc_platform_embedded::control::LEVEL_STAGE_OK,
+            self.scope_code,
+        );
         let y = self.y();
         self.draw(y, RESULT_COL, format_args!("OK"), OK_COLOR);
         // THE DETAIL BELONGS ON THE SCREEN TOO. It went only to the UART, so
@@ -237,6 +266,11 @@ impl<'a, U: Write> Report<'a, U> {
     /// failures still leave a badge that can report, which is the point of
     /// reporting them rather than halting.
     fn resolve_fail(&mut self, detail: Arguments<'_>) {
+        #[cfg(badge_control)]
+        crate::usblog::mark(
+            dlc_platform_embedded::control::LEVEL_STAGE_FAIL,
+            self.scope_code,
+        );
         self.failures += 1;
         let y = self.y();
         self.draw(y, RESULT_COL, format_args!("FAIL"), FAIL_COLOR);

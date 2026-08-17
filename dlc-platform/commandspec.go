@@ -107,6 +107,7 @@ func specCommand(c clispec.Command) *ilcv1.SpecCommand {
 			Repeated:     f.Repeated,
 			Positional:   f.Positional,
 			EnumValues:   f.EnumValues,
+			EnumNumbers:  f.EnumNumbers,
 			Short:        f.Short,
 		})
 	}

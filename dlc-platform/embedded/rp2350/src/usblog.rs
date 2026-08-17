@@ -85,6 +85,11 @@ pub struct LogBuffer {
     /// line noise and send someone hunting a hardware fault.
     len: AtomicUsize,
     truncated: AtomicBool,
+    /// Where the line being written began.
+    ///
+    /// Only main touches it, and only inside `write_str`, so it needs no
+    /// synchronisation — unlike `len`, the ISR never reads it.
+    line_start: usize,
 }
 
 impl LogBuffer {
@@ -93,6 +98,7 @@ impl LogBuffer {
             bytes: [0; 8192],
             len: AtomicUsize::new(0),
             truncated: AtomicBool::new(false),
+            line_start: 0,
         }
     }
 
@@ -130,6 +136,29 @@ impl Write for LogBuffer {
             }
             self.bytes[len] = byte;
             len += 1;
+
+            // A COMPLETED LINE IS AN EVENT. Framing here rather than at the call
+            // sites is what keeps the promise that a frame reader never has less
+            // than a terminal would have shown: EVERY line reaches this, whether
+            // it came through `report.rs` with a stage and a level attached or
+            // through a bare `writeln!` somewhere in main.
+            if byte == b'\n' {
+                let mut end = len - 1;
+                if end > self.line_start && self.bytes[end - 1] == b'\r' {
+                    end -= 1;
+                }
+                #[cfg(badge_control)]
+                {
+                    // Lossy on invalid UTF-8, which the text stream already
+                    // carried verbatim; a frame is not the place to fight over
+                    // bytes that will never decode.
+                    let text = core::str::from_utf8(&self.bytes[self.line_start..end]).unwrap_or("");
+                    notices::line_completed(text);
+                }
+                #[cfg(not(badge_control))]
+                let _ = end;
+                self.line_start = len;
+            }
         }
         // PUBLISH LAST. Everything above must be visible to the ISR before the
         // length that covers it becomes visible, or the ISR sends bytes that
@@ -383,6 +412,22 @@ fn service_locked(usb: &mut Usb) {
         return;
     }
 
+    // NOTICES COME AFTER THE TEXT THEY DUPLICATE, and the ordering is the whole
+    // guard against repeating D8b.
+    //
+    // The reverted version put framed log lines ABOVE this, sharing the reply's
+    // early return. Every report line queued one, so the queue was never empty,
+    // the early return fired on every service call, and the text log — the
+    // diagnostic that needs no tooling — was never transmitted at all.
+    //
+    // Below the text log, that cannot happen: `pending` is finite and drains, so
+    // a notice can only ever use a wire the text stream has finished with. A
+    // frame can never delay the words it is a copy of.
+    #[cfg(badge_control)]
+    if control_notices(serial) {
+        return;
+    }
+
     // A HEARTBEAT, NOT A REPLAY.
     //
     // The first version of this re-sent the WHOLE LOG when idle, so that a
@@ -536,6 +581,10 @@ const RESET_SUBCLASS: u8 = 0x00;
 const RESET_PROTOCOL: u8 = 0x01;
 const RESET_REQUEST_BOOTSEL: u8 = 0x01;
 
+/// RP2350 bootrom reboot type: a normal restart, back into this firmware.
+#[cfg(badge_control)]
+const REBOOT_TYPE_NORMAL: u32 = 0x0000;
+
 /// RP2350 bootrom reboot type: into BOOTSEL. Datasheet 5.5.10.1.
 const REBOOT_TYPE_BOOTSEL: u32 = 0x0002;
 
@@ -593,9 +642,7 @@ impl<B: usb_device::bus::UsbBus> usb_device::class::UsbClass<B> for PicoToolRese
             // p0 is the activity-LED gpio mask and p1 the interface-disable mask;
             // zero for both means "no LED, leave mass storage and PicoBoot
             // enabled", which is what a plain `picotool reboot -u -f` expects.
-            unsafe {
-                hal::rom_data::reboot(REBOOT_TYPE_BOOTSEL, 10, 0, 0);
-            }
+            hal::rom_data::reboot(REBOOT_TYPE_BOOTSEL, 10, 0, 0);
         }
     }
 }
@@ -629,6 +676,23 @@ struct Control {
     tx: [u8; 512],
     tx_len: usize,
     tx_sent: usize,
+    /// The notice frame in flight, and how much of it has gone.
+    ///
+    /// SEPARATE FROM `tx` because a reply has someone blocked on it and a notice
+    /// does not. Sharing one buffer would let a log line overwrite an answer
+    /// somebody was waiting for.
+    nx: [u8; 512],
+    nx_len: usize,
+    nx_sent: usize,
+    /// Which notice frame goes next — an index into the run, not into a buffer.
+    ///
+    /// Backfill is what makes it a frame NUMBER: subscribing sets it to zero, and
+    /// zero means "the first thing this world ever said", however long ago that
+    /// was. A client that attaches at t=10s still gets the boot that failed,
+    /// which is the case a bring-up log exists for.
+    notice_cursor: usize,
+    /// Which notices the client asked for, as `1 << notice`.
+    subscribed: u32,
 }
 
 #[cfg(badge_control)]
@@ -638,6 +702,11 @@ static CONTROL: crate::shared::Shared<Control> = crate::shared::Shared::new(Cont
     tx: [0; 512],
     tx_len: 0,
     tx_sent: 0,
+    nx: [0; 512],
+    nx_len: 0,
+    nx_sent: 0,
+    notice_cursor: 0,
+    subscribed: 0,
 });
 
 /// Take bytes off the wire and answer any complete frame.
@@ -673,7 +742,89 @@ fn control_receive(bytes: &[u8]) {
                     c.rx_len -= n;
                 }
                 control::Found::Frame(request, consumed) => {
-                    let reply = answer(&request);
+                    // TOO EARLY TO ANSWER PROPERLY, so say so in a frame built
+                    // on the stack. Silence here would be indistinguishable from
+                    // a wedged badge, which is the ambiguity this whole channel
+                    // exists to remove.
+                    if !HEAP_READY.load(Ordering::Acquire) {
+                        let mut body = [0u8; 96];
+                        let mut framed = [0u8; 128];
+                        let reply = control::response_into(
+                            &mut body,
+                            false,
+                            "the world is still starting; no heap yet",
+                        )
+                        .and_then(|len| {
+                            control::frame_into(&mut framed, control::KIND_RESPONSE, &body[..len])
+                        });
+                        c.rx.copy_within(consumed..c.rx_len, 0);
+                        c.rx_len -= consumed;
+                        if let Some(len) = reply {
+                            c.tx[..len].copy_from_slice(&framed[..len]);
+                            c.tx_len = len;
+                            c.tx_sent = 0;
+                        }
+                        return;
+                    }
+
+                    // SUBSCRIBE IS HANDLED HERE, not in `answer`. It is the one
+                    // verb that CHANGES this cell, and `answer` is pure so that
+                    // it can never reach for a borrow its caller already holds —
+                    // which would be a reentrant `with` and a panic.
+                    let reply = if request.verb == control::VERB_SUBSCRIBE {
+                        // The mask is read out of `rx` in a block of its own, so
+                        // the immutable borrow ends before the cell is written.
+                        let granted = {
+                            let body = match request.payload {
+                                Some((start, end)) if end <= c.rx_len => &c.rx[start..end],
+                                // NO PAYLOAD IS A VALID UNSUBSCRIBE, not an
+                                // error: an empty `Subscription` encodes to zero
+                                // bytes, so "stop sending me things" arrives
+                                // looking exactly like this.
+                                _ => &[][..],
+                            };
+                            control::parse_subscription(body).unwrap_or(0)
+                                & control::NOTICES_SUPPORTED
+                        };
+                        let began = c.subscribed;
+                        c.subscribed = granted;
+                        // FROM THE TOP OF THE RUN, whenever the log is newly
+                        // subscribed to. Re-subscribing is how a client asks for
+                        // the history again, and re-sending it is cheaper than a
+                        // second verb meaning "replay".
+                        let log_wanted = 1 << control::NOTICE_LOG;
+                        if granted & log_wanted != 0 && began & log_wanted == 0 {
+                            c.notice_cursor = 0;
+                        }
+                        // A SUBSCRIPTION CHANGE ABANDONS THE FRAME IN FLIGHT.
+                        // Its bytes belong to a cursor that may have just moved,
+                        // and half a frame followed by the start of another is
+                        // how a reader desynchronises.
+                        c.nx_len = 0;
+                        c.nx_sent = 0;
+                        control::frame(
+                            control::KIND_RESPONSE,
+                            &control::response(true, "", &control::subscription(granted)),
+                        )
+                    } else {
+                        // The payload is borrowed out of `rx` for the call and
+                        // the borrow ends with it, which is what lets `answer`
+                        // stay free of this cell.
+                        let payload = match request.payload {
+                            Some((start, end)) if end <= c.rx_len => &c.rx[start..end],
+                            _ => &[][..],
+                        };
+                        // `None` means the verb was accepted and will be answered
+                        // later, by main. Nothing is queued now.
+                        match answer(&request, payload) {
+                            Some(reply) => reply,
+                            None => {
+                                c.rx.copy_within(consumed..c.rx_len, 0);
+                                c.rx_len -= consumed;
+                                return;
+                            }
+                        }
+                    };
                     c.rx.copy_within(consumed..c.rx_len, 0);
                     c.rx_len -= consumed;
                     // Queue it here, inside the same section, so a reply cannot
@@ -698,7 +849,10 @@ fn control_receive(bytes: &[u8]) {
 /// step without this reaching for it too — which would be a reentrant borrow and
 /// a panic.
 #[cfg(badge_control)]
-fn answer(request: &dlc_platform_embedded::control::Request) -> alloc::vec::Vec<u8> {
+fn answer(
+    request: &dlc_platform_embedded::control::Request,
+    payload: &[u8],
+) -> Option<alloc::vec::Vec<u8>> {
     use dlc_platform_embedded::control;
 
     let payload = match request.verb {
@@ -707,14 +861,12 @@ fn answer(request: &dlc_platform_embedded::control::Request) -> alloc::vec::Vec<
                 .map(|clock| clock() / 1000)
                 .unwrap_or(0);
             let state = control::WorldState {
-                world: crate::WORLD.name(),
-                tier: "rp2350",
+                world: crate::WORLD.code(),
+                tier: control::TIER_RP2350,
                 version: env!("CARGO_PKG_VERSION"),
-                config: &[
-                    ("screen", crate::world::screen_name()),
-                    ("input", crate::world::input_name()),
-                    ("text", crate::world::text_sink()),
-                ],
+                screen: crate::world::screen_code(),
+                input: crate::world::input_code(),
+                text: crate::world::text_code(),
                 activity: ACTIVITY.load(Ordering::Relaxed) as u32,
                 app: "",
                 app_activity: dlc_platform_embedded::activity::get(),
@@ -722,13 +874,402 @@ fn answer(request: &dlc_platform_embedded::control::Request) -> alloc::vec::Vec<
             };
             control::response(true, "", &state.encode())
         }
+        // DRIVE IT (D3). A press queued here is consumed by the next widget
+        // poll and is indistinguishable from a finger — see buttons.rs.
+        control::VERB_PRESS_BUTTON => match control::parse_button(payload) {
+            Some(button) if crate::buttons::press(button) => control::response(true, "", &[]),
+            // NAMED REFUSAL. A caller built against a newer proto that asks for a
+            // button this board does not have needs to know that now, not to
+            // wait for an effect that is never coming.
+            Some(_) => control::response(false, "no such button on this world", &[]),
+            None => control::response(false, "malformed PressButtonRequest", &[]),
+        },
+
+        // WHAT THE PANEL SAYS, taken from the same draw calls that reached it.
+        control::VERB_GET_SCREEN => {
+            let mut out = alloc::vec::Vec::new();
+            let drawn = crate::display::mirror::rows(|row| control::screen_row(&mut out, row));
+            if drawn {
+                control::screen_dims(
+                    &mut out,
+                    crate::display::mirror::COLS as u32,
+                    crate::display::mirror::ROWS as u32,
+                );
+                control::response(true, "", &out)
+            } else {
+                // BUSY IS NOT BLANK. Main holds the grid while it redraws, and
+                // answering with no rows would report an empty screen.
+                control::response(false, "the panel is being redrawn; ask again", &[])
+            }
+        }
+
+        // PASS-THROUGH (D2). The one verb whose answer this interrupt cannot
+        // produce: it needs the engine, which lives on main's stack. Parked for
+        // main, answered when the app returns — see passthrough.rs.
+        control::VERB_EXECUTE => {
+            let accepted = match control::parse_execute(payload) {
+                Some((method, range)) => {
+                    let bytes = match range {
+                        Some((start, end)) => &payload[start..end],
+                        None => &[][..],
+                    };
+                    crate::passthrough::offer(method, bytes)
+                }
+                None => {
+                    return Some(control::frame(
+                        control::KIND_RESPONSE,
+                        &control::response(false, "malformed ExecuteRequest", &[]),
+                    ))
+                }
+            };
+            // NO REPLY YET is the whole point, so returning `None` here is not an
+            // error path — the answer arrives from main once the app has run.
+            return if accepted {
+                None
+            } else {
+                Some(control::frame(
+                    control::KIND_RESPONSE,
+                    &control::response(
+                        false,
+                        "a request is already running; one at a time",
+                        &[],
+                    ),
+                ))
+            };
+        }
+
+        // WHAT IS INSTALLED, including what will not run and why.
+        control::VERB_LIST_PAYLOADS => {
+            let mut out = alloc::vec::Vec::new();
+            let selected = crate::installed::each(|index, payload| {
+                control::payload_info(
+                    &mut out,
+                    index as u32,
+                    payload.name,
+                    payload.bytes.len() as u32,
+                    crate::installed::integrity_code(payload.integrity),
+                    payload.entry_method,
+                    payload.is_default(),
+                    payload.runnable(),
+                );
+            });
+            match selected {
+                Some(selected) => {
+                    control::payloads_selected(&mut out, selected as u32);
+                    control::response(true, "", &out)
+                }
+                None => control::response(false, "the catalog is busy; ask again", &[]),
+            }
+        }
+
+        // CHOOSE WHAT RUNS NEXT. Noted, not run — see installed.rs.
+        control::VERB_SELECT_PAYLOAD => match control::parse_index(payload) {
+            Some(index) if crate::installed::request(index as usize) => {
+                control::response(true, "", &[])
+            }
+            Some(_) => control::response(false, "no payload with that index", &[]),
+            None => control::response(false, "malformed SelectPayloadRequest", &[]),
+        },
+
+        // START OVER.
+        //
+        // THE REPLY GOES FIRST. `reboot` does not return, so rebooting here would
+        // drop the connection with the answer still queued — and a client cannot
+        // tell that from a badge that crashed on the request. Instead this arms a
+        // flag that `control_send` acts on once the last byte is out, which turns
+        // "it died" into "it said yes, then went".
+        control::VERB_REBOOT => {
+            REBOOT_WHEN_SENT.store(true, Ordering::Release);
+            control::response(true, "", &[])
+        }
+
         // A VERB THIS WORLD DOES NOT KNOW is answered, not ignored. A caller
         // built against a newer proto gets a refusal naming the verb rather than
         // a silence it has to time out on.
         other => control::response(false, "unknown verb", &[other as u8]),
     };
-    control::frame(control::KIND_RESPONSE, &payload)
+    Some(control::frame(control::KIND_RESPONSE, &payload))
 }
+
+
+// ---------------------------------------------------------------------------
+// Notices: the log, as frames, kept so a late client still gets the beginning
+// ---------------------------------------------------------------------------
+
+/// The structured half of the log (D8b), held as ALREADY-FRAMED bytes.
+///
+/// # Why a ring of frames and not a cursor into the text
+///
+/// The first working version pointed a cursor at the text log and framed lines
+/// out of it on the way past. That got backfill for free, and it was wrong in
+/// two ways that were not obvious until it ran:
+///
+///   - **It could not date anything.** The text log stores words and no times,
+///     so a backfilled line was stamped with the clock at FRAMING time — which
+///     said the whole run happened at the instant somebody subscribed. That is
+///     the exact failure `LogLine.uptime_ms` was documented against.
+///   - **It could not carry structure.** `report.rs` knows the stage, the
+///     result and whether only silicon could have answered; by the time a line
+///     is text, all of that has been flattened into prose. Recovering it would
+///     have meant matching on `[OK]` and leading spaces — a regex over rendered
+///     output, which is precisely what frames exist to stop a reader doing.
+///
+/// Framing at the moment a line is WRITTEN fixes both, because that is the only
+/// moment when the time and the structure are both still known.
+///
+/// # Why the frames are encoded, not the fields
+///
+/// A slot holds finished bytes. The alternative — keeping the fields and
+/// encoding on the way out — would put the encoder in the interrupt, and would
+/// need a heap there, which stages 1 to 3 do not have.
+///
+/// # What it costs, and the warning it is not
+///
+/// The module header rejects "disable interrupts around every log write" because
+/// the report writes constantly and masking USB service across all of it would
+/// stall enumeration. This masks for a bounded memcpy on LINE COMPLETION only —
+/// about a microsecond at 150 MHz, against a 1 ms USB frame. Same technique,
+/// different order of magnitude, and the alternative is a lock-free ring whose
+/// correctness rests on "the writer cannot lap the reader mid-frame" — which is
+/// the shape of reasoning `shared.rs` exists because we got wrong three times.
+#[cfg(badge_control)]
+mod notices {
+    use dlc_platform_embedded::control;
+
+    /// Big enough for a frame around a full-width line and a stage name.
+    const SLOT: usize = 160;
+    /// About four screens of bring-up. Beyond that the oldest go, and the count
+    /// of what went is reported rather than quietly dropped.
+    const SLOTS: usize = 40;
+
+    pub struct Notices {
+        slots: [[u8; SLOT]; SLOTS],
+        lens: [u16; SLOTS],
+        /// Frames ever appended. Monotonic, so a subscriber's cursor is just a
+        /// frame number and "have I missed some" is one comparison.
+        head: usize,
+        /// The oldest frame still held.
+        tail: usize,
+        /// How many were lost to the ring wrapping.
+        dropped: usize,
+        /// Metadata for the next line to complete, set by `report.rs`.
+        level: u32,
+        scope: u32,
+        /// `Stage` in control.proto — a number, so remembering "which stage are
+        /// we in" costs four bytes and cannot drift from how a label is worded.
+        stage: u32,
+    }
+
+    static NOTICES: crate::shared::Shared<Notices> = crate::shared::Shared::new(Notices {
+        slots: [[0; SLOT]; SLOTS],
+        lens: [0; SLOTS],
+        head: 0,
+        tail: 0,
+        dropped: 0,
+        level: control::LEVEL_NOTE,
+        scope: 0,
+        stage: 0,
+    });
+
+    /// Declare what the next completed line IS.
+    ///
+    /// Set immediately before the write that closes the line, and consumed by
+    /// it — so a line nobody described is a note, which is what an unannotated
+    /// `writeln!` in main actually is.
+    pub fn mark(level: u32, scope: u32) {
+        NOTICES.with(|n| {
+            n.level = level;
+            n.scope = scope;
+        });
+    }
+
+    /// A stage has been announced. Records the name and emits `STAGE_OPEN`.
+    ///
+    /// THE FRAME GOES OUT BEFORE THE WORK IS ATTEMPTED, which is the whole
+    /// point: if the stage hangs, this is the last thing a client hears, and it
+    /// names what the world was doing. A frame stream built only on completed
+    /// lines said nothing at all in that case.
+    pub fn stage_opened(stage: u32, scope: u32) {
+        NOTICES.with(|n| {
+            n.stage = stage;
+            n.level = control::LEVEL_NOTE;
+            n.scope = scope;
+        });
+        append(control::LEVEL_STAGE_OPEN, scope, "");
+    }
+
+    /// A line finished. Frames it with whatever was declared, then resets.
+    pub fn line_completed(text: &str) {
+        let (level, scope) = NOTICES.with(|n| (n.level, n.scope));
+        append(level, scope, text);
+        NOTICES.with(|n| {
+            // BACK TO A NOTE. Metadata describes ONE line; leaving it set would
+            // label every following line with the last stage's result.
+            n.level = control::LEVEL_NOTE;
+        });
+    }
+
+    fn append(level: u32, scope: u32, text: &str) {
+        // The clock may not be installed yet — stages 1 to 3 run before it. Zero
+        // encodes as absent, so an undated line says so rather than claiming boot.
+        let uptime_ms = dlc_platform_embedded::clock::installed()
+            .map(|clock| clock() / 1000)
+            .unwrap_or(0);
+
+        NOTICES.with(|n| {
+            let mut body = [0u8; SLOT];
+            let stage = n.stage;
+            let Some(len) = control::log_line_into(&mut body, uptime_ms, stage, level, scope, text)
+            else {
+                // TOO LONG TO FRAME IS DROPPED, NOT TRUNCATED. The text stream
+                // still carried it, and a short frame would desynchronise a
+                // reader for every frame after it.
+                return;
+            };
+
+            let index = n.head % SLOTS;
+            let Some(framed) = control::frame_into(&mut n.slots[index], control::KIND_LOG, &body[..len])
+            else {
+                return;
+            };
+            n.lens[index] = framed as u16;
+            n.head += 1;
+            if n.head - n.tail > SLOTS {
+                n.tail = n.head - SLOTS;
+                n.dropped += 1;
+            }
+        });
+    }
+
+    /// The frame at `cursor`, copied into `into`. Returns its length and the
+    /// cursor to use next.
+    ///
+    /// CLAMPS FORWARD if the ring has moved past the cursor: a subscriber that
+    /// fell behind gets the oldest frame still held rather than nothing, and the
+    /// gap is counted in `dropped`.
+    pub fn frame_at(cursor: usize, into: &mut [u8]) -> Option<(usize, usize)> {
+        NOTICES.try_with(|n| {
+            let at = if cursor < n.tail { n.tail } else { cursor };
+            if at >= n.head {
+                return None;
+            }
+            let index = at % SLOTS;
+            let len = n.lens[index] as usize;
+            if len > into.len() {
+                return None;
+            }
+            into[..len].copy_from_slice(&n.slots[index][..len]);
+            Some((len, at + 1))
+        })
+        .flatten()
+    }
+}
+
+/// Whether the allocator has memory behind it.
+///
+/// EVERY REPLY ON THIS CHANNEL ALLOCATES, and the heap does not exist until
+/// PSRAM comes up at stage 4. A question asked before that — which is precisely
+/// when somebody debugging a bring-up would ask one — allocated against an
+/// uninitialised allocator. The board would have gone down answering a question
+/// about why it was not well.
+static HEAP_READY: AtomicBool = AtomicBool::new(false);
+
+/// Called once `HEAP.init` has run.
+pub fn heap_is_ready() {
+    HEAP_READY.store(true, Ordering::Release);
+}
+
+/// Declare what the next completed log line is. See `notices::mark`.
+#[cfg(badge_control)]
+pub fn mark(level: u32, scope: u32) {
+    notices::mark(level, scope);
+}
+
+/// A stage was announced. See `notices::stage_opened`.
+#[cfg(badge_control)]
+pub fn stage_opened(stage: u32, scope: u32) {
+    notices::stage_opened(stage, scope);
+}
+
+/// Push one line of the log as a frame. Returns whether anything was sent.
+///
+/// ONE LINE PER CALL, because a frame must be a whole frame: a reader that gets
+/// half of one and then something else has no way back to the stream. Draining a
+/// whole run therefore takes as many calls as it has lines, which at USB service
+/// rates is milliseconds and is not worth the buffer it would cost to batch.
+///
+/// The line is carried VERBATIM — the same bytes the text stream sent. Nothing
+/// here infers a stage or a level from how a line is punctuated, and it would be
+/// easy to: the world writes `... [OK]` and indents its notes. That inference
+/// would be a regex over rendered prose dressed up as structure, which is
+/// precisely what a frame reader was supposed to stop having to do. Stage and
+/// level want to come from the call sites that already know them, and until they
+/// do, saying nothing is the honest encoding.
+#[cfg(badge_control)]
+fn control_notices(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool {
+    use dlc_platform_embedded::control;
+
+    CONTROL.with(|c| {
+        if c.subscribed & (1 << control::NOTICE_LOG) == 0 {
+            return false;
+        }
+
+        // FINISH WHAT IS IN FLIGHT before taking another frame. A frame must be
+        // sent whole: half of one followed by the start of another is how a
+        // reader desynchronises, and it cannot recover without the next magic.
+        if c.nx_sent < c.nx_len {
+            if let Ok(n) = serial.write(&c.nx[c.nx_sent..c.nx_len]) {
+                c.nx_sent += n;
+            }
+            return true;
+        }
+
+        // ALREADY FRAMED, by main, at the moment the line was written. Nothing
+        // here encodes, allocates, or reads a clock — which is what lets this
+        // run in the interrupt during stages that have no heap yet.
+        let Some((len, next)) = notices::frame_at(c.notice_cursor, &mut c.nx) else {
+            return false;
+        };
+        c.nx_len = len;
+        c.nx_sent = 0;
+        c.notice_cursor = next;
+        if let Ok(n) = serial.write(&c.nx[..c.nx_len]) {
+            c.nx_sent += n;
+        }
+        true
+    })
+}
+
+/// Queue a reply main produced, for the interrupt to send.
+///
+/// The counterpart to `answer` returning `None`: pass-through is the one verb
+/// whose answer comes from the other side of the machine.
+#[cfg(badge_control)]
+pub fn reply(success: bool, output: &[u8], error: &str) {
+    use dlc_platform_embedded::control;
+
+    let framed = control::frame(
+        control::KIND_RESPONSE,
+        // `ok` is the WORLD's verdict and is true: it ran what it was asked. What
+        // the app made of it is `success`, inside.
+        &control::response(
+            true,
+            "",
+            &control::execute_response(success, output, error),
+        ),
+    );
+    CONTROL.with(|c| {
+        let len = framed.len().min(c.tx.len());
+        c.tx[..len].copy_from_slice(&framed[..len]);
+        c.tx_len = len;
+        c.tx_sent = 0;
+    });
+    crate::passthrough::finished();
+}
+
+/// Set when a client asked for a reboot, cleared by going.
+#[cfg(badge_control)]
+static REBOOT_WHEN_SENT: AtomicBool = AtomicBool::new(false);
 
 /// Push any pending reply. Returns whether one is still outstanding.
 #[cfg(badge_control)]
@@ -737,6 +1278,13 @@ fn control_send(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool 
         if c.tx_sent >= c.tx_len {
             c.tx_len = 0;
             c.tx_sent = 0;
+            // THE LAST BYTE IS OUT, so the promise made above has been kept and
+            // the board can go. `reboot` does not return.
+            if REBOOT_WHEN_SENT.load(Ordering::Acquire) {
+                // A short delay lets the host read what was just written before
+                // the device disappears, the same courtesy the BOOTSEL path pays.
+                hal::rom_data::reboot(REBOOT_TYPE_NORMAL, 20, 0, 0);
+            }
             return false;
         }
         if let Ok(n) = serial.write(&c.tx[c.tx_sent..c.tx_len]) {

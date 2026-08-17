@@ -37,6 +37,10 @@
 extern crate alloc;
 
 mod board;
+mod buttons;
+mod chooser;
+mod installed;
+mod passthrough;
 mod console;
 mod display;
 mod keyboard;
@@ -54,6 +58,7 @@ mod world;
 
 use world::{Status, WORLD};
 
+use dlc_platform_embedded::control;
 use dlc_platform_embedded::manifest;
 use dlc_platform_embedded::minimal::MinimalHost;
 use dlc_platform_embedded::pulley::PulleyWidth;
@@ -522,7 +527,7 @@ fn main() -> ! {
     // divisor is derived from it, so if this number is wrong the evidence is
     // garbled text rather than a wrong figure. QEMU has no crystal at all.
     report
-        .stage(report::Scope::HardwareOnly, format_args!("clocks / crystal"))
+        .stage(control::STAGE_CLOCKS, report::Scope::HardwareOnly, format_args!("clocks / crystal"))
         .ok(format_args!("RP2350B @ {} Hz", sys_hz));
     report.note(format_args!(
         "firmware {} v{}",
@@ -537,7 +542,7 @@ fn main() -> ! {
     // is downstream of whether writing GPIO32..39 changes the pads, and four
     // flash cycles went on init sequences and timing while that stayed untested.
     {
-        let stage = report.stage(report::Scope::HardwareOnly, format_args!("data bus 32-39"));
+        let stage = report.stage(control::STAGE_DATA_BUS, report::Scope::HardwareOnly, format_args!("data bus 32-39"));
         let (high, low) = probe_data_bus();
         if high == 0xA5 && low == 0x00 {
             stage.ok(format_args!("A5/00"));
@@ -546,7 +551,7 @@ fn main() -> ! {
         }
     }
 
-    let stage = report.stage(report::Scope::HardwareOnly, format_args!("display ST7789"));
+    let stage = report.stage(control::STAGE_DISPLAY, report::Scope::HardwareOnly, format_args!("display ST7789"));
     if screen_ok {
         stage.ok(format_args!("320x240 parallel"));
     } else {
@@ -556,13 +561,14 @@ fn main() -> ! {
     // 3 — PSRAM. The single most likely thing to fail: register-level code that
     // has never run, executing with XIP DISABLED so a mistake cannot print. QEMU
     // has no QSPI device to model.
-    let stage = report.stage(report::Scope::HardwareOnly, format_args!("PSRAM 8 MiB"));
+    let stage = report.stage(control::STAGE_PSRAM, report::Scope::HardwareOnly, format_args!("PSRAM 8 MiB"));
     let psram_ok = match psram::init(board::PSRAM_CS, sys_hz) {
         Ok(ps) => {
             // Re-init the allocator onto PSRAM. Sound only because nothing above
             // has allocated: `LlffHeap::init` may be called once, and the SRAM
             // block was never handed out.
             unsafe { HEAP.init(ps.base as usize, ps.len) };
+            usblog::heap_is_ready();
             stage.ok(format_args!("{} MiB", ps.len / (1024 * 1024)));
             report.note(format_args!("heap {} KB at {:p}", ps.len / 1024, ps.base));
             true
@@ -579,6 +585,7 @@ fn main() -> ! {
             unsafe {
                 let ptr = &raw mut HEAP_MEM as *mut u8;
                 HEAP.init(ptr as usize, HEAP_BYTES);
+                usblog::heap_is_ready();
             }
             report.note(format_args!(
                 "falling back to {} KB SRAM — can report, cannot instantiate",
@@ -592,8 +599,11 @@ fn main() -> ! {
     // `include_bytes!` into its own image; nothing has ever read this region at
     // an XIP address on a real part, and a payload UF2 dragged to the wrong
     // offset looks exactly like an empty badge.
-    let stage = report.stage(report::Scope::HardwareOnly, format_args!("payload region"));
+    let stage = report.stage(control::STAGE_PAYLOAD_REGION, report::Scope::HardwareOnly, format_args!("payload region"));
     let available = payload::discover();
+    // PUBLISH BEFORE ANYTHING CAN FAIL. A client asking what is installed is most
+    // useful on a badge whose payload is the reason it is not running.
+    installed::publish(&available);
     if available.is_empty() {
         // NOT a failure. This is what an empty loader is FOR, and saying so
         // plainly is the difference between "waiting" and "broken".
@@ -708,6 +718,7 @@ fn main() -> ! {
         menu::choose(&available, screen, &mut buttons, sys_hz, log)
     });
     drop(buttons);
+    installed::selected(choice);
     let selected = available
         .get(choice)
         .or_else(|| available.default_choice().map(|(_, p)| p))
@@ -727,7 +738,7 @@ fn main() -> ! {
     // drag it again".
     if !selected.runnable() {
         report
-            .stage(report::Scope::HardwareOnly, format_args!("verify payload"))
+            .stage(control::STAGE_VERIFY_PAYLOAD, report::Scope::HardwareOnly, format_args!("verify payload"))
             .fail(format_args!("checksum mismatch"));
         report.note(format_args!(
             "{} is corrupt — re-drag the payload UF2",
@@ -745,7 +756,7 @@ fn main() -> ! {
     let mut advertisement = [("", ""); world::ADVERTISEMENT_MAX];
     let advertisement = WORLD.advertise(&mut advertisement);
     let before = HEAP.used();
-    let stage = report.stage(report::Scope::Emulated, format_args!("instantiate {}", selected.name));
+    let stage = report.stage(control::STAGE_INSTANTIATE, report::Scope::Emulated, format_args!("instantiate {}", selected.name));
     // SAFETY: `selected.bytes` is our own build's .cwasm — 16-byte aligned by the
     // catalog format (or by `Aligned`, for the built-in), and `'static` because it
     // is memory-mapped flash.
@@ -827,7 +838,7 @@ fn main() -> ! {
             (0, 0)
         };
         let env = manifest::encode(1, outlet, cols, rows);
-        let stage = report.stage(report::Scope::Emulated, format_args!("manifest"));
+        let stage = report.stage(control::STAGE_MANIFEST, report::Scope::Emulated, format_args!("manifest"));
         match host.execute(manifest::METHOD_SET_ENVIRONMENT, env.as_bytes()) {
             Ok(r) if r.success => stage.ok(format_args!("{cols}x{rows} {}", world::text_sink())),
             Ok(r) => {
@@ -877,7 +888,9 @@ fn main() -> ! {
     // Now the world asks the engine what the command takes (method 5, generated
     // from the app's own .proto) and prompts for that, or skips entirely.
     usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_COLLECTING);
-    let mut request = [0u8; 64];
+    // SIZED FOR A PASS-THROUGH, not for a widget. A person types one field; a
+    // control client sends the app's whole request (passthrough::REQUEST_MAX).
+    let mut request = [0u8; passthrough::REQUEST_MAX];
     let mut request_len = 0usize;
     #[cfg(not(badge_input_off))]
     {
@@ -894,91 +907,150 @@ fn main() -> ! {
 
         let spec = host.execute(5, ask).ok().filter(|r| r.success);
         let answer: &[u8] = spec.as_ref().map(|r| r.output.as_slice()).unwrap_or(&[]);
-        let flag = dlc_platform_embedded::spec::first_flag(answer);
-
         use dlc_platform_embedded::spec;
+
+        // EVERY FIELD THE COMMAND TAKES, in the order the app asks for them.
+        //
+        // This was `first_flag` — one field per command, which was true only
+        // while the only app took one. A calculator declaring `left op right`
+        // would have been prompted for `left`, and the app would have taken
+        // proto defaults for the rest: `5 UNSPECIFIED 0`, reported as a success.
+        //
+        // NOTHING HERE KNOWS ANY APP. The field numbers, kinds, names, defaults
+        // and order all come from `GetCommandSpec`, generated from the app's own
+        // .proto. What the world contributes is the other half of the bargain —
+        // which widget can collect a given kind — because that is a fact about
+        // this badge's buttons, not about the app.
+        const MAX_FIELDS: usize = 8;
+        let mut flags = [spec::Flag::EMPTY; MAX_FIELDS];
+        let count = spec::flags_into(answer, &mut flags);
+        if count == MAX_FIELDS {
+            // SAID, NOT SWALLOWED. Collecting eight of nine fields is the same
+            // failure as collecting one of three, and the app would report
+            // success on a request nobody meant.
+            report.note(format_args!("input: more than {MAX_FIELDS} fields; the rest take defaults"));
+        }
+
         // WHERE THE VALUE CAME FROM, recorded by the WORLD rather than by
         // whichever widget produced it.
         //
-        // There is already more than one path in — a person at a widget, and
-        // shortly a control frame supplying request bytes directly (BADGE-CONTROL
-        // D2) or pressing buttons (D3). A log reading `input: 30` cannot tell
-        // those apart, and "did that come from the spinner or from the cable?"
-        // is exactly the question a failing test asks.
-        //
-        // Named at the point of ACCEPTANCE, so every path is described in the
-        // same words by the same line — a widget logging its own provenance
-        // would leave each new path free to invent its own phrasing, or forget.
+        // There is already more than one path in — a person at a widget, and a
+        // control frame supplying request bytes directly (BADGE-CONTROL D2) or
+        // pressing buttons (D3). A log reading `input: 30` cannot tell those
+        // apart, and "did that come from the spinner or from the cable?" is
+        // exactly the question a failing test asks.
         let mut source = "none";
-        match flag {
-            // A STRING: the character strip. Prompted with the app's own help
-            // text, so the question is the one the app would have asked.
-            Some(flag) if flag.kind == spec::KIND_STRING => {
-                let prompt = spec::help_of(answer, &flag).unwrap_or("input?");
-                let typed = report.with_screen_and_log(|screen, log| {
-                    keyboard::read(prompt, screen, &mut keys, sys_hz, log)
-                });
-                source = "keyboard";
-                // AN EMPTY VALUE IS NOT SENT. Proto3 scalars have no presence, so
-                // an empty string and an absent field decode identically — and
-                // sending nothing keeps the request honest about what happened.
-                if !typed.is_empty() {
-                    if let Some(encoded) = dlc_platform_embedded::request::encode_string_field(
-                        flag.field as u8,
-                        typed.as_str(),
-                        &mut request,
-                    ) {
-                        request_len = encoded.len();
+        for flag in flags.iter().take(count) {
+            // APPEND. Each field is encoded after the last, so a request carries
+            // everything collected rather than only whatever went last.
+            let room = &mut request[request_len..];
+            match flag.kind {
+                // A STRING: the character strip, prompted with the app's own
+                // help text — or its field name, which always exists. With more
+                // than one field to collect, "which one is this?" is the question
+                // a prompt has to answer.
+                kind if kind == spec::KIND_STRING => {
+                    let prompt = spec::help_of(answer, flag)
+                        .or_else(|| spec::name_of(answer, flag))
+                        .unwrap_or("input?");
+                    let typed = report.with_screen_and_log(|screen, log| {
+                        keyboard::read(prompt, screen, &mut keys, sys_hz, log)
+                    });
+                    source = "keyboard";
+                    // AN EMPTY VALUE IS NOT SENT. Proto3 scalars have no
+                    // presence, so an empty string and an absent field decode
+                    // identically — and sending nothing keeps the request honest.
+                    if !typed.is_empty() {
+                        if let Some(encoded) = dlc_platform_embedded::request::encode_string_field(
+                            flag.field as u8,
+                            typed.as_str(),
+                            room,
+                        ) {
+                            request_len += encoded.len();
+                        }
                     }
+                }
+
+                // A NUMBER: the spinner, starting from the declared default.
+                kind if spec::is_integer(kind) || kind == spec::KIND_BOOL => {
+                    let prompt = spec::help_of(answer, flag)
+                        .or_else(|| spec::name_of(answer, flag))
+                        .unwrap_or("value?");
+                    let start = spec::default_number(answer, flag);
+                    let shape = if kind == spec::KIND_BOOL {
+                        spinner::Shape::Boolean
+                    } else {
+                        spinner::Shape::Integer
+                    };
+                    let value = report.with_screen_and_log(|screen, log| {
+                        spinner::read(prompt, shape, start, screen, &mut keys, sys_hz, log)
+                    });
+                    source = "spinner";
+                    // ZERO IS NOT SENT, for the same presence reason as an empty
+                    // string: proto3 cannot tell a zero from an absent field, so
+                    // the app takes its default either way.
+                    if value != 0 {
+                        if let Some(encoded) = dlc_platform_embedded::request::encode_varint_field(
+                            flag.field as u8,
+                            value as u64,
+                            room,
+                        ) {
+                            request_len += encoded.len();
+                        }
+                    }
+                }
+
+                // A CLOSED SET: the app's own choices, offered as they were
+                // declared. This is the general case (D3-general) — a keyboard
+                // and a spinner are worlds guessing at a universal vocabulary;
+                // this one asks the app what the words are.
+                kind if kind == spec::KIND_ENUM => {
+                    let prompt = spec::help_of(answer, flag)
+                        .or_else(|| spec::name_of(answer, flag))
+                        .unwrap_or("choose?");
+                    let picked = report.with_screen_and_log(|screen, log| {
+                        chooser::read(prompt, answer, flag, screen, &mut keys, sys_hz, log)
+                    });
+                    source = "chooser";
+                    // ZERO IS NOT SENT, the same presence rule as everywhere
+                    // else — and for an enum it is doubly right, since a proto3
+                    // enum's zero is its UNSPECIFIED member by convention.
+                    if let Some(number) = picked.filter(|number| *number != 0) {
+                        if let Some(encoded) = dlc_platform_embedded::request::encode_varint_field(
+                            flag.field as u8,
+                            number as u64,
+                            room,
+                        ) {
+                            request_len += encoded.len();
+                        }
+                    }
+                }
+
+                // A KIND WITH NO WIDGET — bytes, a float. The field is
+                // skipped and the app takes its default, which is a no-op rather
+                // than an error (Decision 33).
+                //
+                // NAMED, because with several fields "which one did you skip?"
+                // has an answer worth printing: an operator nobody could enter is
+                // why a calculator returned a number nobody expected.
+                kind => {
+                    source = "unsupported";
+                    let name = spec::name_of(answer, flag).unwrap_or("?");
+                    report.note(format_args!("input: {name} is kind {kind}, no widget here"));
                 }
             }
 
-            // A NUMBER: the spinner, starting from the declared default.
-            //
-            // The character strip could not do this at all — 26 letters and no
-            // digits — which is why `countdown` declared its `from` as a string
-            // and paid for it with a parse and an error path.
-            Some(flag) if spec::is_integer(flag.kind) || flag.kind == spec::KIND_BOOL => {
-                let prompt = spec::help_of(answer, &flag).unwrap_or("value?");
-                let start = spec::default_number(answer, &flag);
-                let shape = if flag.kind == spec::KIND_BOOL {
-                    spinner::Shape::Boolean
-                } else {
-                    spinner::Shape::Integer
-                };
-                let value = report.with_screen_and_log(|screen, log| {
-                    spinner::read(prompt, shape, start, screen, &mut keys, sys_hz, log)
-                });
-                source = "spinner";
-                // ZERO IS NOT SENT, for the same presence reason as an empty
-                // string: proto3 cannot tell a zero from an absent field, so the
-                // app takes its default either way and the shorter request is
-                // the honest one.
-                if value != 0 {
-                    if let Some(encoded) = dlc_platform_embedded::request::encode_varint_field(
-                        flag.field as u8,
-                        value as u64,
-                        &mut request,
-                    ) {
-                        request_len = encoded.len();
-                    }
-                }
+            // A REQUEST HAS ARRIVED, so asking a person for the rest is a wait
+            // for something nobody is going to type (D2).
+            if passthrough::waiting() {
+                break;
             }
-
-            // A KIND WITH NO WIDGET — bytes, an enum, something added later. The
-            // field is skipped and the app takes its default, which is a no-op
-            // rather than an error (Decision 33).
-            Some(flag) => {
-                source = "unsupported";
-                report.note(format_args!("input: kind {} has no widget", flag.kind));
-            }
-
+        }
+        if count == 0 {
             // NO INPUT ADVERTISED: no prompt, no delay, straight to the app.
             // This is the case that made a countdown wait 30 seconds for a name
             // it never wanted.
-            None => {
-                source = "not advertised";
-            }
+            source = "not advertised";
         }
 
         // ONE LINE, EVERY TURN, WHATEVER HAPPENED. An empty request is as much a
@@ -989,7 +1061,27 @@ fn main() -> ! {
         ));
     }
 
-    let method = selected.entry_method;
+    // A CLIENT'S REQUEST WINS, and is checked AFTER collection rather than
+    // before: a request that arrives while a widget is already on screen must
+    // still take effect this turn, not next. The widgets give up as soon as one
+    // is waiting (see passthrough.rs), so what they collected is nothing worth
+    // keeping.
+    let mut method = selected.entry_method;
+    // Read only by the reply below, which is compiled out with the control
+    // channel — the take() itself still has to run either way, because it is
+    // what clears a request nobody can answer.
+    #[cfg_attr(not(badge_control), allow(unused_variables))]
+    let from_control = match passthrough::take(&mut request) {
+        Some((asked, len)) => {
+            method = asked;
+            request_len = len;
+            report.note(format_args!(
+                "input: {request_len} bytes from the control channel, method {method}"
+            ));
+            true
+        }
+        None => false,
+    };
     // The app's text, held for the last frame. A fixed buffer because this is
     // still the pre-menu world of "do not allocate what you can put on the stack",
     // and a screen holds far less than this anyway.
@@ -1003,7 +1095,7 @@ fn main() -> ! {
     usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_RUNNING);
     let started_us = now_us();
     let sleeps_before = dlc_platform_embedded::clock::sleeps();
-    let stage = report.stage(report::Scope::Emulated, format_args!("execute {method}"));
+    let stage = report.stage(control::STAGE_EXECUTE, report::Scope::Emulated, format_args!("execute {method}"));
     let status = match host.execute(method, &request[..request_len]) {
         Ok(result) => {
             if result.success {
@@ -1066,10 +1158,27 @@ fn main() -> ! {
                 dlc_platform_embedded::clock::sleeps() - sleeps_before
             ));
             report.note(format_args!("peak heap {} KB", (HEAP.used() - before) / 1024));
+            // THE APP'S OWN BYTES, verbatim. The world does not read them and
+            // could not: they are in the app's schema, not this firmware's.
+            #[cfg(badge_control)]
+            if from_control {
+                usblog::reply(
+                    result.success,
+                    &result.output,
+                    result.error.as_deref().unwrap_or(""),
+                );
+            }
             world::status_of(&result)
         }
         Err(e) => {
             stage.fail(format_args!("{e:?}"));
+            // A TRAP IS STILL AN ANSWER. A client that got silence here could not
+            // tell a crashed guest from a badge that never received the request,
+            // and would wait out its whole deadline to learn nothing.
+            #[cfg(badge_control)]
+            if from_control {
+                usblog::reply(false, &[], "the app trapped");
+            }
             Status::Broken
         }
     };
@@ -1218,10 +1327,20 @@ where
         // runs every 40 ms whatever the bus is doing, which is exactly the
         // regularity a heartbeat needs.
         usblog::pump();
-        if leave.is_low().unwrap_or(false) {
+        // A REQUEST IS A REASON FOR ANOTHER TURN.
+        //
+        // Without this the badge sits here — the turn is over, the result is on
+        // screen, and it is waiting for a finger. A client's request would be
+        // queued with nobody to collect it, and the FIRST pass-through of a
+        // session would work while every one after it timed out, which is
+        // exactly how this presented.
+        if crate::passthrough::waiting() {
+            return Turn::Again;
+        }
+        if leave.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_UP) {
             return Turn::Leave;
         }
-        if again.is_low().unwrap_or(false) {
+        if again.is_low().unwrap_or(false) || crate::buttons::taken(control::BUTTON_A) {
             return Turn::Again;
         }
     }
