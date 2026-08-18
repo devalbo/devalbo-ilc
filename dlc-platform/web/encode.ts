@@ -92,17 +92,38 @@ function appendField(out: number[], f: Flag, raw: string): void {
     }
 
     case "enum": {
-      // By NAME, resolved to its position — proto3's first value must be zero
-      // and the generator emits them in declaration order, matching the Go
-      // side. A number at a prompt is unreadable and unstable.
-      const i = (f.enumValues ?? []).indexOf(raw);
+      // BY NAME, resolved to the number the APP DECLARED.
+      //
+      // This used to resolve to the name's POSITION, and said so: "proto3's
+      // first value must be zero and the generator emits them in declaration
+      // order." Only the first half is a rule. proto3 requires the FIRST value
+      // to be zero; every value after it is the author's choice, so
+      //
+      //   PROBLEM_UNSPECIFIED = 0; PROBLEM_DIVIDE_BY_ZERO = 7;
+      //
+      // encoded `divide_by_zero` as 1 — a legal-looking enum the app never
+      // declared. `enumNumbers` carries the real values, emitted from the same
+      // loop over the descriptor that produced the names; falling back to the
+      // position keeps a spec generated before that field existed working.
+      //
+      // SHORT NAMES TOO: the spec carries proto's full value names
+      // (`COLOUR_AMBER`) and a person types `amber`. Matching only the full name
+      // made an app's OWN DECLARED DEFAULT unusable as an argument.
+      const values = f.enumValues ?? [];
+      const short = shortEnum(values);
+      const i = values.findIndex(
+        (name, at) =>
+          name.toLowerCase() === raw.toLowerCase() ||
+          short[at].toLowerCase() === raw.toLowerCase(),
+      );
       if (i < 0) {
         throw new Error(
-          `--${f.name}: ${JSON.stringify(raw)} is not one of ${(f.enumValues ?? []).join(", ")}`,
+          `--${f.name}: ${JSON.stringify(raw)} is not one of ${short.join(", ")}`,
         );
       }
+      const numbers = f.enumNumbers ?? [];
       appendTag(out, f.field, WIRE_VARINT);
-      appendVarint(out, BigInt(i));
+      appendVarint(out, BigInt(i < numbers.length ? numbers[i] : i));
       return;
     }
   }
@@ -143,4 +164,42 @@ export function appendVarint(out: number[], n: bigint): void {
     v >>= 7n;
   }
   out.push(Number(v));
+}
+
+/**
+ * Drops the prefix every value of an enum shares.
+ *
+ *   PROBLEM_UNSPECIFIED, PROBLEM_DIVIDE_BY_ZERO, PROBLEM_OVERFLOW
+ *   -> unspecified, divide_by_zero, overflow
+ *
+ * THE COMMON PREFIX, not "everything after the last underscore" — that rule
+ * turns `PROBLEM_DIVIDE_BY_ZERO` into `zero`, which is a different word rather
+ * than an abbreviation. "Before the first underscore" fails the other way on an
+ * enum whose own name is two words (`SPEC_KIND_ENUM` would keep `KIND_ENUM`).
+ *
+ * The twin of `clispec.ShortEnum` in the Go half. Two implementations of one
+ * rule is a cost; the alternative is the web tier importing Go, which is not a
+ * thing.
+ */
+export function shortEnum(values: readonly string[]): string[] {
+  const out = values.slice();
+  if (values.length < 2) return out;
+
+  let prefix = values[0];
+  for (const value of values.slice(1)) {
+    while (!value.startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+      if (prefix === "") return out;
+    }
+  }
+  // Back to a word boundary: two values sharing `PROBLEM_OVER` share more
+  // characters than words, and cutting there leaves `flow` and `draft`.
+  const at = prefix.lastIndexOf("_");
+  if (at < 0) return out;
+  prefix = prefix.slice(0, at + 1);
+
+  return out.map((value) => {
+    const trimmed = value.slice(prefix.length);
+    return trimmed === "" ? value : trimmed.toLowerCase();
+  });
 }

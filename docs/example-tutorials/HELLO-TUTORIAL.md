@@ -108,6 +108,16 @@ So the app decides where to start, how long a tick is, and when it is done. The 
 > **On a tier whose clock is a stub, this finishes instantly.** That is wrong but not broken, and it is exactly
 > what the badge did before its hardware timer was wired to `monotonic-clock`.
 
+### Where the ticks actually land differs by tier
+
+On the CLI and the badge, the ticks reach the person as they happen. **In the browser they do not** — they go
+to the devtools console, and the terminal pane shows only what the renderer reads from the reply.
+
+That is deliberate, not an oversight: printing is the one channel an app can always use, so the bytes must
+always *arrive* somewhere (`web.spec.ts` asserts exactly that), while what a person *reads* comes from the
+typed response. It is still the clearest cost of the split — `count` is the command whose whole point is
+streaming, and it is the command the browser shows least of.
+
 ### The enum is the app's vocabulary
 
 `style` is `plain` / `rocket` / `words`. A host renders those choices **because the command spec carries them**,
@@ -337,6 +347,8 @@ Honest about what has and has not been exercised.
 | `greet`, `count`, `math`, `light` on the **CLI** | ✅ verified |
 | `count`, `math` on the **badge**, via widgets | ✅ verified on hardware |
 | `math` over the **control channel**, request and response by name | ✅ verified on hardware |
-| `light` **on a badge** | ⚠️ the status bytes are emitted and the world renders them; the colour mapping has not been checked against a physical panel |
-| all four in the **browser** | ⚠️ renderers are written and typecheck; not driven by hand |
+| `light` **on a badge** | ✅ the world now renders `ilc.status`; `light amber` and divide-by-zero both drive the panel to amber (`verdict: BROKEN`, `0xFD20`) |
+| the **menu** and `-select` over the cable | ✅ verified on hardware with two payloads |
+| all four in the **browser** | ✅ verified — four Playwright specs drive them against the real engine |
+| `count`'s ticks **in the browser terminal** | ❌ they reach the devtools console, not the pane — see §2 |
 | a **float** operand | ❌ no float kind exists; see §3 |

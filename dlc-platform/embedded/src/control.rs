@@ -87,6 +87,12 @@ pub const BUTTON_DOWN: u32 = 5;
 /// The highest button a world may be asked for; anything above is refused.
 pub const BUTTON_MAX: u32 = BUTTON_DOWN;
 
+/// The reserved event topic carrying an app's three status bytes.
+///
+/// Matches `platform.StatusTopic` in the Go half — a world matching a topic no
+/// app emits would render nothing and look correct doing it.
+pub const STATUS_TOPIC: &str = "ilc.status";
+
 /// `Notice` in control.proto.
 pub const NOTICE_LOG: u32 = 1;
 

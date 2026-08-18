@@ -24,7 +24,7 @@
 import type { Command, Flag } from "./clispec";
 import { positionals } from "./clispec";
 import type { Values } from "./encode";
-import { encodeRequest } from "./encode";
+import { encodeRequest, shortEnum } from "./encode";
 import { executeCommand, type Renderer } from "./terminal";
 import { liveSurface } from "./environment";
 import type { EnginePort } from "./port";
@@ -237,13 +237,32 @@ export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspe
       // A select, from the schema's own values — the same list the terminal
       // completes with and the CLI validates against.
       const sel = document.createElement("select");
-      for (const v of f.enumValues) {
+      // SHORT NAMES, matching what the terminal accepts and what the app's own
+      // `default` is written as. A dropdown offering `COLOUR_AMBER` beside a
+      // default of `amber` cannot even preselect it.
+      const short = shortEnum(f.enumValues);
+      f.enumValues.forEach((v, at) => {
         const o = document.createElement("option");
-        o.value = v;
-        o.textContent = v;
+        o.value = short[at];
+        o.textContent = short[at];
         sel.append(o);
-      }
-      sel.value = f.default ?? f.enumValues[0];
+      });
+      // THE DEFAULT, RESOLVED THE SAME WAY THE OPTIONS WERE.
+      //
+      // An app writes its default in either spelling — platform.proto says
+      // `IMPORT_MODE_MERGE`, hello says `amber` — and the options are short. So
+      // assigning `f.default` straight in matched nothing whenever the schema
+      // used the full name, and the browser silently fell back to the FIRST
+      // option: a form that preselected `unspecified` while the schema said
+      // `merge`, with nothing to show for it.
+      const wanted = f.default
+        ? f.enumValues.findIndex(
+            (name, at) =>
+              name.toLowerCase() === f.default!.toLowerCase() ||
+              short[at].toLowerCase() === f.default!.toLowerCase(),
+          )
+        : -1;
+      sel.value = short[wanted >= 0 ? wanted : 0];
       input = sel;
     } else {
       const inp = document.createElement("input");

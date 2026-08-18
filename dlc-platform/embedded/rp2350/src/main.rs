@@ -1149,8 +1149,20 @@ fn main() -> ! {
             }
             // Events are the SEMANTIC channel — what the minimal world turns into
             // a colour, and what Phase 3 draws.
+            //
+            // `ilc.status` IS NOW RENDERED, and was not before: the world logged
+            // the bytes and threw them away, so an app that set a colour changed
+            // nothing anybody could see. The screen took its colour purely from
+            // whether the command succeeded, which cannot express "it worked and
+            // you should still look at this".
+            let mut asked = None;
             for (topic, body) in host.events() {
                 report.note(format_args!("event {topic} ({} bytes)", body.len()));
+                if topic == dlc_platform_embedded::control::STATUS_TOPIC && !body.is_empty() {
+                    // LAST ONE WINS. An app that sets a status on every tick is
+                    // describing NOW, not the whole run.
+                    asked = world::status_from_slot1(body[0]);
+                }
             }
             report.note(format_args!(
                 "took {} ms, {} sleeps",
@@ -1168,7 +1180,11 @@ fn main() -> ! {
                     result.error.as_deref().unwrap_or(""),
                 );
             }
-            world::status_of(&result)
+            // WHAT THE APP SAID, if it said anything, else what the result
+            // implies. The app is more specific: `math` reports divide-by-zero
+            // as a warning while still SUCCEEDING, and a world that only knew
+            // success/failure would paint that green.
+            asked.unwrap_or_else(|| world::status_of(&result))
         }
         Err(e) => {
             stage.fail(format_args!("{e:?}"));

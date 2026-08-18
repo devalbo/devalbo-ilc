@@ -110,14 +110,15 @@ test("enum fields are selects built from the schema", async ({ page }) => {
   await page.getByTestId("command-import-fs").click();
   const mode = page.getByTestId("field-mode");
   await expect(mode).toHaveRole("combobox");
-  // Exactly the values declared in platform.proto's ImportMode.
-  await expect(mode.locator("option")).toHaveText([
-    "IMPORT_MODE_UNSPECIFIED",
-    "IMPORT_MODE_MERGE",
-    "IMPORT_MODE_REPLACE",
-  ]);
-  // …and the schema's declared default is preselected.
-  await expect(mode).toHaveValue("IMPORT_MODE_MERGE");
+  // The values declared in platform.proto's ImportMode, with the prefix every
+  // one of them shares removed — the same short form the terminal completes to
+  // and the encoder accepts. An inspector offering `IMPORT_MODE_MERGE` beside a
+  // terminal that takes `merge` would be the odd surface out.
+  await expect(mode.locator("option")).toHaveText(["unspecified", "merge", "replace"]);
+  // …and the schema's declared default is preselected — even though the schema
+  // spells it `IMPORT_MODE_MERGE` and the options are short. Resolving the
+  // default through the same matching is what keeps those two from disagreeing.
+  await expect(mode).toHaveValue("merge");
 });
 
 // The inherited verbs are here, and they are the ones with no button in the UI.

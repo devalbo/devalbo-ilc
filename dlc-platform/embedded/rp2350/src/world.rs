@@ -422,6 +422,35 @@ impl Status {
 /// The events are read but not yet interpreted: hello emits none, and inventing a
 /// topic vocabulary before an app uses one would be guessing at an interface.
 /// tictactoe's `StateChangedEvent` is the first real input here.
+/// What an app's `ilc.status` slot 1 means TO THIS WORLD.
+///
+/// # The platform does not define this, on purpose
+///
+/// `status.go` is explicit: the contract is "THREE BYTES AND AN ORDER", the slot
+/// names are placeholders, and "each tier maps them to what it has". So the
+/// VALUE mapping is a world's decision, and this is one world deciding.
+///
+/// Slot 1 is the persistent condition — the one a tier with a single indicator
+/// should render — which is why only it is read here. Slot 2 (movement) and slot
+/// 3 (app-defined detail) have nothing to drive on a panel that is already
+/// showing text.
+///
+/// # An unknown value is not an error
+///
+/// An app is free to put anything in these bytes, and one built against a richer
+/// world will. Anything this world has no colour for reads as `None` and leaves
+/// the result-derived status alone, rather than picking a colour by accident —
+/// a wrong colour is worse than no colour, because it is read as a fact.
+pub fn status_from_slot1(value: u8) -> Option<Status> {
+    match value {
+        0 => Some(Status::Idle),
+        1 => Some(Status::Ok),
+        2 => Some(Status::Broken), // amber — a warning, not a failure
+        3 => Some(Status::Failed),
+        _ => None,
+    }
+}
+
 pub fn status_of(result: &CommandResult) -> Status {
     if result.success {
         Status::Ok

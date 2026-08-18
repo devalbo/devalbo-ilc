@@ -153,6 +153,21 @@ where
         // driven by the interrupt alone never beats while a widget is waiting,
         // which is most of the time a person is looking at the badge.
         crate::usblog::pump();
+
+        // A SELECTION MAY ARRIVE WHILE THE MENU IS UP, and that is the most
+        // natural moment for one — a client that has just READ the menu is
+        // exactly the client that knows which entry it wants.
+        //
+        // Checked here as well as on entry, because on entry alone it was
+        // ignored: the menu is displayed for eight seconds and a request sent
+        // during them sat unconsumed until the NEXT menu, so the timeout won and
+        // the wrong app ran. The client got "selected" and saw something else
+        // start, which is the worst kind of wrong answer.
+        if let Some(index) = crate::installed::take_request() {
+            let _ = writeln!(log, "menu: {index} selected over the control channel");
+            return index;
+        }
+
         elapsed += POLL_MS;
 
         // ACTIVE-LOW: pulled up, and a press shorts to ground. `unwrap_or(false)`

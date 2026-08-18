@@ -16,7 +16,7 @@
 // history; the app owns what a response looks like.
 import type { Command, Flag } from "./clispec";
 import { findCommand, positionals } from "./clispec";
-import { encodeRequest, type Values } from "./encode";
+import { encodeRequest, shortEnum, type Values } from "./encode";
 import type { EnginePort } from "./port";
 
 /** Prints one response. Undefined means the command prints nothing. */
@@ -128,8 +128,11 @@ export function complete(
       (f) => previous.startsWith("-") && (f.name === flagName || f.short === flagName),
     );
     if (flag?.enumValues?.length) {
-      // Positioned on a value for an enum flag: offer what it accepts.
-      candidates = [...flag.enumValues];
+      // Positioned on a value for an enum flag: offer what it accepts — the
+      // SHORT names, which are what the encoder takes and what an app's own
+      // declared default is written as. Completing to `COLOUR_AMBER` and then
+      // rejecting it would be the worst of both.
+      candidates = shortEnum(flag.enumValues);
     } else {
       candidates = (cmd.flags ?? []).map((f) => `--${f.name}`);
     }
@@ -358,7 +361,7 @@ function commandUsage(cmd: Command): string {
   );
   for (const f of cmd.flags ?? []) {
     const bits = [f.help ?? ""];
-    if (f.enumValues?.length) bits.push(`one of: ${f.enumValues.join(", ")}`);
+    if (f.enumValues?.length) bits.push(`one of: ${shortEnum(f.enumValues).join(", ")}`);
     if (f.required) bits.push("(required)");
     if (f.repeated) bits.push("(repeatable)");
     lines.push(`  --${f.name}${f.short ? `, -${f.short}` : ""}  ${bits.join(" ").trim()}`);

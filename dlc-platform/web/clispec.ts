@@ -48,6 +48,14 @@ export type Flag = {
   required?: boolean;
   default?: string;
   enumValues?: readonly string[];
+  /**
+   * The WIRE NUMBER of each name in enumValues, in the same order.
+   *
+   * An ordinal is not a value: proto3 fixes only the FIRST value at zero, so a
+   * host encoding by position sends a number the app never declared — and it is
+   * still a legal-looking enum, so nothing rejects it.
+   */
+  enumNumbers?: readonly number[];
 };
 
 export type Command = {
