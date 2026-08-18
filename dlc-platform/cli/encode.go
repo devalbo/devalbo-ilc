@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protowire"
 
@@ -152,19 +153,46 @@ func appendField(dst []byte, f clispec.Flag, raw string) ([]byte, error) {
 	}
 }
 
-// enumNumber resolves an enum VALUE NAME to its number.
+// enumNumber resolves an enum VALUE NAME to its wire number.
 //
-// By position in the declaration list, which is correct for proto3: the first
-// value must be zero and the generator emits them in declaration order. Names
-// are accepted rather than numbers because a number on a command line is
-// unreadable and unstable to a reader, even though it is the wire form.
+// # An ordinal is not a value
+//
+// This used to return the name's POSITION in the list, and said so: "correct for
+// proto3: the first value must be zero and the generator emits them in
+// declaration order." Only the first half is a rule. proto3 requires the FIRST
+// value to be zero; every value after it can be any number the author likes, so
+//
+//	PROBLEM_UNSPECIFIED = 0; PROBLEM_DIVIDE_BY_ZERO = 7; PROBLEM_OVERFLOW = 11;
+//
+// encoded `overflow` as 2 — which is not a declared value at all, and would
+// arrive at the app as an unknown enum. When the numbers ARE dense the two agree,
+// which is why this survived: every enum anyone had written was dense.
+//
+// `EnumNumbers` carries what the app actually declared, emitted from the same
+// loop over the descriptor that produced the names. Falling back to the position
+// keeps a spec generated before that field existed working exactly as it did.
+//
+// # Short names
+//
+// The spec carries proto's full value names (`OPERATOR_MULTIPLY`) and a person
+// types `multiply`. Matching only the full name made an app's OWN DECLARED
+// DEFAULT unusable as an argument — `(default) = "add"` was rejected by the
+// command that declared it — so both forms are accepted, case-insensitively.
 func enumNumber(f clispec.Flag, raw string) (int, error) {
+	short := clispec.ShortEnum(f.EnumValues)
 	for i, name := range f.EnumValues {
-		if name == raw {
-			return i, nil
+		if !strings.EqualFold(name, raw) && !strings.EqualFold(short[i], raw) {
+			continue
 		}
+		if i < len(f.EnumNumbers) {
+			return int(f.EnumNumbers[i]), nil
+		}
+		return i, nil
 	}
-	return 0, fmt.Errorf("--%s: %q is not one of %v", f.Name, raw, f.EnumValues)
+	// THE SHORT NAMES IN THE ERROR, because they are what the caller should
+	// type. Listing `OPERATOR_MULTIPLY` invites a second failed attempt spelling
+	// it exactly that way.
+	return 0, fmt.Errorf("--%s: %q is not one of %s", f.Name, raw, strings.Join(short, ", "))
 }
 
 // fieldsInOrder sorts a command's flags by field number without mutating the

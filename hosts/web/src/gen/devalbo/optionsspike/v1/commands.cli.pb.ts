@@ -15,6 +15,9 @@ export const CommandsServiceCLI = [
       { name: "name", field: 1, kind: "string", short: "n", required: true, help: "name to greet" },
       { name: "times", field: 2, kind: "int32", help: "repeat count", default: "1" },
     ],
+    results: [
+      { name: "text", field: 1, kind: "string" },
+    ],
   },
   {
     name: "add",
@@ -23,6 +26,9 @@ export const CommandsServiceCLI = [
     flags: [
       { name: "a", field: 1, kind: "int32", required: true, help: "left operand" },
       { name: "b", field: 2, kind: "int32", required: true, help: "right operand" },
+    ],
+    results: [
+      { name: "sum", field: 1, kind: "int32" },
     ],
   },
 ] as const;

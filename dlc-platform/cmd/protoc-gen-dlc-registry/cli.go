@@ -127,6 +127,27 @@ type cliCommand struct {
 	summary     string
 	flags       []cliFlag
 	unsupported []string
+	// What the command ANSWERS with. Derived from the rpc's OUTPUT message the
+	// same way flags are derived from its input, so a host can render a response
+	// by name instead of counting the bytes.
+	response            string
+	results             []cliResult
+	responseUnsupported []string
+}
+
+// cliResult describes one field of a response.
+//
+// A SUBSET OF cliFlag, deliberately: no source, no default, no short letter, no
+// position, no required bit. Those describe how a person SUPPLIES a value and
+// mean nothing about one the app hands back — see SpecResult in platform.proto.
+type cliResult struct {
+	name        string
+	field       uint32
+	kind        string
+	repeated    bool
+	help        string
+	enumValues  []string
+	enumNumbers []int32
 }
 
 // leadingComments maps a descriptor path to the comment written above it.
@@ -261,10 +282,52 @@ func cliCommandsOf(file *descriptorpb.FileDescriptorProto, services []service, r
 			if err := checkPositionals(m.input, cmd.flags); err != nil {
 				return nil, err
 			}
+
+			// THE RESPONSE, walked the same way. A rpc whose output message is
+			// in another file simply has no described results — the same
+			// treatment its input gets, and for the same reason: the command
+			// still dispatches, it is only less legible.
+			cmd.response = m.output
+			if reply, ok := messages[m.output]; ok {
+				for _, f := range reply.Field {
+					result, ok := cliResultOf(f, enums, resolver)
+					if !ok {
+						cmd.responseUnsupported = append(cmd.responseUnsupported, f.GetName())
+						continue
+					}
+					cmd.results = append(cmd.results, result)
+				}
+			}
 			out = append(out, cmd)
 		}
 	}
 	return out, nil
+}
+
+// cliResultOf describes one response field, or reports that it cannot.
+//
+// It reuses `cliFlagOf` for the parts that are genuinely shared — the kind, and
+// an enum's names and numbers — rather than repeating the type switch. A second
+// copy of that switch is how a float gets supported on the way in and not on the
+// way out, six months apart, with nothing to catch it.
+func cliResultOf(f *descriptorpb.FieldDescriptorProto, enums map[string]*descriptorpb.EnumDescriptorProto, resolver *protoregistry.Types) (cliResult, bool) {
+	// THE REAL RESOLVER, not nil. A response field carries no cli options worth
+	// reading, so nil would *probably* be fine — and "probably fine" about a
+	// typed-nil interface is how a generator panics on the first app that puts
+	// an option somewhere unexpected. Passing what we already have costs nothing.
+	flag, ok, err := cliFlagOf(f, enums, resolver)
+	if err != nil || !ok {
+		return cliResult{}, false
+	}
+	return cliResult{
+		name:        flag.name,
+		field:       flag.field,
+		kind:        flag.kind,
+		repeated:    flag.repeated,
+		help:        flag.help,
+		enumValues:  flag.enumValues,
+		enumNumbers: flag.enumNumbers,
+	}, true
 }
 
 func cliFlagOf(f *descriptorpb.FieldDescriptorProto, enums map[string]*descriptorpb.EnumDescriptorProto, resolver *protoregistry.Types) (cliFlag, bool, error) {
@@ -525,6 +588,50 @@ func renderCLI(file *descriptorpb.FileDescriptorProto, services []service, cmds 
 				}
 				fmt.Fprintf(&b, "},\n")
 			}
+			if cmd.response != "" {
+				fmt.Fprintf(&b, "\t\tResponse: %q,\n", cmd.response)
+			}
+			if len(cmd.results) > 0 {
+				fmt.Fprintf(&b, "\t\tResults: []clispec.Result{\n")
+				for _, r := range cmd.results {
+					fmt.Fprintf(&b, "\t\t\t{Name: %q, Field: %d, Kind: clispec.%s", r.name, r.field, r.kind)
+					if r.repeated {
+						fmt.Fprintf(&b, ", Repeated: true")
+					}
+					if r.help != "" {
+						fmt.Fprintf(&b, ", Help: %q", r.help)
+					}
+					if len(r.enumValues) > 0 {
+						fmt.Fprintf(&b, ", EnumValues: []string{")
+						for i, v := range r.enumValues {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%q", v)
+						}
+						fmt.Fprintf(&b, "}, EnumNumbers: []int32{")
+						for i, v := range r.enumNumbers {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%d", v)
+						}
+						fmt.Fprintf(&b, "}")
+					}
+					fmt.Fprintf(&b, "},\n")
+				}
+				fmt.Fprintf(&b, "\t\t},\n")
+			}
+			if len(cmd.responseUnsupported) > 0 {
+				fmt.Fprintf(&b, "\t\tResponseUnsupported: []string{")
+				for i, u := range cmd.responseUnsupported {
+					if i > 0 {
+						fmt.Fprintf(&b, ", ")
+					}
+					fmt.Fprintf(&b, "%q", u)
+				}
+				fmt.Fprintf(&b, "},\n")
+			}
 			fmt.Fprintf(&b, "\t},\n")
 		}
 		fmt.Fprintf(&b, "}\n\n")
@@ -626,6 +733,37 @@ func renderCLITS(file *descriptorpb.FileDescriptorProto, services []service, cmd
 					fmt.Fprintf(&b, "%q", u)
 				}
 				fmt.Fprintf(&b, "],\n")
+			}
+			if len(cmd.results) > 0 {
+				fmt.Fprintf(&b, "    results: [\n")
+				for _, r := range cmd.results {
+					fmt.Fprintf(&b, "      { name: %q, field: %d, kind: %q", r.name, r.field, tsKind(r.kind))
+					if r.repeated {
+						fmt.Fprintf(&b, ", repeated: true")
+					}
+					if r.help != "" {
+						fmt.Fprintf(&b, ", help: %q", r.help)
+					}
+					if len(r.enumValues) > 0 {
+						fmt.Fprintf(&b, ", enumValues: [")
+						for i, v := range r.enumValues {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%q", v)
+						}
+						fmt.Fprintf(&b, "], enumNumbers: [")
+						for i, v := range r.enumNumbers {
+							if i > 0 {
+								fmt.Fprintf(&b, ", ")
+							}
+							fmt.Fprintf(&b, "%d", v)
+						}
+						fmt.Fprintf(&b, "]")
+					}
+					fmt.Fprintf(&b, " },\n")
+				}
+				fmt.Fprintf(&b, "    ],\n")
 			}
 			fmt.Fprintf(&b, "  },\n")
 		}

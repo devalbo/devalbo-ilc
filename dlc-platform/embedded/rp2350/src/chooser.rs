@@ -107,6 +107,9 @@ where
     // START ON THE DECLARED DEFAULT if the app named one, so confirming
     // immediately means the same as not answering — the same rule the spinner
     // follows.
+    // ONCE, not per redraw: it cannot change while the widget is open.
+    let prefix = shared_prefix(spec, flag, count);
+
     let default = spec::default_of(spec, flag);
     let mut active = 0usize;
     if let Some(wanted) = default {
@@ -118,7 +121,9 @@ where
                 // types on a command line. Comparing them whole never matches,
                 // so the default would silently be ignored and the first choice
                 // would look like the app's preference.
-                if short(name).eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted) {
+                if short(name, prefix).eq_ignore_ascii_case(wanted)
+                    || name.eq_ignore_ascii_case(wanted)
+                {
                     active = index;
                     break;
                 }
@@ -132,7 +137,7 @@ where
 
     loop {
         if dirty {
-            draw(prompt, spec, flag, screen, active, count);
+            draw(prompt, spec, flag, screen, active, count, prefix);
             dirty = false;
         }
 
@@ -196,6 +201,7 @@ fn draw(
     screen: &mut Option<Display>,
     active: usize,
     count: usize,
+    prefix: usize,
 ) {
     use dlc_platform_embedded::spec;
 
@@ -218,7 +224,7 @@ fn draw(
             let Some((name, _)) = spec::enum_choice(spec, flag, index) else {
                 break;
             };
-            let width = (short(name).len() as i32 + 4) * CELL_W;
+            let width = (short(name, prefix).len() as i32 + 4) * CELL_W;
             if x + width > COLS * CELL_W {
                 break;
             }
@@ -238,7 +244,7 @@ fn draw(
         let Some((name, _)) = spec::enum_choice(spec, flag, index) else {
             break;
         };
-        let name = short(name);
+        let name = short(name, prefix);
         let width = (name.len() as i32 + 4) * CELL_W;
         if x + width > COLS * CELL_W {
             break;
@@ -268,19 +274,65 @@ fn draw(
     panel.text(hint.as_str(), Point::new(0, TOP + LINE_H * 3), dim);
 }
 
-/// The readable half of a proto enum value name.
+/// How many leading bytes every choice shares, trimmed back to a word boundary.
 ///
-/// `STYLE_ROCKET` is the right identifier on the wire and the wrong thing to put
-/// on a 40-column panel beside three others — four values would not fit, and the
-/// prefix is the same on every one of them, so it is the part carrying no
-/// information at all.
+/// # Why the shared prefix and not "after the last underscore"
+///
+/// That was the first rule and it turned `PROBLEM_DIVIDE_BY_ZERO` into `zero` —
+/// not an abbreviation, a different word. It is right for single-word values
+/// (`STYLE_PLAIN` -> `plain`) and silently wrong for every multi-word one.
+/// "Before the first underscore" fails the other way, on an enum whose own name
+/// is two words: `SPEC_KIND_ENUM` would keep `KIND_ENUM`.
+///
+/// The prefix the values SHARE is the only rule right in both cases, which is
+/// why this is computed once from the whole list rather than per name.
 ///
 /// The ENCODED VALUE is untouched: this changes what a person reads, never what
 /// the app receives.
-fn short(name: &str) -> &str {
-    match name.rfind('_') {
-        Some(at) if at + 1 < name.len() => &name[at + 1..],
-        _ => name,
+fn shared_prefix(
+    spec: &[u8],
+    flag: &dlc_platform_embedded::spec::Flag,
+    count: usize,
+) -> usize {
+    use dlc_platform_embedded::spec;
+
+    if count < 2 {
+        return 0;
+    }
+    let Some((first, _)) = spec::enum_choice(spec, flag, 0) else {
+        return 0;
+    };
+    let mut shared = first.len();
+    for index in 1..count {
+        let Some((name, _)) = spec::enum_choice(spec, flag, index) else {
+            return 0;
+        };
+        let common = first
+            .as_bytes()
+            .iter()
+            .zip(name.as_bytes())
+            .take(shared)
+            .take_while(|(a, b)| a == b)
+            .count();
+        shared = common;
+        if shared == 0 {
+            return 0;
+        }
+    }
+    // BACK TO A WORD BOUNDARY: two values sharing `PROBLEM_OVER` share more
+    // characters than words, and cutting there leaves `flow` and `draft`.
+    match first[..shared].rfind('_') {
+        Some(at) => at + 1,
+        None => 0,
+    }
+}
+
+/// A choice's name with the shared prefix removed.
+fn short(name: &str, prefix: usize) -> &str {
+    if prefix < name.len() {
+        &name[prefix..]
+    } else {
+        name
     }
 }
 

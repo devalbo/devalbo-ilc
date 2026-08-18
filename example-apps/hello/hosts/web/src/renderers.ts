@@ -8,8 +8,19 @@
 // were on, and the one nobody looks at is the one that drifts.
 import type { Renderer } from "@devalbo/dlc-web/terminal";
 
-import { GreetResponse } from "@gen/hello/v1/commands.pb";
-import { MethodGreet } from "@gen/hello/v1/commands.registry.pb";
+import {
+  CountResponse,
+  GreetResponse,
+  LightResponse,
+  MathResponse,
+  Problem,
+} from "@gen/hello/v1/commands.pb";
+import {
+  MethodCount,
+  MethodGreet,
+  MethodLight,
+  MethodMath,
+} from "@gen/hello/v1/commands.registry.pb";
 
 // The INHERITED platform messages. `dlc gen` copies these in from the platform
 // checkout — the Go host imports the equivalent straight from the platform
@@ -29,8 +40,43 @@ import {
   MethodVersion,
 } from "@gen/devalbo/ilc/v1/platform.registry.pb";
 
+// problemText spells a Problem for a person. The ENUM crosses the wire and a
+// test asserts on it; this is only how it reads.
+function problemText(problem: Problem): string {
+  switch (problem) {
+    case Problem.DIVIDE_BY_ZERO:
+      return "cannot divide by zero";
+    case Problem.OVERFLOW:
+      return "the numbers are too big";
+    default:
+      return String(problem);
+  }
+}
+
 export const appRenderers: Record<number, Renderer | undefined> = {
   [MethodGreet]: (bytes) => GreetResponse.fromBinary(bytes).text ?? "",
+
+  // count already streamed every tick to the terminal, so this prints only what
+  // a reader could NOT already see — the tally the app kept.
+  [MethodCount]: (bytes) => {
+    const r = CountResponse.fromBinary(bytes);
+    return `(${r.counted ?? 0} ticks)`;
+  },
+
+  // THE STRUCTURED ONE. Same facts as the engine printed, as fields — which is
+  // what a slot that can decode the schema is for.
+  [MethodMath]: (bytes) => {
+    const r = MathResponse.fromBinary(bytes);
+    if (r.problem && r.problem !== Problem.UNSPECIFIED) {
+      // A PROBLEM IS NOT AN ERROR. The command ran and is reporting what it
+      // found, so this renders as a result rather than throwing.
+      return `${r.expression ?? ""}: ${problemText(r.problem)}`;
+    }
+    return String(r.result ?? 0);
+  },
+
+  [MethodLight]: (bytes) =>
+    LightResponse.fromBinary(bytes).shown ? "set" : "this world has no light to set",
 
   // The inherited verbs. You get these by being an ILC app; only their printing
   // is yours. `version` answers with what `dlc gen` put in dlcconfig from

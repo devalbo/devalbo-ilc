@@ -677,7 +677,89 @@ export const SpecFlag: MessageType<SpecFlag> = /* @__PURE__ */ createMessageType
 
 /**
  * One rpc, as a command a host can offer.
+ * One field of a command's RESPONSE.
  *
+ * # Why this is not a `SpecFlag`
+ *
+ * A flag describes how a PERSON SUPPLIES a value: it has a source (a flag, an
+ * argument, stdin), a default, a short letter, a position on a command line, and
+ * a required bit. None of that means anything about something the app hands
+ * back, and reusing `SpecFlag` would ship five meaningless fields per result and
+ * invite the question "what does `required` mean on an output?"
+ *
+ * What the two share is the part that describes the VALUE, and that is exactly
+ * what is here.
+ *
+ * # What it is for
+ *
+ * Before this, a host could encode a request by name and could only count the
+ * bytes that came back:
+ *
+ *     -set from=3 -set style=words     ->  by name, type-checked, good errors
+ *     output                           ->  0a076c6966746f6666
+ *
+ * Those bytes are `field 1, string, "liftoff"`. The SHAPE is recoverable from
+ * the wire format alone; the NAME is not, and "field 1" is not a thing to show a
+ * person. This is the other half of the round trip.
+ *
+ * @generated from message devalbo.ilc.v1.SpecResult
+ */
+export interface SpecResult {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name?: string;
+  /**
+   * The proto field NUMBER. A host decodes by number, never by name.
+   *
+   * @generated from field: uint32 field = 2;
+   */
+  field?: number;
+  /**
+   * @generated from field: devalbo.ilc.v1.SpecKind kind = 3;
+   */
+  kind?: SpecKind;
+  /**
+   * @generated from field: bool repeated = 4;
+   */
+  repeated?: boolean;
+  /**
+   * @generated from field: string help = 5;
+   */
+  help?: string;
+  /**
+   * For an enum result: the names, and the wire number of each.
+   *
+   * READ THE OTHER WAY from a flag's. On the way in a host maps a name to a
+   * number; on the way out it maps a number to a name, so a field prints
+   * `LIFTOFF` rather than `3`. Same pairs, opposite direction — which is why
+   * they are one list and not two ideas.
+   *
+   * @generated from field: repeated string enum_values = 6;
+   */
+  enumValues?: string[];
+  /**
+   * @generated from field: repeated int32 enum_numbers = 7;
+   */
+  enumNumbers?: number[];
+
+};
+
+export const SpecResult: MessageType<SpecResult> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.SpecResult",
+    fields: [
+        { no: 1, name: "name", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "field", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 3, name: "kind", kind: "enum", T: SpecKind_Enum },
+        { no: 4, name: "repeated", kind: "scalar", T: ScalarType.BOOL },
+        { no: 5, name: "help", kind: "scalar", T: ScalarType.STRING },
+        { no: 6, name: "enum_values", kind: "scalar", T: ScalarType.STRING, repeated: true },
+        { no: 7, name: "enum_numbers", kind: "scalar", T: ScalarType.INT32, repeated: true },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * @generated from message devalbo.ilc.v1.SpecCommand
  */
 export interface SpecCommand {
@@ -717,6 +799,27 @@ export interface SpecCommand {
    * @generated from field: repeated string unsupported = 7;
    */
   unsupported?: string[];
+  /**
+   * What the command ANSWERS with.
+   *
+   * @generated from field: repeated devalbo.ilc.v1.SpecResult results = 8;
+   */
+  results?: SpecResult[];
+  /**
+   * Response message name, for diagnostics only — the twin of `request`.
+   *
+   * @generated from field: string response = 9;
+   */
+  response?: string;
+  /**
+   * Response fields this description cannot express. Same rule as `unsupported`:
+   * a renderer that silently omits a field is worse than one that says it cannot
+   * show it, because the reader cannot tell an absent value from an unshowable
+   * one.
+   *
+   * @generated from field: repeated string response_unsupported = 10;
+   */
+  responseUnsupported?: string[];
 
 };
 
@@ -730,6 +833,9 @@ export const SpecCommand: MessageType<SpecCommand> = /* @__PURE__ */ createMessa
         { no: 5, name: "request", kind: "scalar", T: ScalarType.STRING },
         { no: 6, name: "local", kind: "scalar", T: ScalarType.BOOL },
         { no: 7, name: "unsupported", kind: "scalar", T: ScalarType.STRING, repeated: true },
+        { no: 8, name: "results", kind: "message", T: () => SpecResult, repeated: true },
+        { no: 9, name: "response", kind: "scalar", T: ScalarType.STRING },
+        { no: 10, name: "response_unsupported", kind: "scalar", T: ScalarType.STRING, repeated: true },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

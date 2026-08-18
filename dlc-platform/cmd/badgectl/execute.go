@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
 	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
@@ -46,9 +47,12 @@ func runExecute(port string, method uint, sets []string, wait time.Duration) err
 	defer file.Close()
 
 	var request []byte
+	// FETCHED ONCE, used twice: the same spec describes what to send and how to
+	// read what comes back.
+	var command *ilcv1.SpecCommand
 	if len(sets) > 0 {
-		command, err := fetchSpec(file, uint32(method), wait)
-		if err != nil {
+		var err error
+		if command, err = fetchSpec(file, uint32(method), wait); err != nil {
 			return err
 		}
 		if request, err = encodeRequest(command, sets); err != nil {
@@ -70,15 +74,15 @@ func runExecute(port string, method uint, sets []string, wait time.Duration) err
 		return fmt.Errorf("the app reported failure")
 	}
 	if out := result.GetOutput(); len(out) > 0 {
-		// OPAQUE, AND SAID SO. `GetCommandSpec` describes what a command TAKES
-		// and not what it returns, so this tool can encode `-set from=3` by name
-		// and can only count the bytes that come back. Printing a length dressed
-		// up as a result would suggest the tool understood it.
-		//
-		// The hex is what a person can actually act on today: it can be pasted
-		// into a decoder, and it makes an empty response distinguishable from a
-		// short one. A response spec would replace this with field names.
-		fmt.Printf("output   %d bytes, undecoded (no response spec): %x\n", len(out), out)
+		// BY NAME, from the app's own response spec — the other half of the round
+		// trip. Until `SpecResult` existed this could only print a byte count.
+		if command == nil {
+			var err error
+			if command, err = fetchSpec(file, uint32(method), wait); err != nil {
+				return err
+			}
+		}
+		renderResponse(command, out)
 	}
 	fmt.Println("ok")
 	return nil
@@ -105,6 +109,111 @@ func passThrough(file *os.File, method uint32, request []byte, wait time.Duratio
 		return nil, fmt.Errorf("decoding the app's answer: %w", err)
 	}
 	return &result, nil
+}
+
+// renderResponse prints an app's answer using the app's own description of it.
+//
+// # Why this decodes generically rather than with a generated type
+//
+// This tool has no idea which app is on the badge. It cannot import
+// `countdownv1.CountResponse`, because the payload is whatever somebody dragged
+// onto the flash region — so the only thing that can name these bytes is what
+// the app itself said about them.
+//
+// # Unknown fields are SHOWN, not skipped
+//
+// A field the spec does not describe still gets a line, by number. The spec
+// cannot express nested messages, so an app whose response contains one would
+// otherwise appear to have returned less than it did — and "the value is
+// missing" and "I could not read the value" are different facts.
+func renderResponse(command *ilcv1.SpecCommand, out []byte) {
+	byField := map[uint32]*ilcv1.SpecResult{}
+	for _, r := range command.GetResults() {
+		byField[r.GetField()] = r
+	}
+
+	for len(out) > 0 {
+		tag, n := binary.Uvarint(out)
+		if n <= 0 {
+			fmt.Printf("output   %d undecodable bytes: %x\n", len(out), out)
+			return
+		}
+		out = out[n:]
+		field, wire := uint32(tag>>3), tag&7
+
+		var raw []byte
+		var number uint64
+		switch wire {
+		case 0:
+			value, n := binary.Uvarint(out)
+			if n <= 0 {
+				return
+			}
+			number, out = value, out[n:]
+		case 2:
+			length, n := binary.Uvarint(out)
+			if n <= 0 || uint64(len(out[n:])) < length {
+				return
+			}
+			raw, out = out[n:n+int(length)], out[n+int(length):]
+		case 5:
+			if len(out) < 4 {
+				return
+			}
+			out = out[4:]
+			continue
+		case 1:
+			if len(out) < 8 {
+				return
+			}
+			out = out[8:]
+			continue
+		default:
+			return
+		}
+
+		result, described := byField[field]
+		if !described {
+			fmt.Printf("  field %-2d %s\n", field, undescribed(wire, raw, number))
+			continue
+		}
+		fmt.Printf("  %-10s %s\n", result.GetName(), renderValue(result, raw, number))
+	}
+}
+
+func undescribed(wire uint64, raw []byte, number uint64) string {
+	if wire == 2 {
+		return fmt.Sprintf("(not in the spec) %d bytes: %x", len(raw), raw)
+	}
+	return fmt.Sprintf("(not in the spec) %d", number)
+}
+
+func renderValue(result *ilcv1.SpecResult, raw []byte, number uint64) string {
+	switch result.GetKind() {
+	case ilcv1.SpecKind_SPEC_KIND_STRING:
+		return string(raw)
+	case ilcv1.SpecKind_SPEC_KIND_BYTES:
+		return fmt.Sprintf("%d bytes: %x", len(raw), raw)
+	case ilcv1.SpecKind_SPEC_KIND_BOOL:
+		return strconv.FormatBool(number != 0)
+	case ilcv1.SpecKind_SPEC_KIND_INT32, ilcv1.SpecKind_SPEC_KIND_INT64:
+		return strconv.FormatInt(int64(number), 10)
+	case ilcv1.SpecKind_SPEC_KIND_ENUM:
+		// NUMBER -> NAME, the mirror of encoding. `3` is what the wire carries
+		// and `words` is what a person reads; the app declared both.
+		short := clispec.ShortEnum(result.GetEnumValues())
+		for i := range result.GetEnumValues() {
+			if numbers := result.GetEnumNumbers(); i < len(numbers) && uint64(numbers[i]) == number {
+				return short[i]
+			}
+		}
+		// A NUMBER THE SPEC DOES NOT NAME is shown as a number, not guessed at:
+		// an app built from a newer proto than the spec on the badge can return
+		// a value this list has never heard of.
+		return fmt.Sprintf("%d (unnamed)", number)
+	default:
+		return strconv.FormatUint(number, 10)
+	}
 }
 
 // fetchSpec asks the app what a command takes.
@@ -152,11 +261,7 @@ func showSpec(port string, method uint, wait time.Duration) error {
 			line += "  default " + d
 		}
 		if values := flag.GetEnumValues(); len(values) > 0 {
-			short := make([]string, 0, len(values))
-			for _, name := range values {
-				short = append(short, strings.ToLower(shortEnum(name)))
-			}
-			line += "  one of " + strings.Join(short, "|")
+			line += "  one of " + strings.Join(clispec.ShortEnum(values), "|")
 		}
 		fmt.Println(line)
 	}
@@ -165,6 +270,26 @@ func showSpec(port string, method uint, wait time.Duration) error {
 	// that admits it.
 	for _, name := range command.GetUnsupported() {
 		fmt.Printf("  (%s cannot be set from a spec)\n", name)
+	}
+
+	// BOTH HALVES OF THE CONTRACT. A spec that described only the input told you
+	// how to ask and nothing about what an answer would mean.
+	if results := command.GetResults(); len(results) > 0 {
+		fmt.Printf("  answers %s:\n", command.GetResponse())
+		for _, r := range results {
+			kind := strings.ToLower(strings.TrimPrefix(r.GetKind().String(), "SPEC_KIND_"))
+			line := fmt.Sprintf("    %-10s <%s>   field %d", r.GetName(), kind, r.GetField())
+			if values := r.GetEnumValues(); len(values) > 0 {
+				line += "  one of " + strings.Join(clispec.ShortEnum(values), "|")
+			}
+			if help := r.GetHelp(); help != "" {
+				line += "  " + help
+			}
+			fmt.Println(line)
+		}
+	}
+	for _, name := range command.GetResponseUnsupported() {
+		fmt.Printf("    (%s cannot be shown from a spec)\n", name)
 	}
 	return nil
 }
@@ -256,8 +381,9 @@ func encodeField(flag *ilcv1.SpecFlag, value string) ([]byte, error) {
 		// value the app gave that name; using the index is right only for an
 		// enum numbered densely from zero, and wrong SILENTLY otherwise, because
 		// the wrong number is still a legal one.
+		short := clispec.ShortEnum(flag.GetEnumValues())
 		for index, name := range flag.GetEnumValues() {
-			if !strings.EqualFold(name, value) && !strings.EqualFold(shortEnum(name), value) {
+			if !strings.EqualFold(name, value) && !strings.EqualFold(short[index], value) {
 				continue
 			}
 			number := int32(index)
@@ -274,12 +400,8 @@ func encodeField(flag *ilcv1.SpecFlag, value string) ([]byte, error) {
 			// THE SHORT NAMES IN THE ERROR, because they are what the caller
 			// should type. Listing `STYLE_PLAIN, STYLE_ROCKET` invites a second
 			// failed attempt spelling it exactly that way.
-			short := make([]string, 0, len(flag.GetEnumValues()))
-			for _, name := range flag.GetEnumValues() {
-				short = append(short, strings.ToLower(shortEnum(name)))
-			}
 			return nil, fmt.Errorf("-set %s=%q: expected one of %s",
-				flag.GetName(), value, strings.Join(short, ", "))
+				flag.GetName(), value, strings.Join(clispec.ShortEnum(flag.GetEnumValues()), ", "))
 		}
 		if number == 0 {
 			return nil, nil
@@ -290,17 +412,6 @@ func encodeField(flag *ilcv1.SpecFlag, value string) ([]byte, error) {
 		return nil, fmt.Errorf("-set %s: this tool cannot encode a %s",
 			flag.GetName(), flag.GetKind())
 	}
-}
-
-// shortEnum drops proto's value-name prefix: `STYLE_ROCKET` -> `ROCKET`.
-//
-// Every value of an enum carries the same prefix, so it is the part of the name
-// with no information in it — and the part nobody types.
-func shortEnum(name string) string {
-	if at := strings.LastIndex(name, "_"); at >= 0 && at+1 < len(name) {
-		return name[at+1:]
-	}
-	return name
 }
 
 func appendVarint(field uint32, value uint64) []byte {

@@ -12,6 +12,9 @@ export const PlatformServiceCLI = [
     method: 1,
     request: "VersionRequest",
     summary: "Every app wants a version command; the string itself is app-supplied",
+    results: [
+      { name: "version", field: 1, kind: "string" },
+    ],
   },
   {
     name: "export-fs",
@@ -21,6 +24,9 @@ export const PlatformServiceCLI = [
     flags: [
       { name: "prefix", field: 1, kind: "string", short: "p", help: "subtree to export (default: whole root)" },
       { name: "format", field: 2, kind: "enum", short: "f", help: "bundle format", default: "BUNDLE_FORMAT_BFT", enumValues: ["BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"], enumNumbers: [0, 1, 2, 3] },
+    ],
+    results: [
+      { name: "bundle", field: 1, kind: "bytes" },
     ],
   },
   {
@@ -33,6 +39,9 @@ export const PlatformServiceCLI = [
       { name: "prefix", field: 2, kind: "string", short: "p", help: "destination subtree" },
       { name: "mode", field: 3, kind: "enum", help: "merge into the destination, or replace it", default: "IMPORT_MODE_MERGE", enumValues: ["IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"], enumNumbers: [0, 1, 2] },
     ],
+    results: [
+      { name: "files", field: 1, kind: "string", repeated: true },
+    ],
   },
   {
     name: "reset-fs",
@@ -42,12 +51,18 @@ export const PlatformServiceCLI = [
     flags: [
       { name: "prefix", field: 1, kind: "string", short: "p", help: "subtree to delete (default: whole root)" },
     ],
+    results: [
+      { name: "removed", field: 1, kind: "string", repeated: true },
+    ],
   },
   {
     name: "rebuild-index",
     method: 200,
     request: "RebuildIndexRequest",
     summary: "Rebuild the derived index by scanning the files it projects",
+    results: [
+      { name: "entries", field: 1, kind: "uint32" },
+    ],
   },
 ] as const;
 

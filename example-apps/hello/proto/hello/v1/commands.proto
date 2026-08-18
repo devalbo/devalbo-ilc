@@ -17,10 +17,37 @@ import "devalbo/options/v1/options.proto";
 // The id is permanent — it *is* the wire — and `proto/method-ids.lock` fails the
 // build if one ever changes. The rpc *name* is cosmetic, so renaming a command
 // is safe; renumbering it is not.
+// FOUR COMMANDS, FOUR SHAPES OF CONVERSATION.
+//
+// This app is the breadth example: each command is here because it exercises a
+// different way a device and a client can talk, not because a greeting app
+// needed a calculator. Read them in order and you have seen the range.
+//
+//	greet   ask once, get an answer            — the simplest round trip
+//	count   ask once, watch it happen          — output DURING a command
+//	math    several inputs, a structured answer — multi-field, an enum, a result
+//	        worth decoding
+//	light   ask for a change to the device      — no answer worth reading; the
+//	        point is what the hardware does
 service AppService {
   // Say hello to someone
   rpc Greet(GreetRequest) returns (GreetResponse) {
     option (devalbo.options.v1.method_id) = 10000;
+  }
+
+  // Count down from a number, one tick a second
+  rpc Count(CountRequest) returns (CountResponse) {
+    option (devalbo.options.v1.method_id) = 10001;
+  }
+
+  // Do arithmetic on two numbers
+  rpc Math(MathRequest) returns (MathResponse) {
+    option (devalbo.options.v1.method_id) = 10002;
+  }
+
+  // Set the device's status colour
+  rpc Light(LightRequest) returns (LightResponse) {
+    option (devalbo.options.v1.method_id) = 10003;
   }
 }
 
@@ -31,5 +58,154 @@ message GreetRequest {
   ];
 }
 message GreetResponse {
-  string text = 1;
+  string text = 1 [(devalbo.options.v1.help) = "the greeting"];
+}
+
+// ---------------------------------------------------------------------------
+// count — OUTPUT DURING A COMMAND
+// ---------------------------------------------------------------------------
+//
+// The smallest thing that proves the world does not own TIME.
+//
+// This app sleeps. It decides where to start, how long a tick is, and when it is
+// done; the world provides a clock and a screen and knows none of that. A world
+// that instead called `tick` repeatedly would work and would put the INTERVAL in
+// the shell — and "how often" is a policy, and a policy is logic.
+//
+// Everything it says while running arrives WHILE IT RUNS: `fmt.Println` reaches
+// `wasi:cli/stdout.write`, which is an import, so a host sees each tick a second
+// apart rather than all at once at the end.
+
+message CountRequest {
+  int32 from = 1 [
+    (devalbo.options.v1.help) = "count down from this number",
+    (devalbo.options.v1.short) = "f",
+    (devalbo.options.v1.default) = "5",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+
+  // HOW TO SAY IT — the field that made a badge grow a widget.
+  //
+  // The choices are declared HERE and nowhere else. A host renders them because
+  // the command spec carries them, not because it knows what a countdown style
+  // is; the next app's enum will be `X O EMPTY`.
+  Style style = 2 [
+    (devalbo.options.v1.help) = "how each tick reads",
+    (devalbo.options.v1.default) = "plain",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
+}
+message CountResponse {
+  string text = 1 [(devalbo.options.v1.help) = "what it said at zero"];
+  int32 counted = 2 [(devalbo.options.v1.help) = "how many ticks were emitted"];
+}
+
+// How a tick is phrased. The app's vocabulary, not the world's.
+enum Style {
+  STYLE_UNSPECIFIED = 0;
+  // `3...`
+  STYLE_PLAIN = 1;
+  // `T-minus 3`
+  STYLE_ROCKET = 2;
+  // `three`, for a tier whose panel reads better in words.
+  STYLE_WORDS = 3;
+}
+
+// ---------------------------------------------------------------------------
+// math — A STRUCTURED ANSWER
+// ---------------------------------------------------------------------------
+//
+// Two operands and an operator: the smallest command that needs MORE THAN ONE
+// input, and whose reply is worth decoding field by field rather than printing.
+//
+// It is also where a host's input surface stops being a formality. A badge with
+// four buttons has to collect three fields in the order they read — `left op
+// right` — which is why `cli_positional` is set on all three and why the enum
+// arrives as a chooser rather than as typing.
+
+message MathRequest {
+  int64 left = 1 [
+    (devalbo.options.v1.help) = "the first number",
+    (devalbo.options.v1.default) = "6",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+
+  Operator op = 2 [
+    (devalbo.options.v1.help) = "what to do with them",
+    (devalbo.options.v1.default) = "add",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
+
+  int64 right = 3 [
+    (devalbo.options.v1.help) = "the second number",
+    (devalbo.options.v1.default) = "7",
+    (devalbo.options.v1.cli_positional) = 3
+  ];
+}
+
+message MathResponse {
+  int64 result = 1 [(devalbo.options.v1.help) = "the answer"];
+  // THE EXPRESSION, rendered by the app. A host could build `6 + 7 = 13` itself
+  // from the request it sent — and then every host would build it slightly
+  // differently. The app knows how its own operators are spelled.
+  string expression = 2 [(devalbo.options.v1.help) = "what was computed"];
+  // WHY IT FAILED, when it did. Divide by zero is not a crash and not a trap: it
+  // is an answer, and the app says so in a field a host can act on.
+  Problem problem = 3 [(devalbo.options.v1.help) = "what went wrong, if anything"];
+}
+
+// INT64 AND NOT A FLOAT, deliberately. `SpecKind` has no float, so a `double`
+// here would land in `unsupported` and no host could collect it — the command
+// would exist and be unusable from every surface. Recorded as a decision rather
+// than discovered as a bug: this tier does integers until somebody adds a float
+// kind end to end.
+enum Operator {
+  OPERATOR_UNSPECIFIED = 0;
+  OPERATOR_ADD = 1;
+  OPERATOR_SUBTRACT = 2;
+  OPERATOR_MULTIPLY = 3;
+  OPERATOR_DIVIDE = 4;
+}
+
+// What stopped the arithmetic. NUMBERED SPARSELY ON PURPOSE — see the tutorial:
+// a host that encoded or decoded an enum by its POSITION in the list would read
+// `PROBLEM_OVERFLOW` as `PROBLEM_DIVIDE_BY_ZERO` here, and both are legal values
+// so nothing would reject it.
+enum Problem {
+  PROBLEM_UNSPECIFIED = 0;
+  PROBLEM_DIVIDE_BY_ZERO = 7;
+  PROBLEM_OVERFLOW = 11;
+}
+
+// ---------------------------------------------------------------------------
+// light — CHANGING THE DEVICE
+// ---------------------------------------------------------------------------
+//
+// The command whose POINT is not its reply. A host prints `ok` and the
+// interesting thing happens on the badge: a colour a person across the room can
+// read, with no text anywhere.
+//
+// It is also the clearest case of a capability that may not exist. A terminal
+// has no status light; the app asks anyway, the world does nothing, and neither
+// side treats that as an error (Decision 33).
+
+message LightRequest {
+  Colour colour = 1 [
+    (devalbo.options.v1.help) = "what to show",
+    (devalbo.options.v1.default) = "green",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+}
+message LightResponse {
+  // Whether the world actually has a light. NOT an error either way — a host
+  // that cannot show a colour still ran the command correctly.
+  bool shown = 1 [(devalbo.options.v1.help) = "whether a world rendered it"];
+}
+
+enum Colour {
+  COLOUR_UNSPECIFIED = 0;
+  COLOUR_GREEN = 1;
+  COLOUR_AMBER = 2;
+  COLOUR_RED = 3;
+  COLOUR_OFF = 4;
 }

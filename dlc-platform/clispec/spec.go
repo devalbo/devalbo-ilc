@@ -109,6 +109,36 @@ type Command struct {
 	// command that silently ignores a field is worse than one that says it
 	// cannot set it.
 	Unsupported []string
+
+	// Response is the response message name, for diagnostics — the twin of
+	// Request.
+	Response string
+	// Results describe what the command ANSWERS with, so a host can render a
+	// response by name instead of counting its bytes.
+	Results []Result
+	// ResponseUnsupported names response fields this description cannot express.
+	// Same rule as Unsupported: a renderer that silently omits a field is worse
+	// than one that says it cannot show it, because a reader cannot tell an
+	// absent value from an unshowable one.
+	ResponseUnsupported []string
+}
+
+// Result describes one field of a command's response.
+//
+// A SUBSET OF Flag on purpose: no Source, Default, Short, Positional or
+// Required. Those describe how a person SUPPLIES a value and say nothing about
+// one the app hands back — see SpecResult in platform.proto.
+type Result struct {
+	Name string
+	// Field is the proto field NUMBER. A host decodes by number, never by name.
+	Field    uint32
+	Kind     Kind
+	Repeated bool
+	Help     string
+	// EnumValues and EnumNumbers are read NUMBER -> NAME here, the opposite
+	// direction from a flag's, so a field prints `LIFTOFF` rather than `3`.
+	EnumValues  []string
+	EnumNumbers []int32
 }
 
 // Positionals returns a command's positional fields, in position order.

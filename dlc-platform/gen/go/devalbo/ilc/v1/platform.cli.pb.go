@@ -15,10 +15,14 @@ import "github.com/devalbo/devalbo-ilc/dlc-platform/clispec"
 // PlatformServiceCLI is PlatformService as a command-line surface.
 var PlatformServiceCLI = []clispec.Command{
 	{
-		Name:    "version",
-		Method:  MethodVersion,
-		Request: "VersionRequest",
-		Summary: "Every app wants a version command; the string itself is app-supplied",
+		Name:     "version",
+		Method:   MethodVersion,
+		Request:  "VersionRequest",
+		Summary:  "Every app wants a version command; the string itself is app-supplied",
+		Response: "VersionResponse",
+		Results: []clispec.Result{
+			{Name: "version", Field: 1, Kind: clispec.KindString},
+		},
 	},
 	{
 		Name:    "export-fs",
@@ -28,6 +32,10 @@ var PlatformServiceCLI = []clispec.Command{
 		Flags: []clispec.Flag{
 			{Name: "prefix", Field: 1, Kind: clispec.KindString, Short: "p", Help: "subtree to export (default: whole root)"},
 			{Name: "format", Field: 2, Kind: clispec.KindEnum, Short: "f", Help: "bundle format", Default: "BUNDLE_FORMAT_BFT", EnumValues: []string{"BUNDLE_FORMAT_UNSPECIFIED", "BUNDLE_FORMAT_BFT", "BUNDLE_FORMAT_ZIP", "BUNDLE_FORMAT_PROTO"}, EnumNumbers: []int32{0, 1, 2, 3}},
+		},
+		Response: "ExportFsResponse",
+		Results: []clispec.Result{
+			{Name: "bundle", Field: 1, Kind: clispec.KindBytes},
 		},
 	},
 	{
@@ -40,6 +48,10 @@ var PlatformServiceCLI = []clispec.Command{
 			{Name: "prefix", Field: 2, Kind: clispec.KindString, Short: "p", Help: "destination subtree"},
 			{Name: "mode", Field: 3, Kind: clispec.KindEnum, Help: "merge into the destination, or replace it", Default: "IMPORT_MODE_MERGE", EnumValues: []string{"IMPORT_MODE_UNSPECIFIED", "IMPORT_MODE_MERGE", "IMPORT_MODE_REPLACE"}, EnumNumbers: []int32{0, 1, 2}},
 		},
+		Response: "ImportFsResponse",
+		Results: []clispec.Result{
+			{Name: "files", Field: 1, Kind: clispec.KindString, Repeated: true},
+		},
 	},
 	{
 		Name:    "reset-fs",
@@ -49,11 +61,19 @@ var PlatformServiceCLI = []clispec.Command{
 		Flags: []clispec.Flag{
 			{Name: "prefix", Field: 1, Kind: clispec.KindString, Short: "p", Help: "subtree to delete (default: whole root)"},
 		},
+		Response: "ResetFsResponse",
+		Results: []clispec.Result{
+			{Name: "removed", Field: 1, Kind: clispec.KindString, Repeated: true},
+		},
 	},
 	{
-		Name:    "rebuild-index",
-		Method:  MethodRebuildIndex,
-		Request: "RebuildIndexRequest",
-		Summary: "Rebuild the derived index by scanning the files it projects",
+		Name:     "rebuild-index",
+		Method:   MethodRebuildIndex,
+		Request:  "RebuildIndexRequest",
+		Summary:  "Rebuild the derived index by scanning the files it projects",
+		Response: "RebuildIndexResponse",
+		Results: []clispec.Result{
+			{Name: "entries", Field: 1, Kind: clispec.KindUint32},
+		},
 	},
 }

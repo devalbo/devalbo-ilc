@@ -216,6 +216,18 @@ func TestEnumNameToNumber(t *testing.T) {
 		t.Errorf("MODE_REPLACE encoded as %d, want 2", n)
 	}
 
+	// THE SHORT NAME IS WHAT A PERSON TYPES, and it must work: an app declaring
+	// `(default) = "replace"` was otherwise rejected by the very command that
+	// declared it, because the spec carries proto's full value names.
+	port3 := &fakePort{}
+	app3, _, errOut3 := testApp(t, cmd, port3, "")
+	if code := app3.Run([]string{"go", "-mode", "replace"}); code != 0 {
+		t.Fatalf("short name refused: %s", errOut3.String())
+	}
+	if _, n, _ := field(t, port3.request, 3); n != 2 {
+		t.Errorf("replace encoded as %d, want 2", n)
+	}
+
 	// An unknown name must be refused by NAME, listing what is allowed — a
 	// number silently out of range would reach the engine as a valid-looking
 	// enum nobody defined.
@@ -224,8 +236,47 @@ func TestEnumNameToNumber(t *testing.T) {
 	if code := app2.Run([]string{"go", "-mode", "MODE_SIDEWAYS"}); code == 0 {
 		t.Fatal("an unknown enum value must not succeed")
 	}
-	if !strings.Contains(errOut2.String(), "MODE_MERGE") {
+	// THE SHORT NAMES, because those are what the caller should type. Listing
+	// `MODE_MERGE` invites a second failed attempt spelling it exactly that way.
+	if !strings.Contains(errOut2.String(), "merge") {
 		t.Errorf("error should list the permitted values: %q", errOut2.String())
+	}
+}
+
+// A sparse enum encodes the number the app DECLARED, not the name's position.
+//
+// THE BUG THIS EXISTS FOR: proto3 requires only that the FIRST value be zero.
+// Everything after it is the author's choice, so a host encoding by position
+// sends a number the app never declared — and it is still a legal-looking enum,
+// so nothing rejects it. The app does the wrong thing and reports success.
+func TestSparseEnumEncodesDeclaredNumber(t *testing.T) {
+	cmd := clispec.Command{
+		Name: "go", Method: methodTest,
+		Flags: []clispec.Flag{{
+			Name: "problem", Field: 4, Kind: clispec.KindEnum,
+			EnumValues:  []string{"PROBLEM_UNSPECIFIED", "PROBLEM_DIVIDE_BY_ZERO", "PROBLEM_OVERFLOW"},
+			EnumNumbers: []int32{0, 7, 11},
+		}},
+	}
+
+	for _, c := range []struct {
+		typed string
+		want  uint64
+	}{
+		{"PROBLEM_OVERFLOW", 11},
+		// Multi-word values are why the short name is the SHARED PREFIX removed
+		// and not "everything after the last underscore" — that rule turns
+		// `PROBLEM_DIVIDE_BY_ZERO` into `zero`, which is a different word.
+		{"divide_by_zero", 7},
+	} {
+		port := &fakePort{}
+		app, _, errOut := testApp(t, cmd, port, "")
+		if code := app.Run([]string{"go", "-problem", c.typed}); code != 0 {
+			t.Fatalf("%s: exit %d: %s", c.typed, code, errOut.String())
+		}
+		if _, n, _ := field(t, port.request, 4); n != c.want {
+			t.Errorf("%s encoded as %d, want %d (its declared number)", c.typed, n, c.want)
+		}
 	}
 }
 

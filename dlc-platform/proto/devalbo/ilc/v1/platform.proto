@@ -376,6 +376,47 @@ message SpecFlag {
 }
 
 // One rpc, as a command a host can offer.
+// One field of a command's RESPONSE.
+//
+// # Why this is not a `SpecFlag`
+//
+// A flag describes how a PERSON SUPPLIES a value: it has a source (a flag, an
+// argument, stdin), a default, a short letter, a position on a command line, and
+// a required bit. None of that means anything about something the app hands
+// back, and reusing `SpecFlag` would ship five meaningless fields per result and
+// invite the question "what does `required` mean on an output?"
+//
+// What the two share is the part that describes the VALUE, and that is exactly
+// what is here.
+//
+// # What it is for
+//
+// Before this, a host could encode a request by name and could only count the
+// bytes that came back:
+//
+//     -set from=3 -set style=words     ->  by name, type-checked, good errors
+//     output                           ->  0a076c6966746f6666
+//
+// Those bytes are `field 1, string, "liftoff"`. The SHAPE is recoverable from
+// the wire format alone; the NAME is not, and "field 1" is not a thing to show a
+// person. This is the other half of the round trip.
+message SpecResult {
+  string name = 1;
+  // The proto field NUMBER. A host decodes by number, never by name.
+  uint32 field = 2;
+  SpecKind kind = 3;
+  bool repeated = 4;
+  string help = 5;
+  // For an enum result: the names, and the wire number of each.
+  //
+  // READ THE OTHER WAY from a flag's. On the way in a host maps a name to a
+  // number; on the way out it maps a number to a name, so a field prints
+  // `LIFTOFF` rather than `3`. Same pairs, opposite direction — which is why
+  // they are one list and not two ideas.
+  repeated string enum_values = 6;
+  repeated int32 enum_numbers = 7;
+}
+
 message SpecCommand {
   string name = 1;
   uint32 method = 2;
@@ -389,6 +430,16 @@ message SpecCommand {
   // repeated non-scalars. LISTED rather than dropped: a command that silently
   // ignores a field is worse than one that says it cannot set it.
   repeated string unsupported = 7;
+
+  // What the command ANSWERS with.
+  repeated SpecResult results = 8;
+  // Response message name, for diagnostics only — the twin of `request`.
+  string response = 9;
+  // Response fields this description cannot express. Same rule as `unsupported`:
+  // a renderer that silently omits a field is worse than one that says it cannot
+  // show it, because the reader cannot tell an absent value from an unshowable
+  // one.
+  repeated string response_unsupported = 10;
 }
 
 message GetCommandSpecRequest {

@@ -111,14 +111,29 @@ func specCommand(c clispec.Command) *ilcv1.SpecCommand {
 			Short:        f.Short,
 		})
 	}
+	results := make([]*ilcv1.SpecResult, 0, len(c.Results))
+	for _, r := range c.Results {
+		results = append(results, &ilcv1.SpecResult{
+			Name:        r.Name,
+			Field:       r.Field,
+			Kind:        specKind(r.Kind),
+			Repeated:    r.Repeated,
+			Help:        r.Help,
+			EnumValues:  r.EnumValues,
+			EnumNumbers: r.EnumNumbers,
+		})
+	}
 	return &ilcv1.SpecCommand{
-		Name:        c.Name,
-		Method:      c.Method,
-		Summary:     c.Summary,
-		Flags:       flags,
-		Request:     c.Request,
-		Local:       c.Local,
-		Unsupported: c.Unsupported,
+		Name:                c.Name,
+		Method:              c.Method,
+		Summary:             c.Summary,
+		Flags:               flags,
+		Request:             c.Request,
+		Local:               c.Local,
+		Unsupported:         c.Unsupported,
+		Response:            c.Response,
+		Results:             results,
+		ResponseUnsupported: c.ResponseUnsupported,
 	}
 }
 

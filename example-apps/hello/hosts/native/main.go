@@ -98,6 +98,37 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 			hellov1.MethodGreet: render(func(_ io.Writer, _ *hellov1.GreetResponse) error {
 				return nil
 			}),
+			// Same reasoning: the engine already printed every tick and the
+			// final word. What a RENDERER adds is the part a terminal can show
+			// and a badge cannot — here, the count the app kept for us.
+			hellov1.MethodCount: render(func(out io.Writer, r *hellov1.CountResponse) error {
+				_, err := fmt.Fprintf(out, "(%d ticks)\n", r.GetCounted())
+				return err
+			}),
+			// THE STRUCTURED ONE. The engine prints a human sentence for tiers
+			// that cannot decode a response; this prints the same facts as
+			// FIELDS, which is what a terminal is for.
+			hellov1.MethodMath: render(func(out io.Writer, r *hellov1.MathResponse) error {
+				if p := r.GetProblem(); p != hellov1.Problem_PROBLEM_UNSPECIFIED {
+					// A PROBLEM IS NOT AN ERROR HERE EITHER. The command ran; it
+					// is reporting what it found, and the exit status stays 0
+					// because nothing failed.
+					_, err := fmt.Fprintf(out, "%s: %s\n", r.GetExpression(), problem(p))
+					return err
+				}
+				_, err := fmt.Fprintf(out, "%d\n", r.GetResult())
+				return err
+			}),
+			hellov1.MethodLight: render(func(out io.Writer, r *hellov1.LightResponse) error {
+				if !r.GetShown() {
+					// SAID PLAINLY, because the alternative is a command that
+					// prints "ok" having done nothing observable.
+					_, err := fmt.Fprintln(out, "this world has no light to set")
+					return err
+				}
+				_, err := fmt.Fprintln(out, "set")
+				return err
+			}),
 
 			ilcv1.MethodVersion: render(func(out io.Writer, r *ilcv1.VersionResponse) error {
 				_, err := fmt.Fprintln(out, r.GetVersion())
@@ -139,6 +170,22 @@ func app(port platform.EnginePort, stdout, stderr io.Writer, stdin io.Reader) cl
 				return nil
 			}),
 		},
+	}
+}
+
+// problem spells a Problem for a person.
+//
+// The ENUM is what crosses the wire and what a test asserts on; this is only how
+// it reads. A host that printed `PROBLEM_DIVIDE_BY_ZERO` would be showing an
+// identifier where a sentence belongs.
+func problem(p hellov1.Problem) string {
+	switch p {
+	case hellov1.Problem_PROBLEM_DIVIDE_BY_ZERO:
+		return "cannot divide by zero"
+	case hellov1.Problem_PROBLEM_OVERFLOW:
+		return "the numbers are too big"
+	default:
+		return p.String()
 	}
 }
 

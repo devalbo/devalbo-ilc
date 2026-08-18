@@ -40,3 +40,13 @@ root      = "hosts/web"
 assets    = "hosts/web/src/wasm"
 component = "build/engine.component.wasm"
 
+# THE BADGE. Declared so `dlc build rp2350` produces a component the loader can
+# AOT-compile — the same artifact the native tier links, with no second build.
+#
+# `console` only: the badge has no filesystem yet (every `wasi:filesystem`
+# descriptor refuses ACCESS), and claiming one an app could not use would be the
+# manifest lying about a capability.
+[tiers.rp2350]
+capabilities = ["console"]
+# Inherited, not scaffolded — the world is the firmware, not app code.
+root         = "hosts/rp2350"

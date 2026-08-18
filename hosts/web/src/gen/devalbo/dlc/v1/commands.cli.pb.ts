@@ -21,6 +21,10 @@ export const DlcServiceCLI = [
       { name: "storage", field: 6, kind: "enum", help: "storage layout", enumValues: ["STORAGE_KIND_UNSPECIFIED", "STORAGE_KIND_SPLIT", "STORAGE_KIND_NONE"], enumNumbers: [0, 1, 2] },
       { name: "platform-path", field: 7, kind: "string", help: "local devalbo-ilc checkout (bootstrap; until dlc-platform is published)" },
     ],
+    results: [
+      { name: "path", field: 1, kind: "string" },
+      { name: "files", field: 2, kind: "string", repeated: true },
+    ],
   },
   {
     name: "echo",
@@ -29,6 +33,9 @@ export const DlcServiceCLI = [
     summary: "Echo the words back, through the engine",
     flags: [
       { name: "args", field: 1, kind: "string", repeated: true, positional: 1, help: "words to echo back" },
+    ],
+    results: [
+      { name: "text", field: 1, kind: "string" },
     ],
   },
 ] as const;
