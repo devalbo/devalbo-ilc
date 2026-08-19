@@ -56,7 +56,7 @@ type Handler func(request []byte) Result
 const (
 	// core lifecycle (1–99)
 	MethodVersion           = ilcv1.MethodVersion
-	MethodSetEnvironment    = ilcv1.MethodSetEnvironment
+	MethodSetWorldManifest  = ilcv1.MethodSetWorldManifest
 	MethodGetCommandSurface = ilcv1.MethodGetCommandSurface
 	MethodGetCommandSpec    = ilcv1.MethodGetCommandSpec
 

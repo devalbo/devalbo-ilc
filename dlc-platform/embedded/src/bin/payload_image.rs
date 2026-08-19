@@ -16,7 +16,7 @@
 use dlc_platform_embedded::names;
 use dlc_platform_embedded::catalog;
 use dlc_platform_embedded::catalog::{
-    DEFAULT_ENTRY_METHOD, HEADER_LEN, MAGIC, MAX_ENTRIES, NAME_MAX, SLOT_ALIGN,
+    DEFAULT_ENTRY_METHOD, MAX_ENTRIES, NAME_MAX, SLOT_ALIGN,
 };
 
 fn main() -> std::io::Result<()> {

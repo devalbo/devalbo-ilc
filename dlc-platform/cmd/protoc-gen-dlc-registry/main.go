@@ -83,12 +83,20 @@ func run() error {
 	// TypeScript would reopen exactly the hole this plugin closed for Go. buf
 	// invokes the plugin once per output directory, so the language is a
 	// parameter rather than one invocation emitting both.
+	// only=enums emits the enum values and nothing else.
+	//
+	// The web PACKAGE cannot import from `dlc-platform/gen/ts`: its root is
+	// `web/`, exports are relative to that, and a path outside the root is
+	// neither shipped by npm nor resolvable by a bundler. That is why those
+	// eleven constants were typed by hand. Generating them INTO the package
+	// removes the copy without moving the package boundary.
+	enumsOnly := paramValue(req.GetParameter(), "only") == "enums"
 	lang := paramValue(req.GetParameter(), "lang")
 	if lang == "" {
 		lang = "go"
 	}
-	if lang != "go" && lang != "ts" {
-		return fmt.Errorf("unknown lang=%q (want go or ts)", lang)
+	if lang != "go" && lang != "ts" && lang != "rust" {
+		return fmt.Errorf("unknown lang=%q (want go, ts or rust)", lang)
 	}
 
 	generate := map[string]bool{}
@@ -114,7 +122,7 @@ func run() error {
 				lockedTopics[file.GetPackage()+"."+e.message] = e.topic
 			}
 		}
-		if generate[file.GetName()] && len(events) > 0 {
+		if generate[file.GetName()] && len(events) > 0 && !enumsOnly {
 			base := strings.TrimSuffix(file.GetName(), ".proto")
 			if lang == "go" {
 				content, err := renderEventsGo(file, events)
@@ -129,7 +137,7 @@ func run() error {
 					Name:    proto.String(base + ".events.pb.go"),
 					Content: proto.String(string(formatted)),
 				})
-			} else {
+			} else if lang == "ts" {
 				content, err := renderEventsTS(file, events)
 				if err != nil {
 					return err
@@ -139,6 +147,47 @@ func run() error {
 					Content: proto.String(content),
 				})
 			}
+		}
+
+		// EVERY ENUM VALUE, for the tiers that cannot import generated types.
+		//
+		// The badge hand-decodes protobuf — it is `no_std` and cannot run protoc —
+		// and the web tier's manifest encoder is hand-written for the same reason
+		// its worker is. So both RETYPED the enum values: 41 constants in
+		// control.rs and 11 in world-manifest.ts, each a number copied from a
+		// .proto by a person.
+		//
+		// One of those copies was wrong for a day: `TextOutlet` was transcribed as
+		// DISPLAY=2, UART=3 — alphabetical order rather than declared order — so a
+		// badge writing to its screen told every client it was writing to a serial
+		// port. Nothing caught it: both values are legal, the frame checksummed,
+		// and the enum name printed cleanly at the far end.
+		//
+		// Generating them removes the transcription step that made that possible.
+		if generate[file.GetName()] && (lang == "rust" || lang == "ts") && len(file.EnumType) > 0 {
+			base := strings.TrimSuffix(file.GetName(), ".proto")
+			if lang == "rust" {
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".enums.rs"),
+					Content: proto.String(renderEnumsRust(file)),
+				})
+			} else {
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".enums.ts"),
+					Content: proto.String(renderEnumsTS(file)),
+				})
+			}
+		}
+
+		if enumsOnly {
+			continue
+		}
+
+		// RUST GETS ENUM VALUES AND NOTHING ELSE. The dispatch map and the CLI
+		// surface are Go and TypeScript ideas — the badge has neither a registry
+		// of handlers nor a command line, it has a `match` on a varint.
+		if lang == "rust" {
+			continue
 		}
 
 		services, err := servicesOf(file, resolver)

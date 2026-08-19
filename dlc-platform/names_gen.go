@@ -118,6 +118,8 @@ var knownWorlds = [...]World{
 	"browser",
 	"badge-normal",
 	"badge-minimal",
+	"badge-badger-normal",
+	"badge-badger-minimal",
 }
 
 // worldNameProfile maps a world onto its rule set. Both non-worlds and
@@ -131,6 +133,10 @@ func worldNameProfile(w World) NameProfile {
 	case "badge-normal":
 		return "fat"
 	case "badge-minimal":
+		return "fat"
+	case "badge-badger-normal":
+		return "fat"
+	case "badge-badger-minimal":
 		return "fat"
 	}
 	return ProfilePortable

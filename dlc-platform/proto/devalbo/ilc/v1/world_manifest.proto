@@ -1,0 +1,324 @@
+syntax = "proto3";
+
+package devalbo.ilc.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
+
+import "devalbo/options/v1/options.proto";
+
+// For `WorldName`, which is GENERATED from dlc-platform/names/WORLDS.tsv — the
+// registry Go and Rust are generated from too. It lives in its own file because
+// a generated file should not share one with a hand-written file: a person
+// editing this would otherwise be editing something `make gen-names` overwrites.
+import "devalbo/ilc/v1/world_name.proto";
+
+// WHAT A WORLD IS, told to the app running in it.
+//
+// # Why this is its own file
+//
+// It was thirty messages down in platform.proto, between the command spec and
+// the filesystem bundle format, and a reader looking for "what does a host tell
+// an app about itself" had to know that already. This is one idea and it now
+// has one place.
+//
+// The seam is real rather than cosmetic: everything here is used only by the
+// things here and by `SetWorldManifest`. Nothing in the command surface, the
+// bundle format, or the index reaches into it.
+//
+// # The shape of it
+//
+// A world sends a manifest; an app reads it. Two kinds of fact live inside, and
+// the nesting is the rule:
+//
+//   CAPABILITIES  filesystem, text_out, status — what the app can DO here, and
+//                 what it should branch on. These MOVE: a world that takes the
+//                 screen back for a menu re-sends with a bumped revision.
+//   IDENTITY      who this world is. Diagnostic. Report it; never branch on it,
+//                 because a name that is right today is wrong in the next world
+//                 and the code will still compile.
+//
+// # Why not `wasi:cli/environment`
+//
+// That was the first answer and it is the wrong shape. The wasi environment is
+// read ONCE during `_initialize` and can never be re-read, it carries untyped
+// strings, and it is a one-way push nothing can answer. Every fact here was an
+// `ILC_*` key at some point, and each moved for the same reason: an allocation
+// that cannot be corrected is a lie with a timestamp.
+//
+// A manifest is an ordinary engine command instead — a typed request with a
+// typed reply, dispatched through `execute` like any other, re-sendable, and
+// answerable.
+
+// ---- the environment manifest (§6.4a, Decision 32) ------------------------
+
+// Whether a capability is there.
+//
+// Three states rather than a bool, because UNSPECIFIED is not ABSENT: the first
+// means nobody said, the second means somebody said no. They happen to lead to
+// the same conservative behaviour (an app takes its fallback path either way),
+// but conflating them would make "the host forgot to send a manifest"
+// indistinguishable from "this host has no filesystem" — and only one of those
+// is a bug worth surfacing.
+enum Availability {
+  AVAILABILITY_UNSPECIFIED = 0; // nobody said; treated as absent
+  AVAILABILITY_ABSENT = 1;
+  AVAILABILITY_PRESENT = 2;
+}
+
+// What KIND of root the host granted. Not cosmetic: an app deciding what to
+// cache cares whether its store survives the tab closing.
+enum FilesystemKind {
+  FILESYSTEM_KIND_UNSPECIFIED = 0;
+  FILESYSTEM_KIND_CWD = 1;      // the user's project — `dlc` itself (§3·5)
+  FILESYSTEM_KIND_APP_DIR = 2;  // ./.<app>/ — the convention for everyone else
+  FILESYSTEM_KIND_OPFS = 3;     // the browser's origin-private filesystem
+}
+
+// Whether this root belongs to ONE person, or is shared with others.
+//
+// Separate from FilesystemKind rather than a fourth value of it, because it is
+// an orthogonal dimension: `kind` already mixes WHERE the root is (cwd, app dir)
+// with WHAT backs it (OPFS), and a per-user OPFS subtree is genuinely both OPFS
+// and per-user. An enum can only say one thing.
+//
+// Three states for the same reason Availability has three: "nobody said" is not
+// "somebody said it is shared", and only the second is a claim.
+enum Isolation {
+  ISOLATION_UNSPECIFIED = 0; // nobody said; treated as SHARED
+  ISOLATION_SHARED = 1;      // other people may see this store
+  ISOLATION_PER_USER = 2;    // this root was granted for one person
+}
+
+message Filesystem {
+  Availability availability = 1;
+  FilesystemKind kind = 2;
+  // Ephemeral means the store does not survive the process/tab. An app may
+  // still write; it should not promise the user durability.
+  bool ephemeral = 3;
+
+  // Whether the host isolated this store per user (§3·5).
+  //
+  // WHO READS THIS, since no app in this repo does yet: an app that holds
+  // PRIVATE data and needs to know whether privacy is its problem. If the host
+  // granted a per-user root, everything the app can see belongs to one person
+  // and it may be naive. If it did not, the app is responsible for access
+  // control, and an app that assumed otherwise leaks — silently, and only
+  // discoverably by leaking.
+  //
+  // That asymmetry is why this field exists ahead of its first consumer, where
+  // ENVIRONMENT-PLAN.md D6 would normally say to wait: an unused field costs one
+  // field, and a missing one costs someone else's data.
+  //
+  // UNSPECIFIED IS SAFE, which is what makes it addable without touching a
+  // single existing host: no claim reads as "not isolated", so an app that
+  // requires privacy refuses to run rather than assuming it has it. A host that
+  // forgets to declare isolation therefore fails LOUDLY instead of leaking.
+  //
+  // NOT A SECURITY BOUNDARY. This is the host's word. A host that grants a
+  // shared root and reports PER_USER is lying, and nothing engine-side can
+  // detect it — see AGENTS.md §3·5. It lets an honest host tell an app what it
+  // is getting; it does not enforce anything.
+  Isolation isolation = 4;
+}
+
+// Environment is what the host can do, as of `revision`.
+//
+// Deliberately small (plan D6): a field here is a branch somewhere, and a
+// capability nothing reads yet is a branch nothing tests. Display may never land
+// at all now that Decision 34 made the semantic render path the default. Events
+// are absent BY RULE, not by omission — emitting carries nothing back, so its
+// absence is unobservable and Decision 33 forbids an app branching on it.
+message WorldManifest {
+  // Monotonic, host-assigned, and REQUIRED to be non-zero — the engine rejects
+  // 0 rather than reading it as "the first one", so a host that forgot cannot
+  // masquerade as a host that is up to date.
+  //
+  // Its reader is registration: SetWorldManifest re-runs capability registration
+  // and churns the command surface, so an unchanged revision is how the engine
+  // knows to do nothing. A slot can also tell whether what it rendered from is
+  // still current.
+  uint32 revision = 1;
+  Filesystem filesystem = 2;
+
+  // 3 held an `Index { availability }` for one afternoon, when the derived index
+  // was going to be a host-provided SQLite database that a tier could lack. It
+  // is not: the index is a projection the engine owns, present wherever a
+  // filesystem is, so there is nothing for a manifest to report
+  // (docs/INDEX-PLAN.md D8).
+  //
+  // Reserved rather than reused, because the field a host store would eventually
+  // want is a DIFFERENT question — "does this host provide a key-value store"
+  // (that plan's Phase 6) — and giving an old number new semantics is how a
+  // stale decoder silently reads the wrong fact.
+  reserved 3;
+  reserved "index";
+
+  // Where printed text lands, and how much room the app has RIGHT NOW.
+  //
+  // THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
+  // when the host starts; this one is an ALLOCATION, and a world that takes
+  // screen back for an alert or a menu changes it mid-session. That is exactly
+  // why it belongs here rather than in `wasi:cli/environment`: the wasi env is
+  // read once during `_initialize` and can never be re-read, so an allocation
+  // announced there is frozen at the value it had before the app ever ran.
+  //
+  // Putting it in the manifest gets both halves for free, because the manifest
+  // already has them. POLL: `platform.Env()` is a cached synchronous read, no
+  // import, no round trip. NOTIFY: the host re-sends with a bumped revision and
+  // the engine fires registered callbacks. Neither needed a new capability,
+  // which is the D6 test this had to pass.
+  //
+  // The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
+  // They stay as the startup bootstrap for a tier that cannot push a manifest at
+  // all — today's badge is exactly that — and an app reads them only when this
+  // field is UNSPECIFIED.
+  TextOut text_out = 4;
+
+  // WHAT WORLD THIS IS, for an app that wants to adapt to it.
+  //
+  // # These were environment variables until now
+  //
+  // A world advertised `ILC_TIER=rp2350` and `ILC_WORLD=normal` through
+  // `wasi:cli/environment`, and an app read them with `os.Getenv`. That had the
+  // three faults this manifest exists to fix, and the argument is already
+  // written above for `text_out`:
+  //
+  //   - the wasi env is read ONCE during `_initialize` and can never be re-read;
+  //   - the values were untyped strings, so a rename anywhere broke every reader
+  //     silently and nothing could enumerate the legal values;
+  //   - `ILC_STDOUT` said what `text_out.outlet` already says, in a second
+  //     encoding, which is the drift shape this schema keeps removing.
+  //
+  // It was also never a platform mechanism. ONE tier set these (the badge) and
+  // ONE app read them (`badge-selftest`); every other tier left an app to read
+  // an empty string and conclude nothing. The manifest is the channel every tier
+  // already sends.
+  // Whether this world can render an app's status bytes, and how.
+  //
+  // `ILC_STATUS=color` in the old scheme. Named for the OUTLET rather than the
+  // capability — the same shape as `TextOutlet` — because "can it" and "where
+  // does it go" are the same question once you have to answer it.
+  StatusOutlet status = 5;
+
+  // WHO this world is, as opposed to what it can do.
+  //
+  // Held apart in its own message ON PURPOSE, and the grouping is the rule:
+  // everything above is a CAPABILITY, which an app reads to decide what to do;
+  // everything in here is IDENTITY, which an app reads only to SAY something.
+  //
+  // The distinction is load-bearing in this architecture. An app that branches
+  // on identity — `if world == badge-normal` — has re-implemented a capability
+  // check against a name that will be wrong on the next world, and it will
+  // compile and pass its tests. An app that branches on `text_out.outlet`
+  // adapts to any world that ever exists, including ones written after it.
+  //
+  // So: if you find yourself reaching into `identity` to decide something,
+  // the field you actually wanted is above.
+  WorldIdentity identity = 6;
+}
+
+// Where an app's printed text actually goes.
+//
+// **Presence of stdout proves nothing**, which is why this exists. Every tier
+// PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
+// component whose stdout is missing never instantiates — so an app learns
+// nothing by checking whether it is there. Only the host knows whether the bytes
+// reach a person.
+// WHO a world is. Diagnostic: for reporting, never for branching.
+//
+// NAMED FOR WHOSE IDENTITY IT IS. `Identity` alone left the obvious question
+// unanswered in a package with thirty other messages — identity of what? — and
+// `identity.world` stuttered besides.
+message WorldIdentity {
+  WorldName name = 1;
+}
+
+// Where an app's status bytes reach a person, if anywhere.
+enum StatusOutlet {
+  STATUS_OUTLET_UNSPECIFIED = 0;
+  // Nobody sees them. Not an error — an app sets status unconditionally and a
+  // world that cannot render it does nothing (Decision 33).
+  STATUS_OUTLET_NONE = 1;
+  // A colour: an LED, a panel, a swatch in a browser.
+  STATUS_OUTLET_COLOR = 2;
+}
+
+enum TextOutlet {
+  TEXT_OUTLET_UNSPECIFIED = 0; // nobody said; FAILS OPEN, see below
+  TEXT_OUTLET_NONE = 1;        // printing reaches no one
+  TEXT_OUTLET_UART = 2;        // a serial console someone may be watching
+  TEXT_OUTLET_DISPLAY = 3;     // a screen the host renders text onto
+  TEXT_OUTLET_TERMINAL = 4;    // an ordinary stdout
+}
+
+// The app's text budget, as of the enclosing manifest's `revision`.
+message TextOut {
+  // 1 held an `Availability` for a day, and it was a SECOND WAY TO SAY WHAT
+  // `outlet` ALREADY SAYS. Filesystem needs the enum because a root can be
+  // absent, present, or undeclared with nothing else to read; here all three
+  // states live in `outlet` — UNSPECIFIED is "nobody said", NONE is "somebody
+  // said no", and anything else is a live outlet.
+  //
+  // Two encodings of one fact is the bug this whole message exists to remove
+  // (D12), and it had already grown its own rule: readers were meant to treat
+  // cols/rows as unknown unless availability was PRESENT, so a host that set a
+  // budget and forgot the enum would have it silently ignored. Deleting the
+  // field deletes the rule rather than documenting it.
+  //
+  // Reserved rather than reused: giving an old number new semantics is how a
+  // stale decoder reads the wrong fact confidently.
+  reserved 1;
+  reserved "availability";
+
+  TextOutlet outlet = 2;
+
+  // The space the app HAS, not the space the tier could offer. Zero means
+  // unknown — a terminal whose width the host did not measure — and an app must
+  // read zero as "wrap however you like", never as "you have no room".
+  //
+  // A wrong non-zero number is worse than no number, so a host that does not
+  // know must send zero rather than guess 80.
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message SetWorldManifestRequest {
+  WorldManifest world_manifest = 1;
+}
+
+message SetWorldManifestResponse {
+  // Whether this manifest actually changed anything. False means the revision
+  // matched what was already in force and registration was left alone.
+  bool applied = 1;
+}
+
+// ---- events (§6.3) --------------------------------------------------------
+
+// DataChangedEvent is the payload of the platform's `ilc.data-changed` topic:
+// "the filesystem under this prefix changed, re-read what you care about".
+//
+// Deliberately NOT a diff. A precise change list would be a second source of
+// truth that a subscriber could act on WITHOUT re-reading the files — and the
+// files are the truth (§7.1). Telling a UI only that something moved keeps the
+// filesystem authoritative and keeps this message from growing into a protocol.
+// WorldManifestChangedEvent announces that the facts moved (§6.4a).
+//
+// Emitted only when a manifest actually APPLIES — a re-send of the revision
+// already in force changes nothing, and announcing it would have every listener
+// re-read for no reason.
+//
+// Why an event and not a return value: the host that sent the manifest already
+// knows. This is for everyone ELSE — a command inspector showing which verbs
+// this host provides, a slot rendering a capability-dependent control. They did
+// not make the call and have no other way to learn the answer changed.
+//
+// Carries the revision and nothing else, for the same reason DataChangedEvent
+// is not a diff: a listener that acted on the payload would be treating the
+// event as the source of truth instead of re-reading. Ask the engine.
+message WorldManifestChangedEvent {
+  option (devalbo.options.v1.topic) = "ilc.world-manifest-changed";
+
+  // The revision now in force. Enough for a listener to tell whether it has
+  // already caught up, and useless for anything else — deliberately.
+  uint32 revision = 1;
+}

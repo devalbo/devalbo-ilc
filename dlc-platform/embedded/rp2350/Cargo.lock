@@ -243,7 +243,6 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal 1.0.0",
  "mipidsi",
- "panic-halt",
  "rp235x-hal",
  "usb-device",
  "usbd-serial",
@@ -719,12 +718,6 @@ checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "panic-halt"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a513e167849a384b7f9b746e517604398518590a9142f4846a32e3c2a4de7b11"
 
 [[package]]
 name = "paste"

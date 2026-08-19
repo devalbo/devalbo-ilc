@@ -60,7 +60,7 @@ func SetIndexRebuilder(fn func() (uint32, error)) {
 func platformHandlers() map[uint32]func([]byte) ([]byte, error) {
 	return ilcv1.PlatformServiceHandlers(
 		handleVersion,
-		handleSetEnvironment,
+		handleSetWorldManifest,
 		handleGetCommandSurface,
 		handleGetCommandSpec,
 		handleExportFs,
@@ -97,7 +97,7 @@ func RegisterAll() {
 // set-environment.
 //
 // This is the block that must exist before a host has said anything, because
-// SetEnvironment is itself a command and has to be dispatchable in order to
+// SetWorldManifest is itself a command and has to be dispatchable in order to
 // deliver the facts that decide everything else. That chicken-and-egg is why
 // the core block exists and why id 2 lives in it.
 func RegisterCore() {
@@ -109,7 +109,7 @@ func RegisterCore() {
 //
 // The two-phase shape is forced: the manifest arrives as a COMMAND, so it
 // cannot be read at init. The consequence a host must respect is that
-// SetEnvironment has to arrive before any other command — until it does, the
+// SetWorldManifest has to arrive before any other command — until it does, the
 // only verbs registered are core ones, and anything else answers "unknown
 // method_id". See docs/ENVIRONMENT-PLAN.md §2.5, or just call platform.Boot.
 func RegisterDiscovered() {
@@ -190,15 +190,15 @@ func handleVersion(*ilcv1.VersionRequest) (*ilcv1.VersionResponse, error) {
 	return &ilcv1.VersionResponse{Version: version}, nil
 }
 
-// handleSetEnvironment records what this host can do (Decision 32) and brings
+// handleSetWorldManifest records what this host can do (Decision 32) and brings
 // the command surface in line with it.
 //
 // The registration side-effect is the reason this is not merely a setter, and
 // the reason an unchanged revision must be a no-op: re-running registration
 // would tear down and rebuild the surface underneath a host that only repeated
 // itself.
-func handleSetEnvironment(req *ilcv1.SetEnvironmentRequest) (*ilcv1.SetEnvironmentResponse, error) {
-	applied, err := applyEnvironment(req.GetEnvironment())
+func handleSetWorldManifest(req *ilcv1.SetWorldManifestRequest) (*ilcv1.SetWorldManifestResponse, error) {
+	applied, err := applyEnvironment(req.GetWorldManifest())
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +209,9 @@ func handleSetEnvironment(req *ilcv1.SetEnvironmentRequest) (*ilcv1.SetEnvironme
 		// new answer; emitting first would race every one of them against the
 		// registration it is announcing — the same ordering rule as
 		// emitDataChanged and the same reason.
-		EmitEvent(&ilcv1.EnvironmentChangedEvent{Revision: req.GetEnvironment().GetRevision()})
+		EmitEvent(&ilcv1.WorldManifestChangedEvent{Revision: req.GetWorldManifest().GetRevision()})
 	}
-	return &ilcv1.SetEnvironmentResponse{Applied: applied}, nil
+	return &ilcv1.SetWorldManifestResponse{Applied: applied}, nil
 }
 
 // handleExportFs bundles a subtree into a single BFT blob (§7.3). This is the

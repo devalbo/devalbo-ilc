@@ -111,6 +111,10 @@ step "formatting"               run ./scripts/check-fmt.sh
 # B3/B2's wasm targets call `make gen` themselves; vet + unit tests do not, so
 # without this step a clean tree fails with "no matching versions for …/gen/go/…".
 step "codegen"                  run make gen
+# THE FRAMING IS GENERATED TOO, into three languages from one spec. Checked
+# beside `gen` because a stale constant here is the same class of failure as a
+# stale binding: two implementations that agree in review and not on the wire.
+step "framing constants"        run make verify-protocol
 step "vet"                      run go vet ./engine/... ./cmd/... ./hosts/...
 # hosts/ is in scope as well as engine/: it vets here but did not TEST here, so
 # hosts/native/manifest_test.go — the dlc.toml slot gate — would have passed CI

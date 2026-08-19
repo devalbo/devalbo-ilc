@@ -137,9 +137,29 @@ mod tests {
     use super::*;
     use core::sync::atomic::{AtomicU64, Ordering};
 
-    static FAKE_NOW: AtomicU64 = AtomicU64::new(0);
-    fn fake_clock() -> u64 {
-        FAKE_NOW.load(Ordering::Relaxed)
+    // ONE CLOCK PER TEST, and that is the point.
+    //
+    // These three shared a single `FAKE_NOW` and each set it at the top, which
+    // is correct only if tests run one at a time. They do not: Rust runs them in
+    // parallel by default, so one test's `store` landed inside another's poll
+    // and turned a Pending into a Ready. It passed for months and then failed in
+    // CI the day unrelated tests were added elsewhere in the crate — because all
+    // that had changed was the scheduling.
+    //
+    // A mutex would have serialised the access. Separate statics REMOVE the
+    // sharing, which is the difference between hiding the hazard and not having
+    // it: a fourth test added later cannot reintroduce this by forgetting to
+    // take a lock.
+    //
+    // A `Clock` is a bare `fn() -> u64` with nowhere to put captured state, so
+    // "its own state" means its own static. Three of them is the honest cost.
+    macro_rules! fake_clock {
+        ($now:ident, $clock:ident) => {
+            static $now: AtomicU64 = AtomicU64::new(0);
+            fn $clock() -> u64 {
+                $now.load(Ordering::Relaxed)
+            }
+        };
     }
 
     fn poll_once(future: &mut Deadline) -> Poll<()> {
@@ -165,8 +185,9 @@ mod tests {
     /// the world so it can repaint while the guest waits.
     #[test]
     fn a_future_deadline_is_pending() {
-        FAKE_NOW.store(0, Ordering::Relaxed);
-        let mut future = Deadline::new(fake_clock, 1_000);
+        fake_clock!(PENDING_NOW, pending_clock);
+        PENDING_NOW.store(0, Ordering::Relaxed);
+        let mut future = Deadline::new(pending_clock, 1_000);
         assert_eq!(poll_once(&mut future), Poll::Pending);
     }
 
@@ -174,10 +195,11 @@ mod tests {
     /// which is the whole behaviour that did not exist before.
     #[test]
     fn a_passed_deadline_is_ready() {
-        FAKE_NOW.store(0, Ordering::Relaxed);
-        let mut future = Deadline::new(fake_clock, 1_000);
+        fake_clock!(READY_NOW, ready_clock);
+        READY_NOW.store(0, Ordering::Relaxed);
+        let mut future = Deadline::new(ready_clock, 1_000);
         assert_eq!(poll_once(&mut future), Poll::Pending);
-        FAKE_NOW.store(1_000, Ordering::Relaxed);
+        READY_NOW.store(1_000, Ordering::Relaxed);
         assert_eq!(poll_once(&mut future), Poll::Ready(()));
     }
 
@@ -185,8 +207,9 @@ mod tests {
     /// full wrap of the clock. `>=` not `>`, and the test says which.
     #[test]
     fn a_past_deadline_does_not_wait() {
-        FAKE_NOW.store(5_000, Ordering::Relaxed);
-        let mut future = Deadline::new(fake_clock, 1_000);
+        fake_clock!(PAST_NOW, past_clock);
+        PAST_NOW.store(5_000, Ordering::Relaxed);
+        let mut future = Deadline::new(past_clock, 1_000);
         assert_eq!(poll_once(&mut future), Poll::Ready(()));
     }
 }

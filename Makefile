@@ -68,6 +68,21 @@ gen-names: ## regenerate the name-rule tables into Go and Rust from names/RULES.
 	# WORLDS.tsv), run this, and commit the generated files.
 	@go run ./cmd/gen-names
 
+.PHONY: gen-protocol
+gen-protocol: ## regenerate the framing constants into Rust, Go and TypeScript
+	# ONE SPEC, THREE LANGUAGES — and soon four. The framing had two hand-written
+	# implementations that agreed only because one person wrote both; WebSerial
+	# makes three and badge-to-badge makes four, at which point "they agree" is a
+	# claim nobody can check. Edit dlc-platform/protocol/FRAMING.json, run this,
+	# and commit the result.
+	@go run ./cmd/gen-protocol
+
+.PHONY: verify-protocol
+verify-protocol: ## fail if the generated framing constants are stale
+	# The guard that makes the codegen worth anything: without it somebody edits a
+	# generated file by hand and the single source becomes a fourth copy.
+	@go run ./cmd/gen-protocol -check
+
 .PHONY: verify-names
 verify-names: ## fail if the generated name tables are stale, or the two implementations disagree
 	# THE GUARD THAT MAKES CODEGEN WORTH ANYTHING. Without it, someone edits a
@@ -191,6 +206,25 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 	#   make badge-uf2                     answers nothing on the port  (default)
 	#   make badge-uf2 BADGE_CONTROL=on    answers control frames, and `badgectl` works
 	#
+	# AND HOW OFTEN IT SAYS IT IS ALIVE (D8c). A framed heartbeat says "still
+	# here" when nothing else is happening, which is the one thing a log cannot
+	# say — a world that has to be asked looks identical to a dead one until
+	# somebody knows to ask:
+	#
+	#   make badge-uf2 BADGE_CONTROL=on                            beats every 1s (default)
+	#   make badge-uf2 BADGE_CONTROL=on BADGE_BEAT_FRAMES_MS=5000  slower
+	#   make badge-uf2 BADGE_CONTROL=on BADGE_BEAT_FRAMES_MS=0     silent until subscribed
+	#
+	# The last one is for a build meant to be READ BY EYE: the same cable carries
+	# the human-readable log, so a beating world puts a line of binary into a
+	# `screen` session every interval.
+	#
+	# LISTED HERE BECAUSE THE LAST ONE WAS NOT. `BADGE_CONTROL` was read by
+	# build.rs and exercised by CI and never passed through this recipe, so every
+	# image had the channel compiled out. Make does export command-line variables,
+	# so an unlisted knob APPEARS to work when set on the command line and
+	# silently reverts to its default everywhere else.
+	#
 	# THIS LINE WAS MISSING AND COST A DEBUGGING SESSION. `BADGE_CONTROL` was read
 	# by rp2350/build.rs and exercised by scripts/check-embedded.sh, so it was
 	# implemented and it was tested — but it was never passed HERE, and this is the
@@ -210,6 +244,7 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 		BADGE_WORLD="$(BADGE_WORLD)" \
 		BADGE_BEAT_MS="$(BADGE_BEAT_MS)" \
 		BADGE_CONTROL="$(BADGE_CONTROL)" \
+		BADGE_BEAT_FRAMES_MS="$(BADGE_BEAT_FRAMES_MS)" \
 		cargo build --release
 	@mkdir -p build
 	@cp dlc-platform/embedded/rp2350/target/thumbv8m.main-none-eabihf/release/dlc-rp2350-bringup build/badge-bringup.elf

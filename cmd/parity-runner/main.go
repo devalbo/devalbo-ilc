@@ -71,8 +71,8 @@ var fixtures = []struct {
 	request marshaler
 	raw     string // hex, for deliberately malformed bytes (wins over request)
 }{
-	{name: "set-environment (launch)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	{name: "set-environment (launch)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   1,
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_PRESENT, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD},
 		},
@@ -80,8 +80,8 @@ var fixtures = []struct {
 	// applied=false: the revision is what decides, so contradicting the facts
 	// while keeping the number must change nothing. Both tiers must agree on
 	// that, or one of them would quietly re-register its command surface.
-	{name: "set-environment (unchanged revision)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	{name: "set-environment (unchanged revision)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   1,
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT},
 		},
@@ -89,8 +89,8 @@ var fixtures = []struct {
 	// ISOLATION crosses the boundary as data like everything else (§3·5). Worth a
 	// vector because no host sets it yet: without this, the field would exist on
 	// the wire with nothing ever encoding or decoding it on the wasm side.
-	{name: "set-environment (per-user root)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	{name: "set-environment (per-user root)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision: 5,
 			Filesystem: &ilcv1.Filesystem{
 				Availability: ilcv1.Availability_AVAILABILITY_PRESENT,
@@ -99,8 +99,8 @@ var fixtures = []struct {
 			},
 		},
 	}},
-	{name: "set-environment revision 0 (envelope error)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{Revision: 0},
+	{name: "set-environment revision 0 (envelope error)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{Revision: 0},
 	}},
 	// THE ABSENT BRANCH, exercised on the real component and not only reasoned
 	// about. A capability going away must unregister its verbs identically on
@@ -111,8 +111,8 @@ var fixtures = []struct {
 	// of navigator.storage.getDirectory cannot reach it: the probe runs in the
 	// WORKER, whose global scope page-level init scripts do not touch. Here the
 	// same engine code runs, driven by the manifest rather than by a probe.
-	{name: "set-environment (filesystem goes away)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	{name: "set-environment (filesystem goes away)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   2,
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_ABSENT},
 		},
@@ -124,8 +124,8 @@ var fixtures = []struct {
 	// other check green. Asking what is registered turns the surface into a
 	// result and drags it into the diff.
 	{name: "command surface with no filesystem", method: platform.MethodGetCommandSurface, request: &ilcv1.GetCommandSurfaceRequest{}},
-	{name: "set-environment (filesystem returns)", method: platform.MethodSetEnvironment, request: &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	{name: "set-environment (filesystem returns)", method: platform.MethodSetWorldManifest, request: &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   3,
 			Filesystem: &ilcv1.Filesystem{Availability: ilcv1.Availability_AVAILABILITY_PRESENT, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_CWD},
 		},

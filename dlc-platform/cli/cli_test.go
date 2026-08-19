@@ -557,7 +557,7 @@ func TestMissingRequiredPositional(t *testing.T) {
 
 // A host lifecycle verb is dispatchable but not typeable.
 //
-// SetEnvironment is a command like any other — the host sends it by id — but
+// SetWorldManifest is a command like any other — the host sends it by id — but
 // generating a SUBCOMMAND for it would ask a person to hand-write a capability
 // manifest on a command line, and would oblige every host to register a
 // renderer for a command with nothing to render. That is what broke
@@ -565,7 +565,7 @@ func TestMissingRequiredPositional(t *testing.T) {
 // exists and why this pins it.
 func TestHiddenCommandsAreNotInTheSurface(t *testing.T) {
 	for _, c := range ilcv1.PlatformServiceCLI {
-		if c.Method == platform.MethodSetEnvironment {
+		if c.Method == platform.MethodSetWorldManifest {
 			t.Fatalf("set-environment is in the CLI surface as %q; it is (cli_hidden)", c.Name)
 		}
 	}
@@ -600,14 +600,14 @@ func runAgainstLiveEngine(t *testing.T, fsAvailability ilcv1.Availability, args 
 	// third test asserting against the first test's facts and passing or failing
 	// for reasons unconnected to what it claims to test.
 	revision++
-	body, err := (&ilcv1.SetEnvironmentRequest{Environment: &ilcv1.Environment{
+	body, err := (&ilcv1.SetWorldManifestRequest{WorldManifest: &ilcv1.WorldManifest{
 		Revision:   revision,
 		Filesystem: &ilcv1.Filesystem{Availability: fsAvailability, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR},
 	}}).MarshalVT()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := platform.Execute(platform.MethodSetEnvironment, body); !res.Success {
+	if res := platform.Execute(platform.MethodSetWorldManifest, body); !res.Success {
 		t.Fatalf("set-environment: %s", res.Err)
 	}
 

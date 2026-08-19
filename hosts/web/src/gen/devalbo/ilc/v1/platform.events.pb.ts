@@ -6,5 +6,3 @@
 
 /** Topic for {@link DataChangedEvent}. */
 export const DataChangedEventTopic = "ilc.data-changed";
-/** Topic for {@link EnvironmentChangedEvent}. */
-export const EnvironmentChangedEventTopic = "ilc.environment-changed";

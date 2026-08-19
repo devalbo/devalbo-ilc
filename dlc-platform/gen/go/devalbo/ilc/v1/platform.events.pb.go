@@ -12,10 +12,3 @@ package ilcv1
 // message without reflection — and so a topic cannot be paired with the wrong
 // payload, because there is no call that takes both.
 func (*DataChangedEvent) Topic() string { return "ilc.data-changed" }
-
-// Topic reports where this event is published.
-//
-// A METHOD, not a constant, so `platform.EmitEvent(msg)` can read it off the
-// message without reflection — and so a topic cannot be paired with the wrong
-// payload, because there is no call that takes both.
-func (*EnvironmentChangedEvent) Topic() string { return "ilc.environment-changed" }

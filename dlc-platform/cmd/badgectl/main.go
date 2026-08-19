@@ -23,32 +23,77 @@ import (
 	"syscall"
 	"time"
 
+	platform "github.com/devalbo/devalbo-ilc/dlc-platform"
 	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
-// Must match `control::MAGIC` in the embedded crate.
-var magic = []byte("DLCC")
+// tracing turns this tool into an instrument.
+//
+// # Why this exists
+//
+// Diagnosing "the badge did not answer" meant hand-writing throwaway Python to
+// frame a request and dump what came back — twice, badly, with a parser that
+// misread its own output and sent the investigation somewhere wrong. The tool
+// that already speaks this protocol correctly should be the one that shows it.
+//
+// What it prints is the LAYER BELOW the command: every frame in each direction,
+// with its kind, length and correlation id. That is exactly the layer where the
+// interesting failures live — a reply that never came, a reply meant for
+// somebody else, a frame that arrived split.
+var tracing bool
 
-const overhead = 4 + 1 + 2 + 4
+func trace(format string, args ...any) {
+	if tracing {
+		fmt.Fprintf(os.Stderr, "  trace  "+format+"\n", args...)
+	}
+}
 
-// Frame kinds, matching `control.rs`.
+// kindName spells a frame kind for a person reading a trace.
+func kindName(kind byte) string {
+	switch kind {
+	case kindRequest:
+		return "request"
+	case kindResponse:
+		return "response"
+	case kindLog:
+		return "log"
+	case kindHeartbeat:
+		return "heartbeat"
+	default:
+		return fmt.Sprintf("kind-%d", kind)
+	}
+}
+
+// THE FRAMING, FROM THE ONE SOURCE.
+//
+// These were hand-written here — a magic string, an overhead sum, four kind
+// numbers — and matched the badge only because one person wrote both. They are
+// now generated from dlc-platform/protocol/FRAMING.json into Go, Rust and
+// TypeScript together, so the badge, this tool and a browser cannot disagree.
+var magic = platform.FrameMagic
+
+const overhead = platform.FrameOverhead
+
 const (
-	kindRequest  = 1
-	kindResponse = 2
-	kindLog      = 3
+	kindRequest   = platform.FrameKindRequest
+	kindResponse  = platform.FrameKindResponse
+	kindLog       = platform.FrameKindLog
+	kindHeartbeat = platform.FrameKindHeartbeat
 )
 
 func main() {
 	port := flag.String("port", "", "serial port (e.g. /dev/cu.usbmodemilc1)")
 	wait := flag.Duration("wait", 3*time.Second, "how long to wait for a reply")
 	follow := flag.Duration("follow", 0, "instead of asking, print framed log lines for this long")
+	flag.BoolVar(&tracing, "trace", false, "show every frame sent and received")
+	beat := flag.Int("beat", 0, "with -follow: ask for a heartbeat every N ms (0 = the world's default)")
 	press := flag.String("press", "", "press a button: a, b, c, up, down")
 	screen := flag.Bool("screen", false, "print what the panel says")
 	list := flag.Bool("list", false, "print the installed payloads")
 	sel := flag.Int("select", -1, "choose the payload the next menu resolves to")
 	reboot := flag.Bool("reboot", false, "restart the world")
-	exec := flag.Int("execute", -1, "run an app command by method id")
-	spec := flag.Int("spec", -1, "print what a command takes (0 for all)")
+	exec := flag.String("execute", "", "run an app command by NAME (an id also works)")
+	spec := flag.String("spec", "", "print what a command takes; -spec=all lists them")
 	var sets multiFlag
 	flag.Var(&sets, "set", "name=value for -execute, encoded from the app's own spec (repeatable)")
 	flag.Parse()
@@ -71,15 +116,18 @@ func main() {
 		}
 		return
 	}
-	if *spec >= 0 {
-		if err := showSpec(*port, uint(*spec), *wait); err != nil {
+	if *spec != "" {
+		if *spec == "all" {
+			*spec = ""
+		}
+		if err := showSpec(*port, *spec, *wait); err != nil {
 			fmt.Fprintln(os.Stderr, "badgectl:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if *exec >= 0 {
-		if err := runExecute(*port, uint(*exec), sets, *wait); err != nil {
+	if *exec != "" {
+		if err := runExecute(*port, *exec, sets, *wait); err != nil {
 			fmt.Fprintln(os.Stderr, "badgectl:", err)
 			os.Exit(1)
 		}
@@ -109,7 +157,7 @@ func main() {
 		return
 	}
 	if *follow > 0 {
-		if err := followLog(*port, *follow); err != nil {
+		if err := followLog(*port, *follow, uint32(*beat)); err != nil {
 			fmt.Fprintln(os.Stderr, "badgectl:", err)
 			os.Exit(1)
 		}
@@ -188,7 +236,8 @@ func run(port string, wait time.Duration) error {
 	}
 	defer file.Close()
 
-	request := &ilcv1.ControlRequest{Verb: ilcv1.Verb_VERB_GET_WORLD_STATE}
+	id := nextRequestID()
+	request := &ilcv1.ControlRequest{Verb: ilcv1.Verb_VERB_GET_WORLD_STATE, RequestId: id}
 	body, err := request.MarshalVT()
 	if err != nil {
 		return err
@@ -197,7 +246,7 @@ func run(port string, wait time.Duration) error {
 		return fmt.Errorf("writing the request: %w", err)
 	}
 
-	payload, err := readFrame(file, wait, kindResponse)
+	payload, err := readFrame(file, wait, kindResponse, id)
 	if err != nil {
 		return err
 	}
@@ -231,6 +280,12 @@ func run(port string, wait time.Duration) error {
 		fmt.Printf("app       %s\n", app)
 	}
 	fmt.Printf("uptime    %d ms\n", state.GetUptimeMs())
+	// PASS-THROUGH BOOKKEEPING. Printed always, because the moment you want it
+	// is the moment a request went unanswered — and asking again with a flag is
+	// one round trip too late to see the state that caused it.
+	fmt.Printf("requests  %d offered, %d taken, session %s\n",
+		state.GetRequestsOffered(), state.GetRequestsTaken(),
+		map[bool]string{true: "open", false: "closed"}[state.GetSessionOpen()])
 	return nil
 }
 
@@ -385,14 +440,17 @@ type vtMessage interface{ MarshalVT() ([]byte, error) }
 
 // ask sends one verb and returns the world's answer.
 func ask(file *os.File, verb ilcv1.Verb, payload []byte, wait time.Duration) (*ilcv1.ControlResponse, error) {
-	body, err := (&ilcv1.ControlRequest{Verb: verb, Payload: payload}).MarshalVT()
+	id := nextRequestID()
+	body, err := (&ilcv1.ControlRequest{Verb: verb, Payload: payload, RequestId: id}).MarshalVT()
 	if err != nil {
 		return nil, err
 	}
+	trace("-> %-9s verb=%s request_id=%d payload=%d bytes",
+		"request", strings.TrimPrefix(verb.String(), "VERB_"), id, len(payload))
 	if _, err := file.Write(frame(body)); err != nil {
 		return nil, fmt.Errorf("writing the request: %w", err)
 	}
-	reply, err := readFrame(file, wait, kindResponse)
+	reply, err := readFrame(file, wait, kindResponse, id)
 	if err != nil {
 		return nil, err
 	}
@@ -419,15 +477,34 @@ func frame(payload []byte) []byte {
 // distinction this protocol does not need but must not contradict, since the two
 // share the function.
 func checksum(bytes []byte) uint32 {
-	hash := uint32(0x811c9dc5)
+	hash := platform.ChecksumOffsetBasis
 	for _, b := range bytes {
 		hash ^= uint32(b)
-		hash *= 0x01000193
+		hash *= platform.ChecksumPrime
 	}
 	if hash == 0 {
 		return 1
 	}
 	return hash
+}
+
+// nextRequestID hands out a correlation number.
+//
+// # Why a counter and not a random number
+//
+// Nothing here needs unpredictability — this is not a security boundary, it is
+// a way to tell one answer from another. A counter makes a failure legible: a
+// reply carrying id 3 while we wait on id 5 says "two questions ago", which is
+// a sentence a person can act on. A random 64-bit value says nothing.
+//
+// STARTED FROM THE CLOCK so two runs of this tool against the same badge do not
+// both begin at 1 — a stale reply to the PREVIOUS run's id 1 would otherwise
+// look exactly like the answer to this run's.
+var requestCounter = uint64(time.Now().UnixNano()) &^ 0xFFFF
+
+func nextRequestID() uint64 {
+	requestCounter++
+	return requestCounter
 }
 
 // subscribe asks the world for a set of notices, and waits for it to agree.
@@ -440,14 +517,16 @@ func checksum(bytes []byte) uint32 {
 // is not sending me anything" and "the world never heard me ask" are the two
 // explanations a follower has to distinguish, and only one of them is worth
 // waiting around for.
-func subscribe(file *os.File, notices ...ilcv1.Notice) error {
-	payload, err := (&ilcv1.Subscription{Notices: notices}).MarshalVT()
+func subscribe(file *os.File, beatMs uint32, notices ...ilcv1.Notice) error {
+	payload, err := (&ilcv1.Subscription{Notices: notices, HeartbeatMs: beatMs}).MarshalVT()
 	if err != nil {
 		return err
 	}
+	id := nextRequestID()
 	body, err := (&ilcv1.ControlRequest{
-		Verb:    ilcv1.Verb_VERB_SUBSCRIBE,
-		Payload: payload,
+		Verb:      ilcv1.Verb_VERB_SUBSCRIBE,
+		Payload:   payload,
+		RequestId: id,
 	}).MarshalVT()
 	if err != nil {
 		return err
@@ -456,7 +535,7 @@ func subscribe(file *os.File, notices ...ilcv1.Notice) error {
 		return fmt.Errorf("subscribing: %w", err)
 	}
 
-	reply, err := readFrame(file, 3*time.Second, kindResponse)
+	reply, err := readFrame(file, 3*time.Second, kindResponse, id)
 	if err != nil {
 		return fmt.Errorf("subscribing: %w", err)
 	}
@@ -480,7 +559,62 @@ func subscribe(file *os.File, notices ...ilcv1.Notice) error {
 			return fmt.Errorf("the world does not send %s", wanted)
 		}
 	}
+	// THE RATE IT AGREED TO, which may not be the one asked for — a world
+	// clamps to what it can sustain, and a client that assumed otherwise would
+	// wait the wrong length of time before calling a silence a hang.
+	if beatMs != 0 && granted.GetHeartbeatMs() != beatMs {
+		fmt.Fprintf(os.Stderr, "badgectl: asked for a beat every %d ms, granted %d ms\n",
+			beatMs, granted.GetHeartbeatMs())
+	}
 	return nil
+}
+
+// replyID reads a ControlResponse's request_id without a full decode.
+//
+// A FULL DECODE WOULD ALSO WORK and would be wrong here: this runs on every
+// frame the port produces, including ones meant for somebody else and ones that
+// are not `ControlResponse` at all. Reading one varint field is cheap and cannot
+// fail in a way that matters — an unreadable frame simply has no id, and is
+// treated as uncorrelated rather than rejected.
+func replyID(payload []byte) uint64 {
+	for len(payload) > 0 {
+		tag, n := binary.Uvarint(payload)
+		if n <= 0 {
+			return 0
+		}
+		payload = payload[n:]
+		field, wire := uint32(tag>>3), tag&7
+		switch wire {
+		case 0:
+			value, n := binary.Uvarint(payload)
+			if n <= 0 {
+				return 0
+			}
+			payload = payload[n:]
+			if field == 4 {
+				return value
+			}
+		case 2:
+			length, n := binary.Uvarint(payload)
+			if n <= 0 || uint64(len(payload[n:])) < length {
+				return 0
+			}
+			payload = payload[n+int(length):]
+		case 5:
+			if len(payload) < 4 {
+				return 0
+			}
+			payload = payload[4:]
+		case 1:
+			if len(payload) < 8 {
+				return 0
+			}
+			payload = payload[8:]
+		default:
+			return 0
+		}
+	}
+	return 0
 }
 
 // isIdle reports whether a read error just means "nothing has arrived yet".
@@ -503,7 +637,7 @@ func isIdle(err error) bool {
 // The port carries human-readable output as well as frames, so anything that is
 // not a frame is skipped a byte at a time — the same rule the world applies to a
 // person typing into it.
-func readFrame(file *os.File, wait time.Duration, want byte) ([]byte, error) {
+func readFrame(file *os.File, wait time.Duration, want byte, id uint64) ([]byte, error) {
 	deadline := time.Now().Add(wait)
 	var buffered []byte
 	chunk := make([]byte, 512)
@@ -535,6 +669,9 @@ func readFrame(file *os.File, wait time.Duration, want byte) ([]byte, error) {
 			var kind byte
 			if payload != nil {
 				kind = kindOf(buffered)
+				trace("<- %-9s %4d bytes  request_id=%d", kindName(kind), len(payload), replyID(payload))
+			} else {
+				trace("<- %d byte(s) of non-frame traffic (log text)", consumed)
 			}
 			buffered = buffered[consumed:]
 			// A PUSHED FRAME ARRIVING WHILE WE WAIT FOR AN ANSWER IS TRAFFIC, NOT
@@ -544,6 +681,26 @@ func readFrame(file *os.File, wait time.Duration, want byte) ([]byte, error) {
 			// mostly SUCCEEDS, because most byte strings parse as some message,
 			// and then reports nonsense.
 			if payload != nil && kind == want {
+				// A REPLY TO SOMETHING ELSE IS NOT OUR ANSWER, and skipping it
+				// is the whole point of correlating. The case that made this
+				// necessary: a request times out, the caller asks again, and the
+				// LATE reply to the first arrives first — indistinguishable from
+				// an answer to the second, and wrong in a way nothing downstream
+				// can detect.
+				//
+				// `id == 0` means this caller did not correlate, which keeps the
+				// old behaviour for anything that has not been updated.
+				if id != 0 {
+					if got := replyID(payload); got != 0 && got != id {
+						// SAY SO. A silently discarded reply is indistinguishable
+						// from a world that never answered, and the timeout that
+						// follows blames the wrong thing entirely — "is
+						// BADGE_CONTROL=on?" when the channel is plainly working.
+						fmt.Fprintf(os.Stderr,
+							"badgectl: ignoring a reply for request %d (waiting for %d)\n", got, id)
+						continue
+					}
+				}
 				return payload, nil
 			}
 		}
@@ -608,7 +765,7 @@ func kindOf(bytes []byte) byte { return bytes[4] }
 // human-readable output on the same wire, so a person with `cat` loses nothing.
 // This exists so a TOOL reading frames is not worse off than that person — and
 // so a test can assert on a stage and a level rather than grepping prose.
-func followLog(port string, window time.Duration) error {
+func followLog(port string, window time.Duration, beatMs uint32) error {
 	file, err := openRaw(port)
 	if err != nil {
 		return err
@@ -622,13 +779,13 @@ func followLog(port string, window time.Duration) error {
 	// The subscription is RETROACTIVE: the world answers by streaming the log it
 	// already has, from the start of the run, before anything new. So attaching
 	// late still shows the boot that failed.
-	if err := subscribe(file, ilcv1.Notice_NOTICE_LOG); err != nil {
+	if err := subscribe(file, beatMs, ilcv1.Notice_NOTICE_LOG, ilcv1.Notice_NOTICE_HEARTBEAT); err != nil {
 		return err
 	}
 	// LEAVE IT AS WE FOUND IT. A badge that keeps framing log lines at a client
 	// which has gone is spending its outbound wire on nobody. Best-effort: if the
 	// port is already gone there is nothing to say and nothing to fix.
-	defer func() { _ = subscribe(file) }()
+	defer func() { _ = subscribe(file, 0) }()
 
 	levels := map[ilcv1.Level]string{
 		ilcv1.Level_LEVEL_STAGE_OK:   "ok  ",
@@ -662,16 +819,37 @@ func followLog(port string, window time.Duration) error {
 				kind = kindOf(buffered)
 			}
 			buffered = buffered[consumed:]
-			if payload == nil || kind != kindLog {
+			if payload == nil {
 				continue
 			}
-			var line ilcv1.LogLine
-			if err := line.UnmarshalVT(payload); err != nil {
-				continue
+			switch kind {
+			case kindLog:
+				var line ilcv1.LogLine
+				if err := line.UnmarshalVT(payload); err != nil {
+					continue
+				}
+				fmt.Printf("%8dms %s %s%-16s %s\n",
+					line.GetUptimeMs(), levels[line.GetLevel()],
+					scopeMark(line.GetScope()), stageName(line.GetStage()), line.GetText())
+
+			case kindHeartbeat:
+				// THE BEAT SAYS ONLY "STILL HERE", so it prints as one line and
+				// carries what a watcher would otherwise have to ask for: how
+				// long the world has been up, what it is doing, and what the app
+				// last said it was doing.
+				var state ilcv1.WorldState
+				if err := state.UnmarshalVT(payload); err != nil {
+					continue
+				}
+				app := state.GetAppActivity()
+				if app != "" {
+					app = "  " + app
+				}
+				fmt.Printf("%8dms ~    %-16s %s%s\n",
+					state.GetUptimeMs(), "alive",
+					strings.ToLower(strings.TrimPrefix(state.GetActivity().String(), "ACTIVITY_")),
+					app)
 			}
-			fmt.Printf("%8dms %s %s%-16s %s\n",
-				line.GetUptimeMs(), levels[line.GetLevel()],
-				scopeMark(line.GetScope()), stageName(line.GetStage()), line.GetText())
 		}
 	}
 	return nil

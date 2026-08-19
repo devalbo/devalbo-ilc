@@ -67,7 +67,10 @@ export const appRenderers: Record<number, Renderer | undefined> = {
   // what a slot that can decode the schema is for.
   [MethodMath]: (bytes) => {
     const r = MathResponse.fromBinary(bytes);
-    if (r.problem && r.problem !== Problem.UNSPECIFIED) {
+    // TRUTHY IS ENOUGH: es-lite types an optional enum field without its zero
+    // value, so comparing against UNSPECIFIED is a comparison the compiler can
+    // prove never matters.
+    if (r.problem) {
       // A PROBLEM IS NOT AN ERROR. The command ran and is reporting what it
       // found, so this renders as a result rather than throwing.
       return `${r.expression ?? ""}: ${problemText(r.problem)}`;

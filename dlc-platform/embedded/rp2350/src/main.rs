@@ -63,8 +63,52 @@ use dlc_platform_embedded::manifest;
 use dlc_platform_embedded::minimal::MinimalHost;
 use dlc_platform_embedded::pulley::PulleyWidth;
 
-// Brought in for its #[panic_handler]; nothing calls it directly.
-use panic_halt as _;
+/// What a panic says, and to whom.
+///
+/// # Why this is not `panic_halt`
+///
+/// It was, and `panic_halt` is `loop {}` — which never re-enables interrupts.
+/// Every `Shared::with` body masks them, and that now covers the whole USB
+/// service path, so a panic inside one left the badge enumerated, silent, and
+/// deaf even to picotool's reset interface. Two wedges cost a physical BOOT and
+/// RESET each, with nothing to read afterwards.
+///
+/// A badge that cannot say why it stopped is a badge you diagnose by reflashing
+/// it, which is the failure this firmware's log exists to prevent.
+///
+/// # What it does
+///
+/// Writes the panic into the log — the same buffer the run is already in, so a
+/// reader gets the last thing that happened AND the reason — and then serves the
+/// port forever. The message lands after whatever the run had reached, which is
+/// usually the more useful half.
+#[panic_handler]
+fn panicked(info: &core::panic::PanicInfo) -> ! {
+    // FIRST, BEFORE ANYTHING THAT COULD PANIC AGAIN. Writing to the log frames a
+    // notice, which takes a `Shared` cell that the original panic may have been
+    // holding — and `with` panics on that. A panic inside a panic aborts hard and
+    // silently, which is how the first version of this handler said nothing at
+    // all. See `shared::PANICKING`.
+    shared::PANICKING.store(true, core::sync::atomic::Ordering::Relaxed);
+
+    // NO ALLOCATION, NO FORMATTING MACHINERY BEYOND THIS. The panic may BE an
+    // allocation failure, and a handler that allocates would recurse into the
+    // thing that brought it here.
+    //
+    // SAFETY: nothing else can be running — this never returns.
+    let log = unsafe { &mut *core::ptr::addr_of_mut!(LOG) };
+    use core::fmt::Write;
+    let _ = writeln!(log, "\r\n*** PANIC ***");
+    if let Some(location) = info.location() {
+        let _ = writeln!(log, "at {}:{}", location.file(), location.line());
+    }
+    // The message itself, which for a `Shared` reentrancy or an index is the
+    // sentence that names the bug.
+    let _ = writeln!(log, "{}", info.message());
+    let _ = writeln!(log, "the badge is halted; reset to continue");
+
+    usblog::serve_after_panic()
+}
 
 use embedded_alloc::LlffHeap as Heap;
 use rp235x_hal as hal;
@@ -74,8 +118,50 @@ use hal::uart::{DataBits, StopBits, UartConfig};
 use hal::Clock;
 
 
+/// The allocator, with a guard on the window where there isn't one.
+///
+/// # What this catches, and why a comment could not
+///
+/// The badge cannot initialise its heap until it has PROBED for it: PSRAM may be
+/// absent, and `LlffHeap::init` may be called once, so the arena has to be
+/// chosen before it is handed over. That leaves stages 1 to 3 with a clock, a
+/// USB stack, and no allocator — which is exactly when somebody debugging a
+/// bring-up asks a question.
+///
+/// Rust cannot express "this function does not allocate". There is no effect
+/// system, `no_std` does not imply `no_alloc`, and `Vec::extend_from_slice` reads
+/// like any other method call. So the rule lived in comments, and a refactor
+/// that moved a reply buffer to a `Vec` quietly put an allocation into the one
+/// path whose entire purpose is answering before the heap exists. The badge then
+/// allocated against an uninitialised allocator inside a critical section, which
+/// masked interrupts, which killed the log, the USB stack and picotool's reset
+/// interface together — recoverable only by a finger on BOOT and RESET, with
+/// nothing to read afterwards.
+///
+/// This turns that into a panic that says where. It is one branch on a flag,
+/// paid on every allocation, and it is worth it: the alternative is a class of
+/// bug whose symptom is total silence.
+struct GuardedHeap(Heap);
+
+/// Whether `HEAP.0.init` has been called. Also read by `usblog` to refuse
+/// answers it cannot build yet.
+static HEAP_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+unsafe impl core::alloc::GlobalAlloc for GuardedHeap {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        if !HEAP_READY.load(core::sync::atomic::Ordering::Acquire) {
+            panic!("allocated before the heap exists (stages 1-3 have no allocator)");
+        }
+        unsafe { self.0.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        unsafe { self.0.dealloc(ptr, layout) }
+    }
+}
+
 #[global_allocator]
-static HEAP: Heap = Heap::empty();
+static HEAP: GuardedHeap = GuardedHeap(Heap::empty());
 
 /// The bring-up log, kept so it can be served over USB after the run.
 ///
@@ -183,6 +269,18 @@ fn rest(
     sys_hz: u32,
 ) -> ! {
     use embedded_hal::digital::OutputPin;
+    // NOTHING WILL RUN AGAIN FROM HERE, so say so once, in the one place that
+    // cannot be missed.
+    //
+    // This was set on the session-LEAVE path, which is only one of the ways a
+    // badge reaches this function: a single-shot app finishes its bring-up and
+    // arrives via `report.finish`, never touching that path. A client then
+    // offered a request, the world accepted it into a slot nobody would ever
+    // empty, and every later request was told "a request is already running" —
+    // three wrong answers in a row, all traceable to a flag set on one branch of
+    // five.
+    #[cfg(badge_control)]
+    crate::passthrough::session_open(false);
     let has_screen = screen.is_some();
     show(backlight, screen, status);
     // BLINK ONLY WITHOUT A SCREEN. A lit panel showing a status colour and a
@@ -567,7 +665,8 @@ fn main() -> ! {
             // Re-init the allocator onto PSRAM. Sound only because nothing above
             // has allocated: `LlffHeap::init` may be called once, and the SRAM
             // block was never handed out.
-            unsafe { HEAP.init(ps.base as usize, ps.len) };
+            unsafe { HEAP.0.init(ps.base as usize, ps.len) };
+            HEAP_READY.store(true, core::sync::atomic::Ordering::Release);
             usblog::heap_is_ready();
             stage.ok(format_args!("{} MiB", ps.len / (1024 * 1024)));
             report.note(format_args!("heap {} KB at {:p}", ps.len / 1024, ps.base));
@@ -584,7 +683,8 @@ fn main() -> ! {
             ));
             unsafe {
                 let ptr = &raw mut HEAP_MEM as *mut u8;
-                HEAP.init(ptr as usize, HEAP_BYTES);
+                HEAP.0.init(ptr as usize, HEAP_BYTES);
+                HEAP_READY.store(true, core::sync::atomic::Ordering::Release);
                 usblog::heap_is_ready();
             }
             report.note(format_args!(
@@ -705,7 +805,7 @@ fn main() -> ! {
     // hangs two or three apps in — which looks like a hardware fault and is the
     // worst thing here to debug. The heap is measured on every pass below for
     // exactly that reason.
-    let heap_at_start = HEAP.used();
+    let heap_at_start = HEAP.0.used();
     loop {
     usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_CHOOSING);
     // BORROWED, not moved: the keyboard wants two of these back below.
@@ -753,15 +853,17 @@ fn main() -> ! {
     // here asks a narrower question — does the BOARD agree with the emulator? — and
     // the interesting failure is a settings mismatch or PSRAM being too slow, not
     // "does Wasmtime work".
-    let mut advertisement = [("", ""); world::ADVERTISEMENT_MAX];
-    let advertisement = WORLD.advertise(&mut advertisement);
-    let before = HEAP.used();
+    let before = HEAP.0.used();
     let stage = report.stage(control::STAGE_INSTANTIATE, report::Scope::Emulated, format_args!("instantiate {}", selected.name));
     // SAFETY: `selected.bytes` is our own build's .cwasm — 16-byte aligned by the
     // catalog format (or by `Aligned`, for the built-in), and `'static` because it
     // is memory-mapped flash.
     let host = unsafe {
-        MinimalHost::from_precompiled_advertising(selected.bytes, PulleyWidth::Bits32, advertisement)
+        // NO ENVIRONMENT TABLE. What a world is now travels in the MANIFEST —
+        // see `Environment.tier` in platform.proto. The wasi env is read once at
+        // `_initialize` and can never be corrected, so anything a world might
+        // restate had no business being there.
+        MinimalHost::from_precompiled(selected.bytes, PulleyWidth::Bits32)
     };
     // RESOLVE THE STAGE, THEN ANNOTATE IT — held apart from the branch below so
     // the advertisement is logged once and on both paths. It used to be printed
@@ -769,7 +871,7 @@ fn main() -> ! {
     // stage's own line; `report::Open` is why that no longer compiles.
     let host = match host {
         Ok(h) => {
-            stage.ok(format_args!("{} KB heap", (HEAP.used() - before) / 1024));
+            stage.ok(format_args!("{} KB heap", (HEAP.0.used() - before) / 1024));
             Some(h)
         }
         Err(e) => {
@@ -780,10 +882,23 @@ fn main() -> ! {
             None
         }
     };
-    // WHAT THE GUEST WILL SEE, and it is logged whether or not instantiation
-    // worked: on the failure path it is evidence about what this world offered.
-    for (key, value) in advertisement {
-        report.note(format_args!("{key}={value}"));
+    // WHAT THE GUEST WILL SEE, logged whether or not instantiation worked: on
+    // the failure path it is evidence about what this world offered.
+    //
+    // READ OFF THE SAME FUNCTIONS THE MANIFEST USES, not off a table built
+    // beside it. This used to print the `ILC_*` pairs that were about to be
+    // handed over, which was true by construction; now the manifest is sent a
+    // stage later, so the log has to name its source rather than duplicate it.
+    report.note(format_args!(
+        "tier=rp2350 world={} status={} text={}",
+        WORLD.name(),
+        if WORLD.can(world::Capability::Status) { "color" } else { "none" },
+        world::text_sink()
+    ));
+    // A SESSION IS LIVE from here: there is an instance, and the turn loop below
+    // will pick up anything a client offers.
+    if host.is_some() {
+        passthrough::session_open(true);
     }
     let Some(mut host) = host else {
         if !psram_ok {
@@ -806,7 +921,7 @@ fn main() -> ! {
     // during `_initialize` and can never re-read them. They are the bootstrap.
     // The manifest is the correctable half — revision-stamped and re-sendable —
     // so an app can poll it (`platform.Env()`) and be told when it changes
-    // (`platform.OnEnvironmentChange`).
+    // (`platform.OnWorldManifestChange`).
     //
     // TODAY THE TWO AGREE, because this world has one app, one layout, and the
     // budget is fixed at flash time. Sending it anyway is what makes the numbers
@@ -837,9 +952,19 @@ fn main() -> ! {
         } else {
             (0, 0)
         };
-        let env = manifest::encode(1, outlet, cols, rows);
+        let env = manifest::encode(manifest::WorldManifest {
+            revision: 1,
+            outlet,
+            cols,
+            rows,
+            // WHAT THIS WORLD CAN DO, and separately WHO IT IS — the two used
+            // to go out together as `ILC_STATUS` and `ILC_WORLD` through the
+            // wasi environment, which could say neither again.
+            status: world::status_code(WORLD) as u64,
+            world: WORLD.code() as u64,
+        });
         let stage = report.stage(control::STAGE_MANIFEST, report::Scope::Emulated, format_args!("manifest"));
-        match host.execute(manifest::METHOD_SET_ENVIRONMENT, env.as_bytes()) {
+        match host.execute(manifest::METHOD_SET_WORLD_MANIFEST, env.as_bytes()) {
             Ok(r) if r.success => stage.ok(format_args!("{cols}x{rows} {}", world::text_sink())),
             Ok(r) => {
                 stage.fail(format_args!("engine refused: {}", r.error.as_deref().unwrap_or("no reason")));
@@ -873,9 +998,6 @@ fn main() -> ! {
     // The world drives; the app stays request/response (D2). An app cannot ask
     // for another turn and does not know it got one.
     let mut turn = 0u32;
-    // The last turn's verdict, so leaving the session can rest on the result the
-    // person actually saw rather than a default.
-    let mut last_status = Status::Idle;
     loop {
         turn += 1;
 
@@ -1169,7 +1291,7 @@ fn main() -> ! {
                 (now_us() - started_us) / 1000,
                 dlc_platform_embedded::clock::sleeps() - sleeps_before
             ));
-            report.note(format_args!("peak heap {} KB", (HEAP.used() - before) / 1024));
+            report.note(format_args!("peak heap {} KB", (HEAP.0.used() - before) / 1024));
             // THE APP'S OWN BYTES, verbatim. The world does not read them and
             // could not: they are in the app's schema, not this firmware's.
             #[cfg(badge_control)]
@@ -1201,7 +1323,6 @@ fn main() -> ! {
 
     usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_RESTING);
     let verdict = if report.failed() { Status::Broken } else { status };
-    last_status = verdict;
     report.finish(verdict);
 
     // THE LAST FRAME, and it is where the two worlds visibly differ.
@@ -1236,7 +1357,7 @@ fn main() -> ! {
             } else {
                 use core::fmt::Write;
                 let _ = writeln!(summary, "execute {method}: success");
-                let _ = writeln!(summary, "{} KB heap", (HEAP.used() - before) / 1024);
+                let _ = writeln!(summary, "{} KB heap", (HEAP.0.used() - before) / 1024);
                 let _ = writeln!(summary);
                 let _ = writeln!(summary, "(app returned a typed response;");
                 let _ = writeln!(summary, " it printed nothing to stdout)");
@@ -1284,8 +1405,11 @@ fn main() -> ! {
     // allocated for it. Measured rather than assumed: a leak here is invisible
     // until the heap runs out, and by then the cause is several apps behind.
     drop(host);
+    // NOTHING CAN RUN A REQUEST NOW, and saying so beats queueing one for a turn
+    // that will never come — `rest()` below never returns.
+    passthrough::session_open(false);
     dlc_platform_embedded::activity::clear();
-    let leaked = HEAP.used().saturating_sub(heap_at_start);
+    let leaked = HEAP.0.used().saturating_sub(heap_at_start);
     report.note(format_args!(
         "session: ended after {turn} turn(s), {} KB not reclaimed",
         leaked / 1024

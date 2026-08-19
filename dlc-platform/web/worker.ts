@@ -25,12 +25,12 @@ import {
   _setFileData,
 } from "@bytecodealliance/preview2-shim/filesystem";
 import {
-  encodeSetEnvironment,
+  encodeSetWorldManifest,
   TEXT_OUTLET_DISPLAY,
   probeOPFS,
   FILESYSTEM_KIND_OPFS,
-  METHOD_SET_ENVIRONMENT,
-} from "./environment";
+  METHOD_SET_WORLD_MANIFEST,
+} from "./world-manifest";
 import {
   clearOPFS,
   flushTreeToOPFS,
@@ -160,8 +160,8 @@ async function boot(): Promise<EngineModule> {
   //    launch, so there is nothing to be newer than.
   envRevision = 1;
   const res = mod.execute(
-    METHOD_SET_ENVIRONMENT,
-    encodeSetEnvironment({
+    METHOD_SET_WORLD_MANIFEST,
+    encodeSetWorldManifest({
       revision: envRevision,
       filesystem: hasFilesystem
         ? { available: true, kind: FILESYSTEM_KIND_OPFS }
@@ -302,8 +302,8 @@ const api = {
     envRevision += 1;
     duringCommand = [];
     const r = mod.execute(
-      METHOD_SET_ENVIRONMENT,
-      encodeSetEnvironment({
+      METHOD_SET_WORLD_MANIFEST,
+      encodeSetWorldManifest({
         revision: envRevision,
         filesystem: hasFilesystem
           ? { available: true, kind: FILESYSTEM_KIND_OPFS }
@@ -317,7 +317,7 @@ const api = {
     const events = duringCommand;
     duringCommand = null;
     // No flush: a manifest writes nothing. The events still go out, because
-    // `ilc.environment-changed` is exactly how a slot learns to re-read.
+    // `ilc.world-manifest-changed` is exactly how a slot learns to re-read.
     for (const [topic, payload] of events) deliver(topic, payload);
     return {
       success: r.success === true,

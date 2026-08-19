@@ -180,16 +180,23 @@ use dlc_platform_embedded::minimal::MinimalHost;
     // Here a REAL ENGINE decodes them, on a 32-bit core, through the badge's own
     // host. That is the difference between "these are the bytes I meant to
     // write" and "these are the bytes an engine accepts".
-    let env = manifest::encode(
-        1,
-        manifest::TEXT_OUTLET_UART,
+    let env = manifest::encode(manifest::WorldManifest {
+        revision: 1,
+        outlet: manifest::TEXT_OUTLET_UART,
         // The harness prints over semihosting to a terminal of unknown size.
         // Zero is UNMEASURED, which is the honest answer and the one an app reads
         // as "wrap however you like".
-        0,
-        0,
-    );
-    match host.execute(manifest::METHOD_SET_ENVIRONMENT, env.as_bytes()) {
+        cols: 0,
+        rows: 0,
+        // NO STATUS INDICATOR: this is an emulated core with a serial console and
+        // nothing to light up. Saying so explicitly is what lets an app skip work
+        // it knows is invisible (Decision 33).
+        status: dlc_platform_embedded::control::STATUS_OUTLET_NONE as u64,
+        // AND NO WORLD DECLARED. This harness is not a host slot anybody ships;
+        // `undefined` is the honest answer and the common one.
+        world: 0,
+    });
+    match host.execute(manifest::METHOD_SET_WORLD_MANIFEST, env.as_bytes()) {
         Ok(r) if r.success => {
             let _ = writeln!(out, "set-environment: success");
         }

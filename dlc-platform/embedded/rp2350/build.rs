@@ -40,6 +40,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=BADGE_SCREEN");
     println!("cargo::rerun-if-env-changed=BADGE_INPUT");
     println!("cargo::rerun-if-env-changed=BADGE_CONTROL");
+    println!("cargo::rerun-if-env-changed=BADGE_BEAT_FRAMES_MS");
 
     // Declared so that a typo in a `cfg` name is a warning rather than a branch
     // that quietly never compiles.
@@ -181,6 +182,51 @@ fn main() {
         format!("/// Milliseconds between heartbeats; 0 disables them.\npub const HEARTBEAT_MS: u32 = {heartbeat};\n"),
     )
     .expect("writing heartbeat.rs");
+
+    // DOES THE WORLD BEAT BEFORE ANYONE ASKS? (BADGE-CONTROL-PLAN D8c.)
+    //
+    // The subscription mechanism lets a client turn the framed heartbeat on and
+    // set its rate. This is the OTHER half D8c asks for: what the world does
+    // when nobody has said anything yet.
+    //
+    // ON BY DEFAULT, and the trade is deliberate.
+    //
+    // A world that has to be ASKED before it says it is alive is a world that
+    // looks identical to a dead one until somebody knows to ask — and the moment
+    // you most want a beat is the moment you are least sure what you are talking
+    // to. Silence-until-subscribed optimises for a reader who already has
+    // working tooling, which is not the reader in trouble.
+    //
+    // WHAT IT COSTS, stated plainly: the same cable carries the human-readable
+    // log, so a person running `screen` sees a line of binary every interval
+    // mixed into the text. That is a real cost to the readable-by-anyone
+    // property, and `BADGE_BEAT_FRAMES_MS=0` buys it back for a build meant to
+    // be read by eye.
+    //
+    // WHAT IT CANNOT COST is the log itself. A heartbeat sits at the bottom of
+    // the send ladder and only fires when there is nothing else to send — which
+    // is exactly the property framing the LOG by default did not have, and the
+    // reason that starved the text stream and this does not.
+    //
+    // Only present at all when the control channel is compiled in (D4), so a
+    // shipped badge with `BADGE_CONTROL=off` emits nothing either way.
+    let frames_beat: u32 = std::env::var("BADGE_BEAT_FRAMES_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1_000);
+    std::fs::write(
+        out.join("beat_frames.rs"),
+        format!(
+            "/// Milliseconds between UNSUBSCRIBED heartbeats; 0 waits to be asked.\npub const BEAT_FRAMES_MS: u32 = {frames_beat};\n"
+        ),
+    )
+    .expect("writing beat_frames.rs");
+    // ANNOUNCED WHEN IT IS OFF, not when it is on: the default is now the
+    // unsurprising case, and a build that will NOT beat is the one somebody
+    // needs told, because they may be about to read a silence as a hang.
+    if frames_beat == 0 {
+        println!("cargo::warning=framed heartbeat: OFF — this world stays silent until subscribed");
+    }
 
     std::fs::write(
         out.join("beat.rs"),

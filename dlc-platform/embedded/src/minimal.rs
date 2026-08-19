@@ -47,8 +47,11 @@ pub struct MinimalState {
     /// SHARED with the stream handed to the guest, rather than a plain `Vec` the
     /// stream never touched — see `SharedBuffer` for the bug that was.
     pub stdout: crate::uart::SharedBuffer,
-    /// What this tier tells the app about itself. See the `environment` impl for
-    /// why capability advertisement lives here rather than in a new capability.
+    /// The app's `wasi:cli/environment`, which on every tier here is EMPTY.
+    ///
+    /// Kept because the interface must answer — TinyGo imports it whether or not
+    /// an app calls it — not because anything populates it. What a tier says
+    /// about itself travels in the `WorldManifest`; see the `environment` impl.
     pub environment: Vec<(String, String)>,
     /// A monotonic counter standing in for a hardware timer, used only when no
     /// real clock has been installed.
@@ -100,26 +103,33 @@ impl crate::cli_bindings::wasi::cli::stdin::Host for MinimalState {
     }
 }
 
-/// No argv — but the environment is how a TIER ADVERTISES WHAT IT IS.
+/// No argv, and an EMPTY environment — deliberately, and it used not to be.
 ///
-/// A badge is not launched from a shell, so there is no inherited environment to
-/// pass through and the table is whatever the host decides to say. That makes it
-/// the right place for capability advertisement, and the reason is D6: a fact the
-/// app needs does not justify a new capability when an interface the world
-/// ALREADY DECLARES can carry it. `wasi:cli/environment` is imported by every
-/// component here whether or not it is called, so this costs nothing.
+/// # What this carried, and why it stopped
 ///
-/// **What belongs here is what the app cannot otherwise find out.** Every tier
-/// provides `wasi:cli/stdout` — it must, because TinyGo acquires it during
-/// `_initialize` — so its presence says nothing about whether anyone will ever
-/// SEE the bytes. On a badge with a screen they are read; piped to a buffer that
-/// is dropped, they are not. Only the host knows which, so only the host can say.
+/// A badge is not launched from a shell, so nothing is inherited and the table
+/// was whatever the host decided to say. That made it look like the right place
+/// for a tier to advertise itself, on a D6 argument that still holds in general:
+/// a fact the app needs does not justify a new capability when an interface the
+/// world ALREADY DECLARES can carry it. So `ILC_STDOUT`, `ILC_COLS` and their
+/// neighbours were set here.
 ///
-/// **Advertise what is true TODAY, not what is planned.** The badge's stdout
-/// reaches a UART, and it reaches a screen when Phase 3 wires the TFT — so the
-/// value changes then, and an app that adapts its output gets it right in both
-/// eras. Claiming `display` now would be the one kind of lie this interface makes
-/// expensive: silent, and believed.
+/// They are gone, and the reason is not that D6 was wrong — it is that these
+/// were never environment. They were **app-level configuration**: a set of
+/// fields with a schema, read at one moment, meaningful only as a group. A
+/// string map has no schema, so `ILC_COLS` was parsed at each reader and a typo
+/// was a default rather than an error, and nothing could state that `cols`
+/// without `display` is a contradiction. The `WorldManifest` is that group,
+/// declared once as a message, and it also does what this never could: arrive
+/// AGAIN when the allocation changes, because a screen budget is not settled for
+/// the life of a session.
+///
+/// # Why the interface is still implemented
+///
+/// Because it must answer. TinyGo imports `wasi:cli/environment` whether or not
+/// an app reads it, and an import that does not link is a component that does
+/// not instantiate. Empty is the honest answer: this host has nothing to say in
+/// this vocabulary, and says it in the one place an app might still ask.
 impl crate::cli_bindings::wasi::cli::environment::Host for MinimalState {
     fn get_environment(&mut self) -> Vec<(String, String)> {
         self.environment.clone()
@@ -340,9 +350,7 @@ impl MinimalHost {
     pub fn new(component_bytes: &[u8], width: PulleyWidth) -> Result<Self> {
         let engine = pulley_engine(width)?;
         let component = Component::new(&engine, component_bytes)?;
-        // No advertisement: a laptop harness is not a tier telling an app what it
-        // can do, and an empty environment is what these tools measured against.
-        Self::from_component(engine, component, &[])
+        Self::from_component(engine, component)
     }
 
     /// Instantiate an AOT artifact **without moving it out of flash** — the badge's path.
@@ -363,38 +371,15 @@ impl MinimalHost {
     /// outlives the component as `deserialize_raw` requires. A `static` in flash
     /// satisfies the last two; `include_bytes!` alone does not satisfy alignment.
     pub unsafe fn from_precompiled(cwasm: &'static [u8], width: PulleyWidth) -> Result<Self> {
-        // SAFETY: forwarded to the caller by this function's own contract.
-        unsafe { Self::from_precompiled_advertising(cwasm, width, &[]) }
-    }
-
-    /// As [`Self::from_precompiled`], but telling the app what this tier is.
-    ///
-    /// The pairs become `wasi:cli/environment`, which is where a tier advertises
-    /// what it can actually do — see the `environment` impl above for why that is
-    /// the right vehicle rather than a new capability. An empty table is a host
-    /// that says nothing about itself, which is what the laptop harnesses want.
-    ///
-    /// # Safety
-    ///
-    /// Identical to [`Self::from_precompiled`].
-    pub unsafe fn from_precompiled_advertising(
-        cwasm: &'static [u8],
-        width: PulleyWidth,
-        environment: &[(&str, &str)],
-    ) -> Result<Self> {
         let engine = pulley_engine(width)?;
         // SAFETY: forwarded to the caller by this function's own contract.
         let component =
             unsafe { Component::deserialize_raw(&engine, core::ptr::NonNull::from(cwasm))? };
-        Self::from_component(engine, component, environment)
+        Self::from_component(engine, component)
     }
 
     /// Everything both paths share: the linker, and the one instantiation.
-    fn from_component(
-        engine: Engine,
-        component: Component,
-        environment: &[(&str, &str)],
-    ) -> Result<Self> {
+    fn from_component(engine: Engine, component: Component) -> Result<Self> {
         let mut linker: Linker<MinimalState> = Linker::new(&engine);
 
         // SHADOWING ON, and it is not laziness — it is the only order that works.
@@ -531,13 +516,9 @@ impl MinimalHost {
             |state| state,
         )?;
 
-        let state = MinimalState {
-            environment: environment
-                .iter()
-                .map(|(k, v)| ((*k).into(), (*v).into()))
-                .collect(),
-            ..MinimalState::default()
-        };
+        // `environment` is left at its default (empty) — see the `environment`
+        // impl for why nothing populates it any more.
+        let state = MinimalState::default();
         // THE CLOCK GOES IN BEFORE THE GUEST EXISTS. TinyGo reads it during
         // `_initialize`, which runs inside instantiation below — set it after
         // and a guest's first look at the time would find the counting stub.

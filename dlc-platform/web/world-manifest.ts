@@ -15,24 +15,42 @@
 import { appendTag, appendVarint } from "./encode";
 
 /** devalbo.ilc.v1.Availability */
-export const AVAILABILITY_ABSENT = 1;
-export const AVAILABILITY_PRESENT = 2;
+// THE ENUM VALUES, GENERATED. These were eleven numbers typed out from the
+// .proto by hand, in a file whose whole job is encoding them onto a wire — the
+// same arrangement that put DISPLAY=2 and UART=3 into the badge and had it
+// report the wrong outlet for a day.
+//
+// Generated INTO this package rather than imported from `dlc-platform/gen/ts`,
+// because this is an npm package root and a path outside it is neither shipped
+// nor resolvable by a bundler.
+import {
+  AVAILABILITY_ABSENT,
+  AVAILABILITY_PRESENT,
+  FILESYSTEM_KIND_OPFS,
+  ISOLATION_PER_USER,
+  ISOLATION_SHARED,
+  TEXT_OUTLET_DISPLAY,
+  TEXT_OUTLET_NONE,
+  TEXT_OUTLET_TERMINAL,
+  TEXT_OUTLET_UART,
+} from "./gen/devalbo/ilc/v1/world_manifest.enums";
 
-/** devalbo.ilc.v1.FilesystemKind */
-export const FILESYSTEM_KIND_OPFS = 3;
+// RE-EXPORTED because consumers imported them from here before they were
+// generated, and where a constant is generated is not their business.
+export {
+  AVAILABILITY_ABSENT,
+  AVAILABILITY_PRESENT,
+  FILESYSTEM_KIND_OPFS,
+  ISOLATION_PER_USER,
+  ISOLATION_SHARED,
+  TEXT_OUTLET_DISPLAY,
+  TEXT_OUTLET_NONE,
+  TEXT_OUTLET_TERMINAL,
+  TEXT_OUTLET_UART,
+};
 
-/** devalbo.ilc.v1.Isolation */
-export const ISOLATION_SHARED = 1;
-export const ISOLATION_PER_USER = 2;
-
-/** devalbo.ilc.v1.TextOutlet */
-export const TEXT_OUTLET_NONE = 1;
-export const TEXT_OUTLET_UART = 2;
-export const TEXT_OUTLET_DISPLAY = 3;
-export const TEXT_OUTLET_TERMINAL = 4;
-
-/** `SetEnvironment` — the core-lifecycle block, id 2. */
-export const METHOD_SET_ENVIRONMENT = 2;
+/** `SetWorldManifest` — the core-lifecycle block, id 2. */
+export const METHOD_SET_WORLD_MANIFEST = 2;
 
 const WIRE_VARINT = 0;
 const WIRE_BYTES = 2;
@@ -79,14 +97,14 @@ export interface Manifest {
 }
 
 /**
- * Encode `SetEnvironmentRequest{ environment }`.
+ * Encode `SetWorldManifestRequest{ environment }`.
  *
  * Hand-encoded for the same reason `encode.ts` is: this package is consumed by
  * a `file:` symlink with no node_modules of its own, so a bare specifier for a
  * generated message would not resolve. Field NUMBERS are the contract and are
  * pinned by the parity vector, not by these names.
  */
-export function encodeSetEnvironment(m: Manifest): Uint8Array {
+export function encodeSetWorldManifest(m: Manifest): Uint8Array {
   if (!Number.isInteger(m.revision) || m.revision <= 0) {
     // Refused here as well as in the engine, because a host that shipped a zero
     // would otherwise discover it as a failed command at launch rather than as
@@ -140,7 +158,7 @@ export function encodeSetEnvironment(m: Manifest): Uint8Array {
   }
 
   const req: number[] = [];
-  appendTag(req, 1, WIRE_BYTES); // SetEnvironmentRequest.environment
+  appendTag(req, 1, WIRE_BYTES); // SetWorldManifestRequest.environment
   appendVarint(req, BigInt(env.length));
   req.push(...env);
   return Uint8Array.from(req);

@@ -30,6 +30,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -39,12 +40,17 @@ import (
 )
 
 // runExecute performs one app command and prints what it answered.
-func runExecute(port string, method uint, sets []string, wait time.Duration) error {
+func runExecute(port, typed string, sets []string, wait time.Duration) error {
 	file, err := openRaw(port)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
+
+	method, err := resolve(file, typed, wait)
+	if err != nil {
+		return err
+	}
 
 	var request []byte
 	// FETCHED ONCE, used twice: the same spec describes what to send and how to
@@ -52,7 +58,7 @@ func runExecute(port string, method uint, sets []string, wait time.Duration) err
 	var command *ilcv1.SpecCommand
 	if len(sets) > 0 {
 		var err error
-		if command, err = fetchSpec(file, uint32(method), wait); err != nil {
+		if command, err = fetchSpec(file, method, wait); err != nil {
 			return err
 		}
 		if request, err = encodeRequest(command, sets); err != nil {
@@ -60,7 +66,7 @@ func runExecute(port string, method uint, sets []string, wait time.Duration) err
 		}
 	}
 
-	result, err := passThrough(file, uint32(method), request, wait)
+	result, err := passThrough(file, method, request, wait)
 	if err != nil {
 		return err
 	}
@@ -78,7 +84,7 @@ func runExecute(port string, method uint, sets []string, wait time.Duration) err
 		// trip. Until `SpecResult` existed this could only print a byte count.
 		if command == nil {
 			var err error
-			if command, err = fetchSpec(file, uint32(method), wait); err != nil {
+			if command, err = fetchSpec(file, method, wait); err != nil {
 				return err
 			}
 		}
@@ -216,24 +222,68 @@ func renderValue(result *ilcv1.SpecResult, raw []byte, number uint64) string {
 	}
 }
 
-// fetchSpec asks the app what a command takes.
-func fetchSpec(file *os.File, method uint32, wait time.Duration) (*ilcv1.SpecCommand, error) {
+// resolve turns what a person typed into a method id.
+//
+// # Nothing human-facing should require knowing a number
+//
+// This tool took `-execute 10002`, so using it meant looking up an id in a
+// .proto — for a command whose NAME the app already publishes. Method ids are
+// the wire: permanent, locked, and dispatched on. They are not an interface.
+//
+// A NUMBER IS STILL ACCEPTED, and deliberately: an id that the spec does not
+// describe is exactly the case where a name cannot help, and refusing it would
+// leave no way to reach a command whose description is missing or broken. That
+// is a debugging tool's job.
+func resolve(file *os.File, typed string, wait time.Duration) (uint32, error) {
+	if id, err := strconv.ParseUint(typed, 10, 32); err == nil {
+		return uint32(id), nil
+	}
+
+	// ZERO MEANS EVERY COMMAND, which is what makes name lookup one round trip
+	// rather than one per candidate.
+	commands, err := fetchCommands(file, 0, wait)
+	if err != nil {
+		return 0, err
+	}
+	names := make([]string, 0, len(commands))
+	for _, command := range commands {
+		if strings.EqualFold(command.GetName(), typed) {
+			return command.GetMethod(), nil
+		}
+		names = append(names, command.GetName())
+	}
+	slices.Sort(names)
+	return 0, fmt.Errorf("this app has no command %q — it has %s",
+		typed, strings.Join(names, ", "))
+}
+
+// fetchCommands asks the app to describe one command, or all of them.
+func fetchCommands(file *os.File, method uint32, wait time.Duration) ([]*ilcv1.SpecCommand, error) {
 	ask, err := (&ilcv1.GetCommandSpecRequest{MethodId: method}).MarshalVT()
 	if err != nil {
 		return nil, err
 	}
 	result, err := passThrough(file, ilcv1.MethodGetCommandSpec, ask, wait)
 	if err != nil {
-		return nil, fmt.Errorf("asking what method %d takes: %w", method, err)
+		return nil, fmt.Errorf("asking what this app takes: %w", err)
 	}
 	if !result.GetSuccess() {
-		return nil, fmt.Errorf("the app would not describe method %d: %s", method, result.GetError())
+		return nil, fmt.Errorf("the app would not describe itself: %s", result.GetError())
 	}
 	var spec ilcv1.GetCommandSpecResponse
 	if err := spec.UnmarshalVT(result.GetOutput()); err != nil {
 		return nil, fmt.Errorf("decoding the command spec: %w", err)
 	}
-	for _, command := range spec.GetCommands() {
+	return spec.GetCommands(), nil
+}
+
+// fetchSpec asks the app what a command takes.
+func fetchSpec(file *os.File, method uint32, wait time.Duration) (*ilcv1.SpecCommand, error) {
+	commands, err := fetchCommands(file, method, wait)
+	if err != nil {
+		return nil, err
+	}
+	for _, command := range commands {
 		if method == 0 || command.GetMethod() == method {
 			return command, nil
 		}
@@ -242,14 +292,32 @@ func fetchSpec(file *os.File, method uint32, wait time.Duration) (*ilcv1.SpecCom
 }
 
 // showSpec prints what an app's commands take, in the app's own words.
-func showSpec(port string, method uint, wait time.Duration) error {
+func showSpec(port, typed string, wait time.Duration) error {
 	file, err := openRaw(port)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	command, err := fetchSpec(file, uint32(method), wait)
+	// EVERY COMMAND when nothing was named — the useful default for a person who
+	// does not yet know what this app is.
+	if typed == "" {
+		commands, err := fetchCommands(file, 0, wait)
+		if err != nil {
+			return err
+		}
+		for _, command := range commands {
+			fmt.Printf("%-12s (method %d)  %s\n",
+				command.GetName(), command.GetMethod(), command.GetSummary())
+		}
+		return nil
+	}
+
+	method, err := resolve(file, typed, wait)
+	if err != nil {
+		return err
+	}
+	command, err := fetchSpec(file, method, wait)
 	if err != nil {
 		return err
 	}

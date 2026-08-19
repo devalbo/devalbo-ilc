@@ -169,7 +169,7 @@ func Boot(opts BootOptions) error {
 		return errors.New("boot: TextOutlet unset — the host is the only party that knows where printed text lands; use TEXT_OUTLET_NONE if it reaches nobody")
 	}
 
-	// Before the manifest: SetEnvironment may emit, and a sink installed
+	// Before the manifest: SetWorldManifest may emit, and a sink installed
 	// afterwards would miss the first event with nothing to indicate it had.
 	if opts.Sink != nil {
 		SetEventSink(opts.Sink)
@@ -193,8 +193,8 @@ func Boot(opts BootOptions) error {
 		Cols:   opts.TextCols,
 		Rows:   opts.TextRows,
 	}
-	body, err := (&ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+	body, err := (&ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   1,
 			Filesystem: fs,
 			TextOut:    textOut,
@@ -203,14 +203,14 @@ func Boot(opts BootOptions) error {
 	if err != nil {
 		return errors.New("boot: encode environment: " + err.Error())
 	}
-	if _, ok := registry[MethodSetEnvironment]; !ok {
+	if _, ok := registry[MethodSetWorldManifest]; !ok {
 		// Otherwise this surfaces as "unknown method_id 2", which names the
 		// symptom and not the cause. The cause is always the same: the app's
 		// engine package never registered, because the host forgot the
 		// blank import that runs its init.
 		return errors.New("boot: no commands registered — import the app's engine package so its init runs (RegisterAll / RegisterDiscovered)")
 	}
-	if res := Execute(MethodSetEnvironment, body); !res.Success {
+	if res := Execute(MethodSetWorldManifest, body); !res.Success {
 		return errors.New("boot: " + res.Err)
 	}
 	return nil

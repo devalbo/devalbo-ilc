@@ -24,7 +24,9 @@ rp235x-hal = { version = "0.3", features = ["critical-section-impl", "rt"] }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 embedded-hal = "1"
-panic-halt = "1"
+# NO panic-halt. It is `loop {}`, which never re-enables interrupts — and every
+# Shared::with masks them, so a panic inside one left the badge silent and deaf
+# even to picotool. The handler lives in main.rs and SERVES THE LOG instead.
 
 # --- the heap ----------------------------------------------------------------
 # Wasmtime needs `alloc`, and 520 KB of SRAM will not hold a component's linear

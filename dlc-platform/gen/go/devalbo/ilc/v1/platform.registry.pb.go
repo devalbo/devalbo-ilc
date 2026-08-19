@@ -10,7 +10,7 @@ package ilcv1
 // Method ids for PlatformService.
 const (
 	MethodVersion           uint32 = 1
-	MethodSetEnvironment    uint32 = 2
+	MethodSetWorldManifest  uint32 = 2
 	MethodGetCommandSurface uint32 = 4
 	MethodGetCommandSpec    uint32 = 5
 	MethodExportFs          uint32 = 100
@@ -24,7 +24,7 @@ const (
 // decode/encode, so an app never touches request bytes or an id.
 func PlatformServiceHandlers(
 	versionFn func(*VersionRequest) (*VersionResponse, error),
-	setEnvironmentFn func(*SetEnvironmentRequest) (*SetEnvironmentResponse, error),
+	setWorldManifestFn func(*SetWorldManifestRequest) (*SetWorldManifestResponse, error),
 	getCommandSurfaceFn func(*GetCommandSurfaceRequest) (*GetCommandSurfaceResponse, error),
 	getCommandSpecFn func(*GetCommandSpecRequest) (*GetCommandSpecResponse, error),
 	exportFsFn func(*ExportFsRequest) (*ExportFsResponse, error),
@@ -44,12 +44,12 @@ func PlatformServiceHandlers(
 			}
 			return resp.MarshalVT()
 		},
-		MethodSetEnvironment: func(request []byte) ([]byte, error) {
-			var req SetEnvironmentRequest
+		MethodSetWorldManifest: func(request []byte) ([]byte, error) {
+			var req SetWorldManifestRequest
 			if err := req.UnmarshalVT(request); err != nil {
 				return nil, err
 			}
-			resp, err := setEnvironmentFn(&req)
+			resp, err := setWorldManifestFn(&req)
 			if err != nil {
 				return nil, err
 			}

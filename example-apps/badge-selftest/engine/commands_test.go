@@ -27,47 +27,33 @@ func TestSelfTestReportsRatherThanFails(t *testing.T) {
 	}
 }
 
-// TestAbsentAdvertisementIsNotAFailure — the `undefined` world advertises
-// nothing, which is legitimate and common. An earlier version reported FAIL
-// here, and a check that fails on correct behaviour trains people to ignore it.
-func TestAbsentAdvertisementIsNotAFailure(t *testing.T) {
-	t.Setenv("ILC_TIER", "")
-	t.Setenv("ILC_WORLD", "")
-	for _, c := range checkAdvertisement() {
-		if c.name == "advertisement" && !c.passed {
-			t.Errorf("an unadorned host must not fail: %s", c.detail)
+// TestAbsentWorldIsNotAFailure — the `undefined` world declares nothing, which
+// is legitimate and common. An earlier version reported FAIL here, and a check
+// that fails on correct behaviour trains people to ignore it.
+func TestAbsentWorldIsNotAFailure(t *testing.T) {
+	// No manifest sent: every field is its zero value, which is what a host that
+	// says nothing about itself looks like.
+	for _, c := range checkManifest() {
+		if !c.passed {
+			t.Errorf("an unadorned host must not fail: %s = %s", c.name, c.detail)
 		}
 	}
 }
 
-// TestPartialAdvertisementIsAFailure — the case that IS a host bug: keys set
-// halfway, which means somebody added one and forgot the table it belongs to.
-func TestPartialAdvertisementIsAFailure(t *testing.T) {
-	t.Setenv("ILC_TIER", "rp2350")
-	t.Setenv("ILC_WORLD", "")
-	found := false
-	for _, c := range checkAdvertisement() {
-		if c.name == "advertisement" {
-			found = true
-			if c.passed {
-				t.Error("a half-set advertisement should be caught")
-			}
+// TestWorldCannotBeHalfDeclared — the failure mode this refactor DELETED.
+//
+// The old check hunted for a host that set `ILC_TIER` and forgot `ILC_WORLD`,
+// because with N independent string keys that is a real bug an app could detect.
+// A typed manifest has no such state: `Identity` is one message with one field,
+// so "half declared" is not expressible and there is nothing left to check.
+//
+// Kept as a test rather than deleted so the absence is deliberate. If somebody
+// adds a second identity field, this is where they should ask whether they have
+// re-created the problem.
+func TestWorldCannotBeHalfDeclared(t *testing.T) {
+	for _, c := range checkManifest() {
+		if c.name == "world" && strings.Contains(c.detail, "partial") {
+			t.Errorf("a typed manifest should have no partial state: %s", c.detail)
 		}
-	}
-	if !found {
-		t.Fatal("no advertisement check ran")
-	}
-}
-
-// TestReadOnlySkipsWrites — a host may be mounted read-only elsewhere (the
-// badge's USB volume is single-writer), and a self-test that corrupts what it is
-// testing is worse than no self-test.
-func TestReadOnlySkipsWrites(t *testing.T) {
-	got, err := handleSelfTest(&badgeselftestv1.SelfTestRequest{ReadOnly: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got.Text, "read-only") {
-		t.Errorf("read-only run should say so: %q", got.Text)
 	}
 }

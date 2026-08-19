@@ -1,0 +1,149 @@
+{
+  "_": [
+    "THE WIRE, DECLARED ONCE. Generated into Rust, Go and TypeScript by",
+    "cmd/gen-protocol; `make verify-protocol` fails the build when any of them",
+    "drifts from this file.",
+    "",
+    "WHY THIS FILE EXISTS. The framing had two hand-written implementations —",
+    "Rust on the badge, Go in badgectl — and agreed only because one person wrote",
+    "both. WebSerial makes three and badge-to-badge makes four, and by then",
+    "'they agree' is a claim nobody can check.",
+    "",
+    "THE SIZES ARE DERIVED, NOT PICKED. A buffer that must hold a framed request",
+    "is written as the sum of the things it holds, so growing a request grows the",
+    "buffer. A literal cannot be checked against the thing it was chosen for —",
+    "which is how a 512-byte reply buffer met a 600-byte answer, sent the first",
+    "512 bytes, and left the client waiting forever for a completion that could",
+    "not come."
+  ],
+
+  "magic": "DLCC",
+  "magic_why": [
+    "The port is SHARED with the human-readable log, and the far end may be a",
+    "person typing. A frame has to be recognisable in a stream that is mostly not",
+    "frames, and unrecognised bytes discardable without desynchronising the next."
+  ],
+
+  "header": {
+    "magic_bytes": 4,
+    "kind_bytes": 1,
+    "length_bytes": 2,
+    "checksum_bytes": 4
+  },
+  "header_why": [
+    "A KIND because not every frame answers a question: replies are pulled, log",
+    "lines and heartbeats are pushed. Protobuf messages are not self-describing,",
+    "so without it a reader could not tell a response from a log line — and",
+    "guessing by trying both decoders accepts nonsense, since most byte strings",
+    "parse as some message.",
+    "",
+    "A CHECKSUM because a truncated frame is plausible: a host that closes",
+    "mid-write leaves a prefix that parses."
+  ],
+
+  "kinds": [
+    { "name": "request", "value": 1, "doc": "A client asking a world something." },
+    { "name": "response", "value": 2, "doc": "A world's answer, correlated by request_id." },
+    { "name": "log", "value": 3, "doc": "A LogLine, pushed to a subscriber." },
+    { "name": "heartbeat", "value": 4, "doc": "A periodic WorldState, so silence means something." }
+  ],
+
+  "checksum": {
+    "algorithm": "fnv1a32",
+    "offset_basis": 2166136261,
+    "prime": 16777619,
+    "never_zero": true,
+    "doc": [
+      "FNV-1a, little-endian on the wire. Enough to catch truncation and",
+      "corruption, and not pretending to be more.",
+      "",
+      "NEVER ZERO: that value means 'no checksum recorded' for a stored payload,",
+      "and a body whose real hash is zero would silently become unverified. The",
+      "control channel does not need that distinction but must not contradict it,",
+      "because both share one function."
+    ]
+  },
+
+  "limits": [
+    {
+      "name": "max_payload",
+      "value": 8192,
+      "doc": [
+        "The largest payload a frame may carry. Bounded so a corrupt length cannot",
+        "make a world allocate against a number it read off a wire."
+      ]
+    },
+    {
+      "name": "max_request",
+      "value": 256,
+      "doc": [
+        "The largest app request a world accepts for pass-through. Bigger than any",
+        "widget can collect — a person types one field — and smaller than a frame,",
+        "because this bounds what is COPIED into a fixed slot while it waits."
+      ]
+    },
+    {
+      "name": "envelope_slack",
+      "value": 32,
+      "doc": [
+        "Room for the fields AROUND a payload: a verb, a correlation id, their",
+        "tags. Named rather than folded into the sums so it is obvious what the",
+        "spare bytes are for."
+      ]
+    },
+    {
+      "name": "max_log_line",
+      "value": 96,
+      "doc": "The longest line the log will frame. Bounded by the panel and the report format."
+    },
+    {
+      "name": "notice_slots",
+      "value": 40,
+      "doc": [
+        "How many framed notices a world keeps for a client that has not read them.",
+        "About four screens of bring-up; beyond that the oldest go and the count of",
+        "what went is reported rather than quietly dropped."
+      ]
+    },
+    {
+      "name": "max_refusal_text",
+      "value": 64,
+      "doc": [
+        "The longest sentence a stack-built refusal may carry. Everything needing",
+        "more than this needs a heap and can wait for one."
+      ]
+    }
+  ],
+
+  "derived": [
+    {
+      "name": "frame_overhead",
+      "expr": "magic_bytes + kind_bytes + length_bytes + checksum_bytes",
+      "doc": "Everything a frame costs beyond its payload."
+    },
+    {
+      "name": "inbound",
+      "expr": "frame_overhead + max_request + envelope_slack",
+      "doc": [
+        "What a world holds while reassembling an inbound frame. A frame larger",
+        "than this can never complete, so a world REFUSES one that says it is —",
+        "rather than sliding bytes forever while the sender waits."
+      ]
+    },
+    {
+      "name": "notice_frame",
+      "expr": "frame_overhead + max_log_line + envelope_slack",
+      "doc": "One framed LogLine, and the slot that holds it."
+    },
+    {
+      "name": "refusal_body",
+      "expr": "max_refusal_text + envelope_slack",
+      "doc": "A ControlResponse carrying one sentence and a correlation id."
+    },
+    {
+      "name": "refusal_frame",
+      "expr": "frame_overhead + refusal_body",
+      "doc": "The same, framed — the answer a world can give before it has a heap."
+    }
+  ]
+}

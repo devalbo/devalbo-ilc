@@ -26,7 +26,7 @@ import { positionals } from "./clispec";
 import type { Values } from "./encode";
 import { encodeRequest, shortEnum } from "./encode";
 import { executeCommand, type Renderer } from "./terminal";
-import { liveSurface } from "./environment";
+import { liveSurface } from "./world-manifest";
 import type { EnginePort } from "./port";
 
 export type InspectorOptions = {
@@ -110,7 +110,7 @@ export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspe
   void markUnavailable();
 
   // RE-READ when the facts move (§6.4a). The engine announces
-  // `ilc.environment-changed` after the surface is already in line with the new
+  // `ilc.world-manifest-changed` after the surface is already in line with the new
   // manifest, so asking again here cannot race the registration it is reacting
   // to.
   //
@@ -120,7 +120,7 @@ export function mountInspector(root: HTMLElement, opts: InspectorOptions): Inspe
   let unsubscribe: (() => void) | null = null;
   void opts.port
     .subscribe?.((topic) => {
-      if (topic === "ilc.environment-changed") void markUnavailable();
+      if (topic === "ilc.world-manifest-changed") void markUnavailable();
     })
     .then((off) => {
       unsubscribe = off;

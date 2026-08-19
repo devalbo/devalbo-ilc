@@ -40,6 +40,7 @@
   },
   "files": [
     "*.ts",
+    "gen/",
     "shim/",
     "README.md",
     "LICENSE"

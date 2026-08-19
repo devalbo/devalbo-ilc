@@ -108,7 +108,7 @@ func TestBootRefusesAnUnsetFilesystemKind(t *testing.T) {
 	}
 }
 
-// The sink must be installed BEFORE the manifest, because SetEnvironment may
+// The sink must be installed BEFORE the manifest, because SetWorldManifest may
 // itself emit — and a sink installed afterwards would miss that first event
 // with nothing to indicate anything had been missed.
 //

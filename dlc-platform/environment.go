@@ -30,7 +30,7 @@ import (
 //
 // Nil is a real state, not an oversight: an app may ask before the host has
 // spoken, and the answer then is "assume nothing" — see Env.
-var env *ilcv1.Environment
+var env *ilcv1.WorldManifest
 
 // Env returns the environment in force.
 //
@@ -47,9 +47,9 @@ var env *ilcv1.Environment
 // everywhere, and being wrong costs performance rather than data. A default is
 // dangerous when the safe option and the convenient one differ. Here they are
 // the same.
-func Env() *ilcv1.Environment {
+func Env() *ilcv1.WorldManifest {
 	if env == nil {
-		return &ilcv1.Environment{}
+		return &ilcv1.WorldManifest{}
 	}
 	return env
 }
@@ -91,11 +91,11 @@ func Isolated() bool {
 // applyEnvironment installs a manifest, reporting whether anything changed.
 //
 // Returns false for a repeat of the revision already in force. That is not an
-// optimisation: SetEnvironment TRIGGERS capability registration (see
+// optimisation: SetWorldManifest TRIGGERS capability registration (see
 // commands.go), so re-applying an unchanged manifest would tear down and
 // rebuild the command surface underneath a host that only meant to say hello
 // twice. The revision is what makes the difference observable.
-func applyEnvironment(next *ilcv1.Environment) (bool, error) {
+func applyEnvironment(next *ilcv1.WorldManifest) (bool, error) {
 	if next == nil {
 		return false, errors.New("set-environment: no environment")
 	}
@@ -152,7 +152,7 @@ var envWatchers []func()
 // synchronously and cheaply, rather than depending on a callback that may never
 // come because nothing has changed yet.
 //
-// Callbacks run in registration order, synchronously, inside the SetEnvironment
+// Callbacks run in registration order, synchronously, inside the SetWorldManifest
 // command. Keep them short and do not call back into the platform's command
 // dispatch from one — the surface is being rebuilt underneath you.
 //

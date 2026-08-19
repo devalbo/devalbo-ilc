@@ -4,10 +4,15 @@ package devalbo.ilc.v1;
 
 option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1;ilcv1";
 
-// For `TextOutlet`. WHERE AN APP'S TEXT COMES OUT is already declared there and
-// is the same question a world answers about itself — a second enum meaning the
-// same thing would be two vocabularies to keep in step.
-import "devalbo/ilc/v1/platform.proto";
+// For `TextOutlet` and `WorldName`.
+//
+// WHAT A WORLD IS is not a control-channel fact: an APP asks the same questions
+// through its manifest, and a second copy of these enums here would be two
+// vocabularies to keep in step. They were defined here first only because the
+// control channel needed them first — and they now live in the file named for
+// the idea rather than in either consumer.
+import "devalbo/ilc/v1/world_manifest.proto";
+import "devalbo/ilc/v1/world_name.proto";
 
 // Driving a WORLD from outside it (docs/BADGE-CONTROL-PLAN.md).
 //
@@ -52,7 +57,7 @@ message WorldState {
   // is still the right name; `config` is gone entirely.
   reserved 1, 2, 4;
 
-  WorldKind world = 9;
+  WorldName world = 9;
   Tier tier = 10;
   // Firmware or host version. GENUINELY A STRING: a semver is not a closed set.
   string version = 3;
@@ -88,6 +93,21 @@ message WorldState {
   // Milliseconds since boot. Lets a caller tell a world that is progressing
   // slowly from one that has stopped, without watching two answers arrive.
   uint64 uptime_ms = 7;
+
+  // PASS-THROUGH BOOKKEEPING, for the question a client cannot answer alone.
+  //
+  // "I sent a request and nothing happened" has three causes that are identical
+  // from the far end of a cable: it never arrived, it arrived and was refused,
+  // or it arrived and nobody collected it. One counter separates the first from
+  // the rest, and the pair separates the second from the third.
+  //
+  // Diagnostic, and kept: this cost an afternoon of writing throwaway probes to
+  // guess at it, which is exactly the work a control channel exists to make
+  // unnecessary.
+  uint32 requests_offered = 14;
+  uint32 requests_taken = 15;
+  // Whether an app is instantiated and could run one at all.
+  bool session_open = 16;
 }
 
 // Where a world is in its own sequence.
@@ -111,25 +131,7 @@ enum Activity {
 }
 
 
-// Which world a firmware was built as. Mirrors `BadgeWorld` in world.rs.
-enum WorldKind {
-  WORLD_KIND_UNSPECIFIED = 0;
-  // Text: the app's output is meant to be READ.
-  WORLD_KIND_NORMAL = 1;
-  // One colour, meaning "how is it going" — a deliberate simulation of a world
-  // with almost no output capability.
-  WORLD_KIND_MINIMAL = 2;
-}
 
-// Which tier is answering. The same value an app sees as `ILC_TIER`, so a test
-// can assert that a world advertises what it claims.
-enum Tier {
-  TIER_UNSPECIFIED = 0;
-  TIER_RP2350 = 1;
-  TIER_BROWSER = 2;
-  TIER_NATIVE = 3;
-  TIER_QEMU_ARMV7M = 4;
-}
 
 // How a world divides its panel. Mirrors `ScreenLayout` in world.rs.
 enum ScreenLayout {
@@ -313,6 +315,16 @@ message ExecuteRequest {
 }
 
 message ExecuteResponse {
+  // WHICH COMMAND THIS ANSWERS.
+  //
+  // Implicit until now: the caller sent a method id, so it knew. That holds
+  // only while the response never leaves the conversation that produced it —
+  // and the whole point of framing was that these bytes can be logged,
+  // replayed, or mirrored to another world (D8), where "what did I ask for" is
+  // no longer in scope. One varint makes the answer decodable on its own, which
+  // is also what lets a reader pick the right response spec for it.
+  uint32 method_id = 4;
+
   // WHETHER THE APP SUCCEEDED, which is not whether the world did.
   //
   // `ControlResponse.ok` says the world accepted the verb and ran something.
@@ -324,6 +336,37 @@ message ExecuteResponse {
   bytes output = 2;
   // What the app said went wrong, if anything.
   string error = 3;
+}
+
+// Which tier is answering.
+//
+// # Why this is NOT in an app's manifest
+//
+// Not because an app already knows — it does not, and that is the whole reason
+// the manifest exists. An app is ONE portable artifact: the same engine package
+// is linked natively, compiled to wasm for a browser, and AOT-compiled to a
+// `.cwasm` that a badge runs for apps it was never built for. At runtime it
+// cannot tell which of those happened.
+//
+// (An earlier version of this comment said the opposite — "a tier is what an app
+// was built for" — which inverts the central premise of the architecture. It is
+// recorded here because a schema comment is read as settled fact, and this one
+// was wrong for a day.)
+//
+// The real reason is REDUNDANCY. `World` already determines the tier:
+// `badge-normal` is rp2350, `browser` is the browser tier, `native` is native.
+// Carrying both in the same message makes a disagreement EXPRESSIBLE — a world
+// that reports `browser` and `rp2350` together — and this schema has spent its
+// life removing exactly that shape: `TextOut.availability` beside `outlet`, the
+// `config` map beside typed fields.
+//
+// So an app is told the more specific of the two, once.
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_RP2350 = 1;
+  TIER_BROWSER = 2;
+  TIER_NATIVE = 3;
+  TIER_QEMU_ARMV7M = 4;
 }
 
 // The envelope every control exchange uses.
@@ -341,6 +384,32 @@ message ControlRequest {
   // The verb's argument, if it takes one. For `VERB_EXECUTE` this is a
   // `method_id` and the app's request bytes; for `VERB_GET_WORLD_STATE`, empty.
   bytes payload = 2;
+
+  // A NUMBER THE CLIENT CHOOSES, echoed on the reply.
+  //
+  // # Why this exists before anything needs it
+  //
+  // Today a client pairs a reply with its request by there being only one in
+  // flight — `passthrough.rs` REFUSES a second pass-through for exactly that
+  // reason, and says so. That is not a design, it is the absence of one, and it
+  // holds only while three things stay true: one client, one link, and a
+  // transport that neither reorders nor duplicates.
+  //
+  // Each of those is already scheduled to stop being true. The browser mirror
+  // (D8) is a second client on the same wire. A UDP transport (D9 §1a) can
+  // deliver a reply twice, or out of order, or after the retry that replaced
+  // it — and an uncorrelated reply is then not merely unhelpful, it is WRONG,
+  // and wrong in a way nothing can detect after the fact.
+  //
+  // Adding it now costs a varint. Adding it later means every client that
+  // learned to depend on one-at-a-time is a client that breaks.
+  //
+  // # It is opaque to the world
+  //
+  // A world never interprets it, never validates it, and never remembers it
+  // beyond the reply it is echoing into. Zero means "not correlated", which is
+  // what a client that predates this field sends, and it keeps working.
+  uint64 request_id = 3;
 }
 
 message ControlResponse {
@@ -351,6 +420,14 @@ message ControlResponse {
   // The verb's answer, encoded per verb. `VERB_GET_WORLD_STATE` returns an
   // encoded `WorldState`.
   bytes payload = 3;
+
+  // The `request_id` of the request this answers, copied verbatim.
+  //
+  // A client that sent one and receives a reply carrying a DIFFERENT id has
+  // learned something true and useful: this is not its answer. Skipping it and
+  // continuing to wait is correct, and is what makes a late reply from a
+  // timed-out request harmless rather than a wrong answer to the next question.
+  uint64 request_id = 4;
 }
 
 // A line of a world's log, as a message rather than a string (D8b).
@@ -487,6 +564,20 @@ enum Verb {
 // one of them can see, and they disagree the moment a badge reboots — which,
 // with a reset button on the front, it does constantly.
 message Subscription {
+  // How often to beat, for `NOTICE_HEARTBEAT`. Zero takes the world's own
+  // default.
+  //
+  // THE SUBSCRIBER CHOOSES, because the subscriber is the one who knows what it
+  // is watching for: a person watching a badge wants a second, a test watching
+  // for a hang in a ten-minute run does not. A world that fixed the rate would
+  // be guessing at both.
+  //
+  // A WORLD MAY STILL REFUSE THE NUMBER. It is clamped to what this world will
+  // actually sustain and the granted value comes back in the reply — asking for
+  // a beat every millisecond on a link that also carries a log is a request to
+  // starve the log, and quietly obeying would be worse than saying no.
+  uint32 heartbeat_ms = 2;
+
   // The notices wanted. EMPTY MEANS NONE, which is how a client unsubscribes.
   //
   // A world grants what it supports and no more, and the reply says which — so a
@@ -505,4 +596,17 @@ enum Notice {
   NOTICE_UNSPECIFIED = 0;
   // A `LogLine`.
   NOTICE_LOG = 1;
+
+  // A periodic `WorldState`, so that SILENCE MEANS SOMETHING.
+  //
+  // Every other diagnostic here is "the world says things". None of them says
+  // "the world is still here", so silence had four readings — hung, finished,
+  // starved, or a reader already at the end — and no way to tell them apart
+  // without reflashing. That ambiguity cost an hour on 2026-08-17.
+  //
+  // A beat collapses it. If it stops, the world stopped. If it continues while
+  // nothing else arrives, the world is alive and the silence is about something
+  // else. That is a different claim from anything the log makes, and it is the
+  // one that was missing.
+  NOTICE_HEARTBEAT = 2;
 }

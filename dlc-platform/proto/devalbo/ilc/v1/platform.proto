@@ -6,6 +6,11 @@ option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/
 
 import "devalbo/options/v1/options.proto";
 
+// For `SetWorldManifest`'s request and reply. WHAT A WORLD IS lives in its own
+// file — this one is the command surface, the bundle format and the index, and
+// it only needs the manifest to name the rpc that delivers it.
+import "devalbo/ilc/v1/world_manifest.proto";
+
 // The ILC platform's own command surface — the verbs EVERY app inherits rather
 // than writes (§16.3). Apps depend on these; they never inline them, so a fix
 // here (path containment, bundle parsing) reaches every app on a version bump
@@ -46,7 +51,7 @@ service PlatformService {
   // once at launch BEFORE any other command, and re-sent whenever a fact
   // changes. Also the trigger for registering capability-dependent verbs, which
   // is why it lives in the block that is always registered.
-  rpc SetEnvironment(SetEnvironmentRequest) returns (SetEnvironmentResponse) {
+  rpc SetWorldManifest(SetWorldManifestRequest) returns (SetWorldManifestResponse) {
     option (devalbo.options.v1.method_id) = 2;
     // A host sends this; nobody types it. See cli_hidden.
     option (devalbo.options.v1.cli_hidden) = true;
@@ -124,178 +129,6 @@ service PlatformService {
 message VersionRequest {}
 message VersionResponse {
   string version = 1;
-}
-
-// ---- the environment manifest (§6.4a, Decision 32) ------------------------
-
-// Whether a capability is there.
-//
-// Three states rather than a bool, because UNSPECIFIED is not ABSENT: the first
-// means nobody said, the second means somebody said no. They happen to lead to
-// the same conservative behaviour (an app takes its fallback path either way),
-// but conflating them would make "the host forgot to send a manifest"
-// indistinguishable from "this host has no filesystem" — and only one of those
-// is a bug worth surfacing.
-enum Availability {
-  AVAILABILITY_UNSPECIFIED = 0; // nobody said; treated as absent
-  AVAILABILITY_ABSENT = 1;
-  AVAILABILITY_PRESENT = 2;
-}
-
-// What KIND of root the host granted. Not cosmetic: an app deciding what to
-// cache cares whether its store survives the tab closing.
-enum FilesystemKind {
-  FILESYSTEM_KIND_UNSPECIFIED = 0;
-  FILESYSTEM_KIND_CWD = 1;      // the user's project — `dlc` itself (§3·5)
-  FILESYSTEM_KIND_APP_DIR = 2;  // ./.<app>/ — the convention for everyone else
-  FILESYSTEM_KIND_OPFS = 3;     // the browser's origin-private filesystem
-}
-
-// Whether this root belongs to ONE person, or is shared with others.
-//
-// Separate from FilesystemKind rather than a fourth value of it, because it is
-// an orthogonal dimension: `kind` already mixes WHERE the root is (cwd, app dir)
-// with WHAT backs it (OPFS), and a per-user OPFS subtree is genuinely both OPFS
-// and per-user. An enum can only say one thing.
-//
-// Three states for the same reason Availability has three: "nobody said" is not
-// "somebody said it is shared", and only the second is a claim.
-enum Isolation {
-  ISOLATION_UNSPECIFIED = 0; // nobody said; treated as SHARED
-  ISOLATION_SHARED = 1;      // other people may see this store
-  ISOLATION_PER_USER = 2;    // this root was granted for one person
-}
-
-message Filesystem {
-  Availability availability = 1;
-  FilesystemKind kind = 2;
-  // Ephemeral means the store does not survive the process/tab. An app may
-  // still write; it should not promise the user durability.
-  bool ephemeral = 3;
-
-  // Whether the host isolated this store per user (§3·5).
-  //
-  // WHO READS THIS, since no app in this repo does yet: an app that holds
-  // PRIVATE data and needs to know whether privacy is its problem. If the host
-  // granted a per-user root, everything the app can see belongs to one person
-  // and it may be naive. If it did not, the app is responsible for access
-  // control, and an app that assumed otherwise leaks — silently, and only
-  // discoverably by leaking.
-  //
-  // That asymmetry is why this field exists ahead of its first consumer, where
-  // ENVIRONMENT-PLAN.md D6 would normally say to wait: an unused field costs one
-  // field, and a missing one costs someone else's data.
-  //
-  // UNSPECIFIED IS SAFE, which is what makes it addable without touching a
-  // single existing host: no claim reads as "not isolated", so an app that
-  // requires privacy refuses to run rather than assuming it has it. A host that
-  // forgets to declare isolation therefore fails LOUDLY instead of leaking.
-  //
-  // NOT A SECURITY BOUNDARY. This is the host's word. A host that grants a
-  // shared root and reports PER_USER is lying, and nothing engine-side can
-  // detect it — see AGENTS.md §3·5. It lets an honest host tell an app what it
-  // is getting; it does not enforce anything.
-  Isolation isolation = 4;
-}
-
-// Environment is what the host can do, as of `revision`.
-//
-// Deliberately small (plan D6): a field here is a branch somewhere, and a
-// capability nothing reads yet is a branch nothing tests. Display may never land
-// at all now that Decision 34 made the semantic render path the default. Events
-// are absent BY RULE, not by omission — emitting carries nothing back, so its
-// absence is unobservable and Decision 33 forbids an app branching on it.
-message Environment {
-  // Monotonic, host-assigned, and REQUIRED to be non-zero — the engine rejects
-  // 0 rather than reading it as "the first one", so a host that forgot cannot
-  // masquerade as a host that is up to date.
-  //
-  // Its reader is registration: SetEnvironment re-runs capability registration
-  // and churns the command surface, so an unchanged revision is how the engine
-  // knows to do nothing. A slot can also tell whether what it rendered from is
-  // still current.
-  uint32 revision = 1;
-  Filesystem filesystem = 2;
-
-  // 3 held an `Index { availability }` for one afternoon, when the derived index
-  // was going to be a host-provided SQLite database that a tier could lack. It
-  // is not: the index is a projection the engine owns, present wherever a
-  // filesystem is, so there is nothing for a manifest to report
-  // (docs/INDEX-PLAN.md D8).
-  //
-  // Reserved rather than reused, because the field a host store would eventually
-  // want is a DIFFERENT question — "does this host provide a key-value store"
-  // (that plan's Phase 6) — and giving an old number new semantics is how a
-  // stale decoder silently reads the wrong fact.
-  reserved 3;
-  reserved "index";
-
-  // Where printed text lands, and how much room the app has RIGHT NOW.
-  //
-  // THIS IS THE FIELD THAT MOVES. Everything else in this manifest is settled
-  // when the host starts; this one is an ALLOCATION, and a world that takes
-  // screen back for an alert or a menu changes it mid-session. That is exactly
-  // why it belongs here rather than in `wasi:cli/environment`: the wasi env is
-  // read once during `_initialize` and can never be re-read, so an allocation
-  // announced there is frozen at the value it had before the app ever ran.
-  //
-  // Putting it in the manifest gets both halves for free, because the manifest
-  // already has them. POLL: `platform.Env()` is a cached synchronous read, no
-  // import, no round trip. NOTIFY: the host re-sends with a bumped revision and
-  // the engine fires registered callbacks. Neither needed a new capability,
-  // which is the D6 test this had to pass.
-  //
-  // The `ILC_STDOUT`/`ILC_COLS`/`ILC_ROWS` wasi keys are NOT replaced by this.
-  // They stay as the startup bootstrap for a tier that cannot push a manifest at
-  // all — today's badge is exactly that — and an app reads them only when this
-  // field is UNSPECIFIED.
-  TextOut text_out = 4;
-}
-
-// Where an app's printed text actually goes.
-//
-// **Presence of stdout proves nothing**, which is why this exists. Every tier
-// PROVIDES `wasi:cli/stdout` — TinyGo acquires it during `_initialize` and a
-// component whose stdout is missing never instantiates — so an app learns
-// nothing by checking whether it is there. Only the host knows whether the bytes
-// reach a person.
-enum TextOutlet {
-  TEXT_OUTLET_UNSPECIFIED = 0; // nobody said; FAILS OPEN, see below
-  TEXT_OUTLET_NONE = 1;        // printing reaches no one
-  TEXT_OUTLET_UART = 2;        // a serial console someone may be watching
-  TEXT_OUTLET_DISPLAY = 3;     // a screen the host renders text onto
-  TEXT_OUTLET_TERMINAL = 4;    // an ordinary stdout
-}
-
-// The app's text budget, as of the enclosing manifest's `revision`.
-message TextOut {
-  // 1 held an `Availability` for a day, and it was a SECOND WAY TO SAY WHAT
-  // `outlet` ALREADY SAYS. Filesystem needs the enum because a root can be
-  // absent, present, or undeclared with nothing else to read; here all three
-  // states live in `outlet` — UNSPECIFIED is "nobody said", NONE is "somebody
-  // said no", and anything else is a live outlet.
-  //
-  // Two encodings of one fact is the bug this whole message exists to remove
-  // (D12), and it had already grown its own rule: readers were meant to treat
-  // cols/rows as unknown unless availability was PRESENT, so a host that set a
-  // budget and forgot the enum would have it silently ignored. Deleting the
-  // field deletes the rule rather than documenting it.
-  //
-  // Reserved rather than reused: giving an old number new semantics is how a
-  // stale decoder reads the wrong fact confidently.
-  reserved 1;
-  reserved "availability";
-
-  TextOutlet outlet = 2;
-
-  // The space the app HAS, not the space the tier could offer. Zero means
-  // unknown — a terminal whose width the host did not measure — and an app must
-  // read zero as "wrap however you like", never as "you have no room".
-  //
-  // A wrong non-zero number is worse than no number, so a host that does not
-  // know must send zero rather than guess 80.
-  uint32 cols = 3;
-  uint32 rows = 4;
 }
 
 // ---- the command spec (WORLD-INPUT-PLAN.md D2) -----------------------------
@@ -464,15 +297,6 @@ message GetCommandSurfaceResponse {
   repeated uint32 method_ids = 1;
 }
 
-message SetEnvironmentRequest {
-  Environment environment = 1;
-}
-message SetEnvironmentResponse {
-  // Whether this manifest actually changed anything. False means the revision
-  // matched what was already in force and registration was left alone.
-  bool applied = 1;
-}
-
 // Filesystem export/import — the first-class platform primitive (§7.3). An
 // app's whole state is a filesystem tree, so one bundle moves it between the
 // terminal, the browser, and an embedded device.
@@ -549,37 +373,6 @@ message RebuildIndexResponse {
   // collection is empty", which is the difference between a broken rebuilder and
   // an empty store.
   uint32 entries = 1;
-}
-
-// ---- events (§6.3) --------------------------------------------------------
-
-// DataChangedEvent is the payload of the platform's `ilc.data-changed` topic:
-// "the filesystem under this prefix changed, re-read what you care about".
-//
-// Deliberately NOT a diff. A precise change list would be a second source of
-// truth that a subscriber could act on WITHOUT re-reading the files — and the
-// files are the truth (§7.1). Telling a UI only that something moved keeps the
-// filesystem authoritative and keeps this message from growing into a protocol.
-// EnvironmentChangedEvent announces that the facts moved (§6.4a).
-//
-// Emitted only when a manifest actually APPLIES — a re-send of the revision
-// already in force changes nothing, and announcing it would have every listener
-// re-read for no reason.
-//
-// Why an event and not a return value: the host that sent the manifest already
-// knows. This is for everyone ELSE — a command inspector showing which verbs
-// this host provides, a slot rendering a capability-dependent control. They did
-// not make the call and have no other way to learn the answer changed.
-//
-// Carries the revision and nothing else, for the same reason DataChangedEvent
-// is not a diff: a listener that acted on the payload would be treating the
-// event as the source of truth instead of re-reading. Ask the engine.
-message EnvironmentChangedEvent {
-  option (devalbo.options.v1.topic) = "ilc.environment-changed";
-
-  // The revision now in force. Enough for a listener to tell whether it has
-  // already caught up, and useless for anything else — deliberately.
-  uint32 revision = 1;
 }
 
 message DataChangedEvent {

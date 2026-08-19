@@ -69,90 +69,6 @@ func (x Activity) String() string {
 	return strconv.Itoa(int(x))
 }
 
-// Which world a firmware was built as. Mirrors `BadgeWorld` in world.rs.
-type WorldKind int32
-
-const (
-	WorldKind_WORLD_KIND_UNSPECIFIED WorldKind = 0
-	// Text: the app's output is meant to be READ.
-	WorldKind_WORLD_KIND_NORMAL WorldKind = 1
-	// One colour, meaning "how is it going" — a deliberate simulation of a world
-	// with almost no output capability.
-	WorldKind_WORLD_KIND_MINIMAL WorldKind = 2
-)
-
-// Enum value maps for WorldKind.
-var (
-	WorldKind_name = map[int32]string{
-		0: "WORLD_KIND_UNSPECIFIED",
-		1: "WORLD_KIND_NORMAL",
-		2: "WORLD_KIND_MINIMAL",
-	}
-	WorldKind_value = map[string]int32{
-		"WORLD_KIND_UNSPECIFIED": 0,
-		"WORLD_KIND_NORMAL":      1,
-		"WORLD_KIND_MINIMAL":     2,
-	}
-)
-
-func (x WorldKind) Enum() *WorldKind {
-	p := new(WorldKind)
-	*p = x
-	return p
-}
-
-func (x WorldKind) String() string {
-	name, valid := WorldKind_name[int32(x)]
-	if valid {
-		return name
-	}
-	return strconv.Itoa(int(x))
-}
-
-// Which tier is answering. The same value an app sees as `ILC_TIER`, so a test
-// can assert that a world advertises what it claims.
-type Tier int32
-
-const (
-	Tier_TIER_UNSPECIFIED Tier = 0
-	Tier_TIER_RP2350      Tier = 1
-	Tier_TIER_BROWSER     Tier = 2
-	Tier_TIER_NATIVE      Tier = 3
-	Tier_TIER_QEMU_ARMV7M Tier = 4
-)
-
-// Enum value maps for Tier.
-var (
-	Tier_name = map[int32]string{
-		0: "TIER_UNSPECIFIED",
-		1: "TIER_RP2350",
-		2: "TIER_BROWSER",
-		3: "TIER_NATIVE",
-		4: "TIER_QEMU_ARMV7M",
-	}
-	Tier_value = map[string]int32{
-		"TIER_UNSPECIFIED": 0,
-		"TIER_RP2350":      1,
-		"TIER_BROWSER":     2,
-		"TIER_NATIVE":      3,
-		"TIER_QEMU_ARMV7M": 4,
-	}
-)
-
-func (x Tier) Enum() *Tier {
-	p := new(Tier)
-	*p = x
-	return p
-}
-
-func (x Tier) String() string {
-	name, valid := Tier_name[int32(x)]
-	if valid {
-		return name
-	}
-	return strconv.Itoa(int(x))
-}
-
 // How a world divides its panel. Mirrors `ScreenLayout` in world.rs.
 type ScreenLayout int32
 
@@ -406,6 +322,71 @@ func (x Integrity) String() string {
 	return strconv.Itoa(int(x))
 }
 
+// Which tier is answering.
+//
+// # Why this is NOT in an app's manifest
+//
+// Not because an app already knows — it does not, and that is the whole reason
+// the manifest exists. An app is ONE portable artifact: the same engine package
+// is linked natively, compiled to wasm for a browser, and AOT-compiled to a
+// `.cwasm` that a badge runs for apps it was never built for. At runtime it
+// cannot tell which of those happened.
+//
+// (An earlier version of this comment said the opposite — "a tier is what an app
+// was built for" — which inverts the central premise of the architecture. It is
+// recorded here because a schema comment is read as settled fact, and this one
+// was wrong for a day.)
+//
+// The real reason is REDUNDANCY. `World` already determines the tier:
+// `badge-normal` is rp2350, `browser` is the browser tier, `native` is native.
+// Carrying both in the same message makes a disagreement EXPRESSIBLE — a world
+// that reports `browser` and `rp2350` together — and this schema has spent its
+// life removing exactly that shape: `TextOut.availability` beside `outlet`, the
+// `config` map beside typed fields.
+//
+// So an app is told the more specific of the two, once.
+type Tier int32
+
+const (
+	Tier_TIER_UNSPECIFIED Tier = 0
+	Tier_TIER_RP2350      Tier = 1
+	Tier_TIER_BROWSER     Tier = 2
+	Tier_TIER_NATIVE      Tier = 3
+	Tier_TIER_QEMU_ARMV7M Tier = 4
+)
+
+// Enum value maps for Tier.
+var (
+	Tier_name = map[int32]string{
+		0: "TIER_UNSPECIFIED",
+		1: "TIER_RP2350",
+		2: "TIER_BROWSER",
+		3: "TIER_NATIVE",
+		4: "TIER_QEMU_ARMV7M",
+	}
+	Tier_value = map[string]int32{
+		"TIER_UNSPECIFIED": 0,
+		"TIER_RP2350":      1,
+		"TIER_BROWSER":     2,
+		"TIER_NATIVE":      3,
+		"TIER_QEMU_ARMV7M": 4,
+	}
+)
+
+func (x Tier) Enum() *Tier {
+	p := new(Tier)
+	*p = x
+	return p
+}
+
+func (x Tier) String() string {
+	name, valid := Tier_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 type Level int32
 
 const (
@@ -581,6 +562,18 @@ const (
 	Notice_NOTICE_UNSPECIFIED Notice = 0
 	// A `LogLine`.
 	Notice_NOTICE_LOG Notice = 1
+	// A periodic `WorldState`, so that SILENCE MEANS SOMETHING.
+	//
+	// Every other diagnostic here is "the world says things". None of them says
+	// "the world is still here", so silence had four readings — hung, finished,
+	// starved, or a reader already at the end — and no way to tell them apart
+	// without reflashing. That ambiguity cost an hour on 2026-08-17.
+	//
+	// A beat collapses it. If it stops, the world stopped. If it continues while
+	// nothing else arrives, the world is alive and the silence is about something
+	// else. That is a different claim from anything the log makes, and it is the
+	// one that was missing.
+	Notice_NOTICE_HEARTBEAT Notice = 2
 )
 
 // Enum value maps for Notice.
@@ -588,10 +581,12 @@ var (
 	Notice_name = map[int32]string{
 		0: "NOTICE_UNSPECIFIED",
 		1: "NOTICE_LOG",
+		2: "NOTICE_HEARTBEAT",
 	}
 	Notice_value = map[string]int32{
 		"NOTICE_UNSPECIFIED": 0,
 		"NOTICE_LOG":         1,
+		"NOTICE_HEARTBEAT":   2,
 	}
 )
 
@@ -616,7 +611,7 @@ func (x Notice) String() string {
 // those, and three debugging cycles went on that ambiguity in one session.
 type WorldState struct {
 	unknownFields []byte
-	World         WorldKind `protobuf:"varint,9,opt,name=world,proto3" json:"world,omitempty"`
+	World         WorldName `protobuf:"varint,9,opt,name=world,proto3" json:"world,omitempty"`
 	Tier          Tier      `protobuf:"varint,10,opt,name=tier,proto3" json:"tier,omitempty"`
 	// Firmware or host version. GENUINELY A STRING: a semver is not a closed set.
 	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
@@ -647,6 +642,20 @@ type WorldState struct {
 	// Milliseconds since boot. Lets a caller tell a world that is progressing
 	// slowly from one that has stopped, without watching two answers arrive.
 	UptimeMs uint64 `protobuf:"varint,7,opt,name=uptime_ms,json=uptimeMs,proto3" json:"uptimeMs,omitempty"`
+	// PASS-THROUGH BOOKKEEPING, for the question a client cannot answer alone.
+	//
+	// "I sent a request and nothing happened" has three causes that are identical
+	// from the far end of a cable: it never arrived, it arrived and was refused,
+	// or it arrived and nobody collected it. One counter separates the first from
+	// the rest, and the pair separates the second from the third.
+	//
+	// Diagnostic, and kept: this cost an afternoon of writing throwaway probes to
+	// guess at it, which is exactly the work a control channel exists to make
+	// unnecessary.
+	RequestsOffered uint32 `protobuf:"varint,14,opt,name=requests_offered,json=requestsOffered,proto3" json:"requestsOffered,omitempty"`
+	RequestsTaken   uint32 `protobuf:"varint,15,opt,name=requests_taken,json=requestsTaken,proto3" json:"requestsTaken,omitempty"`
+	// Whether an app is instantiated and could run one at all.
+	SessionOpen bool `protobuf:"varint,16,opt,name=session_open,json=sessionOpen,proto3" json:"sessionOpen,omitempty"`
 }
 
 func (x *WorldState) Reset() {
@@ -655,11 +664,11 @@ func (x *WorldState) Reset() {
 
 func (*WorldState) ProtoMessage() {}
 
-func (x *WorldState) GetWorld() WorldKind {
+func (x *WorldState) GetWorld() WorldName {
 	if x != nil {
 		return x.World
 	}
-	return WorldKind_WORLD_KIND_UNSPECIFIED
+	return WorldName_WORLD_NAME_UNSPECIFIED
 }
 
 func (x *WorldState) GetTier() Tier {
@@ -723,6 +732,27 @@ func (x *WorldState) GetUptimeMs() uint64 {
 		return x.UptimeMs
 	}
 	return 0
+}
+
+func (x *WorldState) GetRequestsOffered() uint32 {
+	if x != nil {
+		return x.RequestsOffered
+	}
+	return 0
+}
+
+func (x *WorldState) GetRequestsTaken() uint32 {
+	if x != nil {
+		return x.RequestsTaken
+	}
+	return 0
+}
+
+func (x *WorldState) GetSessionOpen() bool {
+	if x != nil {
+		return x.SessionOpen
+	}
+	return false
 }
 
 type PressButtonRequest struct {
@@ -981,6 +1011,15 @@ func (x *ExecuteRequest) GetRequest() []byte {
 
 type ExecuteResponse struct {
 	unknownFields []byte
+	// WHICH COMMAND THIS ANSWERS.
+	//
+	// Implicit until now: the caller sent a method id, so it knew. That holds
+	// only while the response never leaves the conversation that produced it —
+	// and the whole point of framing was that these bytes can be logged,
+	// replayed, or mirrored to another world (D8), where "what did I ask for" is
+	// no longer in scope. One varint makes the answer decodable on its own, which
+	// is also what lets a reader pick the right response spec for it.
+	MethodId uint32 `protobuf:"varint,4,opt,name=method_id,json=methodId,proto3" json:"methodId,omitempty"`
 	// WHETHER THE APP SUCCEEDED, which is not whether the world did.
 	//
 	// `ControlResponse.ok` says the world accepted the verb and ran something.
@@ -999,6 +1038,13 @@ func (x *ExecuteResponse) Reset() {
 }
 
 func (*ExecuteResponse) ProtoMessage() {}
+
+func (x *ExecuteResponse) GetMethodId() uint32 {
+	if x != nil {
+		return x.MethodId
+	}
+	return 0
+}
 
 func (x *ExecuteResponse) GetSuccess() bool {
 	if x != nil {
@@ -1037,6 +1083,31 @@ type ControlRequest struct {
 	// The verb's argument, if it takes one. For `VERB_EXECUTE` this is a
 	// `method_id` and the app's request bytes; for `VERB_GET_WORLD_STATE`, empty.
 	Payload []byte `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	// A NUMBER THE CLIENT CHOOSES, echoed on the reply.
+	//
+	// # Why this exists before anything needs it
+	//
+	// Today a client pairs a reply with its request by there being only one in
+	// flight — `passthrough.rs` REFUSES a second pass-through for exactly that
+	// reason, and says so. That is not a design, it is the absence of one, and it
+	// holds only while three things stay true: one client, one link, and a
+	// transport that neither reorders nor duplicates.
+	//
+	// Each of those is already scheduled to stop being true. The browser mirror
+	// (D8) is a second client on the same wire. A UDP transport (D9 §1a) can
+	// deliver a reply twice, or out of order, or after the retry that replaced
+	// it — and an uncorrelated reply is then not merely unhelpful, it is WRONG,
+	// and wrong in a way nothing can detect after the fact.
+	//
+	// Adding it now costs a varint. Adding it later means every client that
+	// learned to depend on one-at-a-time is a client that breaks.
+	//
+	// # It is opaque to the world
+	//
+	// A world never interprets it, never validates it, and never remembers it
+	// beyond the reply it is echoing into. Zero means "not correlated", which is
+	// what a client that predates this field sends, and it keeps working.
+	RequestId uint64 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"requestId,omitempty"`
 }
 
 func (x *ControlRequest) Reset() {
@@ -1059,6 +1130,13 @@ func (x *ControlRequest) GetPayload() []byte {
 	return nil
 }
 
+func (x *ControlRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
 type ControlResponse struct {
 	unknownFields []byte
 	// False means the world refused or could not answer. `error` says why, in
@@ -1068,6 +1146,13 @@ type ControlResponse struct {
 	// The verb's answer, encoded per verb. `VERB_GET_WORLD_STATE` returns an
 	// encoded `WorldState`.
 	Payload []byte `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	// The `request_id` of the request this answers, copied verbatim.
+	//
+	// A client that sent one and receives a reply carrying a DIFFERENT id has
+	// learned something true and useful: this is not its answer. Skipping it and
+	// continuing to wait is correct, and is what makes a late reply from a
+	// timed-out request harmless rather than a wrong answer to the next question.
+	RequestId uint64 `protobuf:"varint,4,opt,name=request_id,json=requestId,proto3" json:"requestId,omitempty"`
 }
 
 func (x *ControlResponse) Reset() {
@@ -1095,6 +1180,13 @@ func (x *ControlResponse) GetPayload() []byte {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *ControlResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
 }
 
 // A line of a world's log, as a message rather than a string (D8b).
@@ -1213,6 +1305,19 @@ func (x *LogLine) GetScope() Scope {
 // with a reset button on the front, it does constantly.
 type Subscription struct {
 	unknownFields []byte
+	// How often to beat, for `NOTICE_HEARTBEAT`. Zero takes the world's own
+	// default.
+	//
+	// THE SUBSCRIBER CHOOSES, because the subscriber is the one who knows what it
+	// is watching for: a person watching a badge wants a second, a test watching
+	// for a hang in a ten-minute run does not. A world that fixed the rate would
+	// be guessing at both.
+	//
+	// A WORLD MAY STILL REFUSE THE NUMBER. It is clamped to what this world will
+	// actually sustain and the granted value comes back in the reply — asking for
+	// a beat every millisecond on a link that also carries a log is a request to
+	// starve the log, and quietly obeying would be worse than saying no.
+	HeartbeatMs uint32 `protobuf:"varint,2,opt,name=heartbeat_ms,json=heartbeatMs,proto3" json:"heartbeatMs,omitempty"`
 	// The notices wanted. EMPTY MEANS NONE, which is how a client unsubscribes.
 	//
 	// A world grants what it supports and no more, and the reply says which — so a
@@ -1226,6 +1331,13 @@ func (x *Subscription) Reset() {
 }
 
 func (*Subscription) ProtoMessage() {}
+
+func (x *Subscription) GetHeartbeatMs() uint32 {
+	if x != nil {
+		return x.HeartbeatMs
+	}
+	return 0
+}
 
 func (x *Subscription) GetNotices() []Notice {
 	if x != nil {
@@ -1249,6 +1361,9 @@ func (m *WorldState) CloneVT() *WorldState {
 	r.App = m.App
 	r.AppActivity = m.AppActivity
 	r.UptimeMs = m.UptimeMs
+	r.RequestsOffered = m.RequestsOffered
+	r.RequestsTaken = m.RequestsTaken
+	r.SessionOpen = m.SessionOpen
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -1370,6 +1485,7 @@ func (m *ExecuteResponse) CloneVT() *ExecuteResponse {
 		return (*ExecuteResponse)(nil)
 	}
 	r := new(ExecuteResponse)
+	r.MethodId = m.MethodId
 	r.Success = m.Success
 	r.Error = m.Error
 	r.Output = protobuf_go_lite.CloneBytes(m.Output)
@@ -1389,6 +1505,7 @@ func (m *ControlRequest) CloneVT() *ControlRequest {
 	}
 	r := new(ControlRequest)
 	r.Verb = m.Verb
+	r.RequestId = m.RequestId
 	r.Payload = protobuf_go_lite.CloneBytes(m.Payload)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
@@ -1407,6 +1524,7 @@ func (m *ControlResponse) CloneVT() *ControlResponse {
 	r := new(ControlResponse)
 	r.Ok = m.Ok
 	r.Error = m.Error
+	r.RequestId = m.RequestId
 	r.Payload = protobuf_go_lite.CloneBytes(m.Payload)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
@@ -1443,6 +1561,7 @@ func (m *Subscription) CloneVT() *Subscription {
 		return (*Subscription)(nil)
 	}
 	r := new(Subscription)
+	r.HeartbeatMs = m.HeartbeatMs
 	r.Notices = protobuf_go_lite.CloneSlice(m.Notices)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
@@ -1488,6 +1607,15 @@ func (this *WorldState) EqualVT(that *WorldState) bool {
 		return false
 	}
 	if this.Text != that.Text {
+		return false
+	}
+	if this.RequestsOffered != that.RequestsOffered {
+		return false
+	}
+	if this.RequestsTaken != that.RequestsTaken {
+		return false
+	}
+	if this.SessionOpen != that.SessionOpen {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1659,6 +1787,9 @@ func (this *ExecuteResponse) EqualVT(that *ExecuteResponse) bool {
 	if this.Error != that.Error {
 		return false
 	}
+	if this.MethodId != that.MethodId {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -1679,6 +1810,9 @@ func (this *ControlRequest) EqualVT(that *ControlRequest) bool {
 		return false
 	}
 	if !protobuf_go_lite.EqualBytes(this.Payload, that.Payload) {
+		return false
+	}
+	if this.RequestId != that.RequestId {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1704,6 +1838,9 @@ func (this *ControlResponse) EqualVT(that *ControlResponse) bool {
 		return false
 	}
 	if !protobuf_go_lite.EqualBytes(this.Payload, that.Payload) {
+		return false
+	}
+	if this.RequestId != that.RequestId {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1756,6 +1893,9 @@ func (this *Subscription) EqualVT(that *Subscription) bool {
 	if !protobuf_go_lite.EqualSlice(this.Notices, that.Notices) {
 		return false
 	}
+	if this.HeartbeatMs != that.HeartbeatMs {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -1804,86 +1944,6 @@ func (x *Activity) UnmarshalText(b []byte) error {
 
 // UnmarshalJSON unmarshals the Activity from JSON.
 func (x *Activity) UnmarshalJSON(b []byte) error {
-	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
-}
-
-// MarshalProtoJSON marshals the WorldKind to JSON.
-func (x WorldKind) MarshalProtoJSON(s *json.MarshalState) {
-	s.WriteEnum(int32(x), WorldKind_name)
-}
-
-// MarshalText marshals the WorldKind to text.
-func (x WorldKind) MarshalText() ([]byte, error) {
-	return []byte(json.GetEnumString(int32(x), WorldKind_name)), nil
-}
-
-// MarshalJSON marshals the WorldKind to JSON.
-func (x WorldKind) MarshalJSON() ([]byte, error) {
-	return json.DefaultMarshalerConfig.Marshal(x)
-}
-
-// UnmarshalProtoJSON unmarshals the WorldKind from JSON.
-func (x *WorldKind) UnmarshalProtoJSON(s *json.UnmarshalState) {
-	v := s.ReadEnum(WorldKind_value)
-	if err := s.Err(); err != nil {
-		s.SetErrorf("could not read WorldKind enum: %v", err)
-		return
-	}
-	*x = WorldKind(v)
-}
-
-// UnmarshalText unmarshals the WorldKind from text.
-func (x *WorldKind) UnmarshalText(b []byte) error {
-	i, err := json.ParseEnumString(string(b), WorldKind_value)
-	if err != nil {
-		return err
-	}
-	*x = WorldKind(i)
-	return nil
-}
-
-// UnmarshalJSON unmarshals the WorldKind from JSON.
-func (x *WorldKind) UnmarshalJSON(b []byte) error {
-	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
-}
-
-// MarshalProtoJSON marshals the Tier to JSON.
-func (x Tier) MarshalProtoJSON(s *json.MarshalState) {
-	s.WriteEnum(int32(x), Tier_name)
-}
-
-// MarshalText marshals the Tier to text.
-func (x Tier) MarshalText() ([]byte, error) {
-	return []byte(json.GetEnumString(int32(x), Tier_name)), nil
-}
-
-// MarshalJSON marshals the Tier to JSON.
-func (x Tier) MarshalJSON() ([]byte, error) {
-	return json.DefaultMarshalerConfig.Marshal(x)
-}
-
-// UnmarshalProtoJSON unmarshals the Tier from JSON.
-func (x *Tier) UnmarshalProtoJSON(s *json.UnmarshalState) {
-	v := s.ReadEnum(Tier_value)
-	if err := s.Err(); err != nil {
-		s.SetErrorf("could not read Tier enum: %v", err)
-		return
-	}
-	*x = Tier(v)
-}
-
-// UnmarshalText unmarshals the Tier from text.
-func (x *Tier) UnmarshalText(b []byte) error {
-	i, err := json.ParseEnumString(string(b), Tier_value)
-	if err != nil {
-		return err
-	}
-	*x = Tier(i)
-	return nil
-}
-
-// UnmarshalJSON unmarshals the Tier from JSON.
-func (x *Tier) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -2084,6 +2144,46 @@ func (x *Integrity) UnmarshalText(b []byte) error {
 
 // UnmarshalJSON unmarshals the Integrity from JSON.
 func (x *Integrity) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Tier to JSON.
+func (x Tier) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Tier_name)
+}
+
+// MarshalText marshals the Tier to text.
+func (x Tier) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Tier_name)), nil
+}
+
+// MarshalJSON marshals the Tier to JSON.
+func (x Tier) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Tier from JSON.
+func (x *Tier) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Tier_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Tier enum: %v", err)
+		return
+	}
+	*x = Tier(v)
+}
+
+// UnmarshalText unmarshals the Tier from text.
+func (x *Tier) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Tier_value)
+	if err != nil {
+		return err
+	}
+	*x = Tier(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Tier from JSON.
+func (x *Tier) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -2305,6 +2405,21 @@ func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("text")
 		x.Text.MarshalProtoJSON(s)
 	}
+	if x.RequestsOffered != 0 || s.HasField("requestsOffered") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("requestsOffered")
+		s.WriteUint32(x.RequestsOffered)
+	}
+	if x.RequestsTaken != 0 || s.HasField("requestsTaken") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("requestsTaken")
+		s.WriteUint32(x.RequestsTaken)
+	}
+	if x.SessionOpen || s.HasField("sessionOpen") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("sessionOpen")
+		s.WriteBool(x.SessionOpen)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2352,6 +2467,15 @@ func (x *WorldState) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "text":
 			s.AddField("text")
 			x.Text.UnmarshalProtoJSON(s)
+		case "requests_offered", "requestsOffered":
+			s.AddField("requests_offered")
+			x.RequestsOffered = s.ReadUint32()
+		case "requests_taken", "requestsTaken":
+			s.AddField("requests_taken")
+			x.RequestsTaken = s.ReadUint32()
+		case "session_open", "sessionOpen":
+			s.AddField("session_open")
+			x.SessionOpen = s.ReadBool()
 		}
 	})
 }
@@ -2741,6 +2865,11 @@ func (x *ExecuteResponse) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("error")
 		s.WriteString(x.Error)
 	}
+	if x.MethodId != 0 || s.HasField("methodId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("methodId")
+		s.WriteUint32(x.MethodId)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2767,6 +2896,9 @@ func (x *ExecuteResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "error":
 			s.AddField("error")
 			x.Error = s.ReadString()
+		case "method_id", "methodId":
+			s.AddField("method_id")
+			x.MethodId = s.ReadUint32()
 		}
 	})
 }
@@ -2794,6 +2926,11 @@ func (x *ControlRequest) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("payload")
 		s.WriteBytes(x.Payload)
 	}
+	if x.RequestId != 0 || s.HasField("requestId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("requestId")
+		s.WriteUint64(x.RequestId)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2817,6 +2954,9 @@ func (x *ControlRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "payload":
 			s.AddField("payload")
 			x.Payload = s.ReadBytes()
+		case "request_id", "requestId":
+			s.AddField("request_id")
+			x.RequestId = s.ReadUint64()
 		}
 	})
 }
@@ -2849,6 +2989,11 @@ func (x *ControlResponse) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("payload")
 		s.WriteBytes(x.Payload)
 	}
+	if x.RequestId != 0 || s.HasField("requestId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("requestId")
+		s.WriteUint64(x.RequestId)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2875,6 +3020,9 @@ func (x *ControlResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "payload":
 			s.AddField("payload")
 			x.Payload = s.ReadBytes()
+		case "request_id", "requestId":
+			s.AddField("request_id")
+			x.RequestId = s.ReadUint64()
 		}
 	})
 }
@@ -2977,6 +3125,11 @@ func (x *Subscription) MarshalProtoJSON(s *json.MarshalState) {
 		}
 		s.WriteArrayEnd()
 	}
+	if x.HeartbeatMs != 0 || s.HasField("heartbeatMs") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("heartbeatMs")
+		s.WriteUint32(x.HeartbeatMs)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -3005,6 +3158,9 @@ func (x *Subscription) UnmarshalProtoJSON(s *json.UnmarshalState) {
 				v.UnmarshalProtoJSON(s)
 				x.Notices = append(x.Notices, v)
 			})
+		case "heartbeat_ms", "heartbeatMs":
+			s.AddField("heartbeat_ms")
+			x.HeartbeatMs = s.ReadUint32()
 		}
 	})
 }
@@ -3042,6 +3198,23 @@ func (m *WorldState) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.SessionOpen {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.SessionOpen)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x80
+	}
+	if m.RequestsTaken != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestsTaken))
+		i--
+		dAtA[i] = 0x78
+	}
+	if m.RequestsOffered != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestsOffered))
+		i--
+		dAtA[i] = 0x70
 	}
 	if m.Text != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Text))
@@ -3406,6 +3579,11 @@ func (m *ExecuteResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x20
+	}
 	if len(m.Error) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Error)
 		i--
@@ -3453,6 +3631,11 @@ func (m *ControlRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.RequestId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestId))
+		i--
+		dAtA[i] = 0x18
+	}
 	if len(m.Payload) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Payload)
 		i--
@@ -3494,6 +3677,11 @@ func (m *ControlResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.RequestId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestId))
+		i--
+		dAtA[i] = 0x20
 	}
 	if len(m.Payload) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Payload)
@@ -3599,6 +3787,11 @@ func (m *Subscription) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.HeartbeatMs != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.HeartbeatMs))
+		i--
+		dAtA[i] = 0x10
+	}
 	if len(m.Notices) > 0 {
 		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.Notices)
 		i--
@@ -3635,6 +3828,23 @@ func (m *WorldState) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.SessionOpen {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.SessionOpen)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x80
+	}
+	if m.RequestsTaken != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestsTaken))
+		i--
+		dAtA[i] = 0x78
+	}
+	if m.RequestsOffered != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestsOffered))
+		i--
+		dAtA[i] = 0x70
 	}
 	if m.Text != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Text))
@@ -3999,6 +4209,11 @@ func (m *ExecuteResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error)
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.MethodId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.MethodId))
+		i--
+		dAtA[i] = 0x20
+	}
 	if len(m.Error) > 0 {
 		i = protobuf_go_lite.EncodeString(dAtA, i, m.Error)
 		i--
@@ -4046,6 +4261,11 @@ func (m *ControlRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) 
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.RequestId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestId))
+		i--
+		dAtA[i] = 0x18
+	}
 	if len(m.Payload) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Payload)
 		i--
@@ -4087,6 +4307,11 @@ func (m *ControlResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error)
 	_ = l
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.RequestId != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.RequestId))
+		i--
+		dAtA[i] = 0x20
 	}
 	if len(m.Payload) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Payload)
@@ -4192,6 +4417,11 @@ func (m *Subscription) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.HeartbeatMs != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.HeartbeatMs))
+		i--
+		dAtA[i] = 0x10
+	}
 	if len(m.Notices) > 0 {
 		i = protobuf_go_lite.EncodeVarintPacked(dAtA, i, m.Notices)
 		i--
@@ -4216,6 +4446,9 @@ func (m *WorldState) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Screen)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Input)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Text)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestsOffered)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestsTaken)
+	n += protobuf_go_lite.SizeBoolNonZero(2, m.SessionOpen)
 	n += len(m.unknownFields)
 	return n
 }
@@ -4308,6 +4541,7 @@ func (m *ExecuteResponse) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeBoolNonZero(1, m.Success)
 	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Output)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Error)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.MethodId)
 	n += len(m.unknownFields)
 	return n
 }
@@ -4320,6 +4554,7 @@ func (m *ControlRequest) SizeVT() (n int) {
 	_ = l
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Verb)
 	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Payload)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestId)
 	n += len(m.unknownFields)
 	return n
 }
@@ -4333,6 +4568,7 @@ func (m *ControlResponse) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeBoolNonZero(1, m.Ok)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Error)
 	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Payload)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestId)
 	n += len(m.unknownFields)
 	return n
 }
@@ -4359,17 +4595,12 @@ func (m *Subscription) SizeVT() (n int) {
 	var l int
 	_ = l
 	n += protobuf_go_lite.SizeVarintPacked(1, m.Notices)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.HeartbeatMs)
 	n += len(m.unknownFields)
 	return n
 }
 
 func (x Activity) MarshalProtoText() string {
-	return x.String()
-}
-func (x WorldKind) MarshalProtoText() string {
-	return x.String()
-}
-func (x Tier) MarshalProtoText() string {
 	return x.String()
 }
 func (x ScreenLayout) MarshalProtoText() string {
@@ -4385,6 +4616,9 @@ func (x Button) MarshalProtoText() string {
 	return x.String()
 }
 func (x Integrity) MarshalProtoText() string {
+	return x.String()
+}
+func (x Tier) MarshalProtoText() string {
 	return x.String()
 }
 func (x Level) MarshalProtoText() string {
@@ -4424,7 +4658,7 @@ func (x *WorldState) MarshalProtoText() string {
 	}
 	if x.World != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "world")
-		protobuf_go_lite.TextWriteStringer(&sb, WorldKind(x.World))
+		protobuf_go_lite.TextWriteStringer(&sb, WorldName(x.World))
 	}
 	if x.Tier != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "tier")
@@ -4441,6 +4675,18 @@ func (x *WorldState) MarshalProtoText() string {
 	if x.Text != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "text")
 		protobuf_go_lite.TextWriteStringer(&sb, TextOutlet(x.Text))
+	}
+	if x.RequestsOffered != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "requests_offered")
+		protobuf_go_lite.TextWriteUint(&sb, x.RequestsOffered)
+	}
+	if x.RequestsTaken != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "requests_taken")
+		protobuf_go_lite.TextWriteUint(&sb, x.RequestsTaken)
+	}
+	if x.SessionOpen != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "session_open")
+		protobuf_go_lite.TextWriteBool(&sb, x.SessionOpen)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -4593,6 +4839,10 @@ func (x *ExecuteResponse) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "error")
 		protobuf_go_lite.TextWriteString(&sb, x.Error)
 	}
+	if x.MethodId != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "method_id")
+		protobuf_go_lite.TextWriteUint(&sb, x.MethodId)
+	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
 
@@ -4609,6 +4859,10 @@ func (x *ControlRequest) MarshalProtoText() string {
 	if len(x.Payload) != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "payload")
 		protobuf_go_lite.TextWriteBytes(&sb, x.Payload)
+	}
+	if x.RequestId != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "request_id")
+		protobuf_go_lite.TextWriteUint(&sb, x.RequestId)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -4630,6 +4884,10 @@ func (x *ControlResponse) MarshalProtoText() string {
 	if len(x.Payload) != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "payload")
 		protobuf_go_lite.TextWriteBytes(&sb, x.Payload)
+	}
+	if x.RequestId != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "request_id")
+		protobuf_go_lite.TextWriteUint(&sb, x.RequestId)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -4676,6 +4934,10 @@ func (x *Subscription) MarshalProtoText() string {
 			protobuf_go_lite.TextWriteStringer(&sb, Notice(v))
 		}
 		protobuf_go_lite.TextWriteListEnd(&sb)
+	}
+	if x.HeartbeatMs != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "heartbeat_ms")
+		protobuf_go_lite.TextWriteUint(&sb, x.HeartbeatMs)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -4760,7 +5022,7 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 			m.World = 0
 			var _v uint64
 			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-			m.World = WorldKind(_v)
+			m.World = WorldName(_v)
 			if err != nil {
 				return err
 			}
@@ -4808,6 +5070,34 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		case 14:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestsOffered", wireType)
+			}
+			m.RequestsOffered = 0
+			m.RequestsOffered, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 15:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestsTaken", wireType)
+			}
+			m.RequestsTaken = 0
+			m.RequestsTaken, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 16:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionOpen", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.SessionOpen = bool(v)
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -5285,6 +5575,15 @@ func (m *ExecuteResponse) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			m.Error = v
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -5343,6 +5642,15 @@ func (m *ControlRequest) UnmarshalVT(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			m.Payload, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Payload, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+			}
+			m.RequestId = 0
+			m.RequestId, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
@@ -5413,6 +5721,15 @@ func (m *ControlResponse) UnmarshalVT(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			m.Payload, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Payload, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+			}
+			m.RequestId = 0
+			m.RequestId, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
@@ -5586,6 +5903,15 @@ func (m *Subscription) UnmarshalVT(dAtA []byte) error {
 			} else {
 				return fmt.Errorf("proto: wrong wireType = %d for field Notices", wireType)
 			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field HeartbeatMs", wireType)
+			}
+			m.HeartbeatMs = 0
+			m.HeartbeatMs, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -5685,7 +6011,7 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 			m.World = 0
 			var _v uint64
 			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
-			m.World = WorldKind(_v)
+			m.World = WorldName(_v)
 			if err != nil {
 				return err
 			}
@@ -5733,6 +6059,34 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		case 14:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestsOffered", wireType)
+			}
+			m.RequestsOffered = 0
+			m.RequestsOffered, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 15:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestsTaken", wireType)
+			}
+			m.RequestsTaken = 0
+			m.RequestsTaken, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 16:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionOpen", wireType)
+			}
+			var v bool
+			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.SessionOpen = bool(v)
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -6210,6 +6564,15 @@ func (m *ExecuteResponse) UnmarshalVTUnsafe(dAtA []byte) error {
 				return err
 			}
 			m.Error = v
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodId", wireType)
+			}
+			m.MethodId = 0
+			m.MethodId, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -6268,6 +6631,15 @@ func (m *ControlRequest) UnmarshalVTUnsafe(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			m.Payload, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+			}
+			m.RequestId = 0
+			m.RequestId, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
@@ -6338,6 +6710,15 @@ func (m *ControlResponse) UnmarshalVTUnsafe(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			m.Payload, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+			}
+			m.RequestId = 0
+			m.RequestId, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
@@ -6510,6 +6891,15 @@ func (m *Subscription) UnmarshalVTUnsafe(dAtA []byte) error {
 				}
 			} else {
 				return fmt.Errorf("proto: wrong wireType = %d for field Notices", wireType)
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field HeartbeatMs", wireType)
+			}
+			m.HeartbeatMs = 0
+			m.HeartbeatMs, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
 			}
 		default:
 			iNdEx = preIndex

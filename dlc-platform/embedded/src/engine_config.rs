@@ -7,8 +7,10 @@
 //! exactly. They lived in two crates and were kept in step by hand, which failed
 //! exactly as you would expect:
 //!
-//!     Module was compiled with a memory reservation of '10485760'
-//!     but '0' is expected for the host
+//! ```text
+//! Module was compiled with a memory reservation of '10485760'
+//! but '0' is expected for the host
+//! ```
 //!
 //! The obvious fix — have `precompile/` depend on this crate — is wrong, and the
 //! reason is the point of `precompile/Cargo.toml`: that crate builds wasmtime

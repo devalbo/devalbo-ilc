@@ -32,27 +32,27 @@ func cleanEnv(t *testing.T) {
 	registry = map[uint32]Handler{}
 }
 
-func manifest(revision uint32, fs ilcv1.Availability) *ilcv1.SetEnvironmentRequest {
-	return &ilcv1.SetEnvironmentRequest{
-		Environment: &ilcv1.Environment{
+func manifest(revision uint32, fs ilcv1.Availability) *ilcv1.SetWorldManifestRequest {
+	return &ilcv1.SetWorldManifestRequest{
+		WorldManifest: &ilcv1.WorldManifest{
 			Revision:   revision,
 			Filesystem: &ilcv1.Filesystem{Availability: fs, Kind: ilcv1.FilesystemKind_FILESYSTEM_KIND_APP_DIR},
 		},
 	}
 }
 
-// send dispatches SetEnvironment the way a host does — through Execute, not by
+// send dispatches SetWorldManifest the way a host does — through Execute, not by
 // calling the handler. Natively the engine is linked in-process and a direct
 // call would work, but then the native tier would never exercise the command
 // path that the wasm tier has no choice about, and parity would be comparing
 // two different sequences.
-func send(t *testing.T, req *ilcv1.SetEnvironmentRequest) Result {
+func send(t *testing.T, req *ilcv1.SetWorldManifestRequest) Result {
 	t.Helper()
 	body, err := req.MarshalVT()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Execute(MethodSetEnvironment, body)
+	return Execute(MethodSetWorldManifest, body)
 }
 
 // An app that asks before any host has spoken must get the conservative answer,
@@ -73,9 +73,9 @@ func TestUnsetEnvironmentReadsAsAbsent(t *testing.T) {
 // --- isolation (§3·5) -------------------------------------------------------
 
 // isolated builds a manifest whose filesystem carries an isolation claim.
-func isolated(revision uint32, iso ilcv1.Isolation) *ilcv1.SetEnvironmentRequest {
+func isolated(revision uint32, iso ilcv1.Isolation) *ilcv1.SetWorldManifestRequest {
 	req := manifest(revision, ilcv1.Availability_AVAILABILITY_PRESENT)
-	req.Environment.Filesystem.Isolation = iso
+	req.WorldManifest.Filesystem.Isolation = iso
 	return req
 }
 
@@ -133,7 +133,7 @@ func TestIsolationCanBeWithdrawn(t *testing.T) {
 	}
 }
 
-func TestSetEnvironmentRoundTrips(t *testing.T) {
+func TestSetWorldManifestRoundTrips(t *testing.T) {
 	cleanEnv(t)
 	RegisterCore()
 
@@ -183,7 +183,7 @@ func TestSecondManifestReplaces(t *testing.T) {
 }
 
 // Re-sending the revision already in force must do NOTHING. The stake is not a
-// wasted assignment: SetEnvironment re-runs capability registration, so
+// wasted assignment: SetWorldManifest re-runs capability registration, so
 // re-applying would rebuild the command surface underneath a host that only
 // repeated itself.
 func TestUnchangedRevisionDoesNotReapply(t *testing.T) {
@@ -191,7 +191,7 @@ func TestUnchangedRevisionDoesNotReapply(t *testing.T) {
 	RegisterCore()
 
 	first := send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
-	var firstResp ilcv1.SetEnvironmentResponse
+	var firstResp ilcv1.SetWorldManifestResponse
 	if err := firstResp.UnmarshalVT(first.Output); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestUnchangedRevisionDoesNotReapply(t *testing.T) {
 	// Same revision, contradictory facts: proof that the revision alone decides,
 	// so a host cannot smuggle a change past the check by keeping the number.
 	second := send(t, manifest(1, ilcv1.Availability_AVAILABILITY_ABSENT))
-	var secondResp ilcv1.SetEnvironmentResponse
+	var secondResp ilcv1.SetWorldManifestResponse
 	if err := secondResp.UnmarshalVT(second.Output); err != nil {
 		t.Fatal(err)
 	}
@@ -215,14 +215,14 @@ func TestUnchangedRevisionDoesNotReapply(t *testing.T) {
 }
 
 // RegisterCore registers the block that must exist before the host has spoken —
-// and nothing else. SetEnvironment being in it is the whole reason the core
+// and nothing else. SetWorldManifest being in it is the whole reason the core
 // block exists: it is the command that decides what else gets registered, so it
 // cannot itself be waiting on a decision.
 func TestRegisterCoreRegistersOnlyLifecycleVerbs(t *testing.T) {
 	cleanEnv(t)
 	RegisterCore()
 
-	for _, method := range []uint32{MethodVersion, MethodSetEnvironment} {
+	for _, method := range []uint32{MethodVersion, MethodSetWorldManifest} {
 		if _, ok := registry[method]; !ok {
 			t.Fatalf("core method %d not registered", method)
 		}
@@ -315,8 +315,8 @@ func TestAppliedManifestAnnouncesItself(t *testing.T) {
 	seen := recordEvents(t)
 
 	send(t, manifest(1, ilcv1.Availability_AVAILABILITY_PRESENT))
-	if len(*seen) != 1 || (*seen)[0] != "ilc.environment-changed" {
-		t.Fatalf("topics = %v, want one ilc.environment-changed", *seen)
+	if len(*seen) != 1 || (*seen)[0] != "ilc.world-manifest-changed" {
+		t.Fatalf("topics = %v, want one ilc.world-manifest-changed", *seen)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestSurfaceIsSettledBeforeTheAnnouncement(t *testing.T) {
 
 	var registeredWhenHeard bool
 	SetEventSink(func(topic string, _ []byte) {
-		if topic == "ilc.environment-changed" {
+		if topic == "ilc.world-manifest-changed" {
 			_, registeredWhenHeard = registry[MethodExportFs]
 		}
 	})

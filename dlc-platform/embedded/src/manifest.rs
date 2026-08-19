@@ -20,7 +20,7 @@
 //! The manifest is the half that moves. It is revision-stamped and re-sendable,
 //! which gives an app both things it needs without a new capability: it can POLL
 //! (`platform.Env()`, a cached read with no import) and it can be TOLD
-//! (`platform.OnEnvironmentChange`).
+//! (`platform.OnWorldManifestChange`).
 //!
 //! `ILC_STDOUT` stays as the startup bootstrap — what a boot log shows, and all a
 //! world that cannot push a manifest would ever have. The budget keys are GONE:
@@ -47,8 +47,8 @@
 //! would be comments (AGENTS.md §5). Here they run on the host on every push,
 //! which for a hand-rolled wire encoder is the whole point.
 
-/// `SetEnvironment` — the core-lifecycle block, id 2. See platform.proto.
-pub const METHOD_SET_ENVIRONMENT: u32 = 2;
+/// `SetWorldManifest` — the core-lifecycle block, id 2. See platform.proto.
+pub const METHOD_SET_WORLD_MANIFEST: u32 = 2;
 
 /// devalbo.ilc.v1.Availability
 const AVAILABILITY_ABSENT: u64 = 1;
@@ -119,7 +119,7 @@ impl Buf {
     }
 }
 
-/// An encoded `SetEnvironmentRequest`, ready to hand to `execute`.
+/// An encoded `SetWorldManifestRequest`, ready to hand to `execute`.
 pub struct Manifest {
     buf: Buf,
 }
@@ -140,7 +140,31 @@ impl Manifest {
 /// `cols`/`rows` of zero mean UNMEASURED, never "no room" — an app reads unknown
 /// as "wrap however you like". A world that knows its own text budget at compile
 /// time, as the badge does, always sends real numbers.
-pub fn encode(revision: u64, outlet: u64, cols: u64, rows: u64) -> Manifest {
+/// What a world tells an app about itself.
+///
+/// A STRUCT because it was `encode(revision, outlet, cols, rows)` — four `u64`s
+/// in a row, where swapping any two compiles cleanly and sends a world with the
+/// wrong number of columns or, worse, the wrong revision. Named fields are the
+/// same shape as the message they encode.
+pub struct WorldManifest {
+    pub revision: u64,
+    /// `TextOutlet`.
+    pub outlet: u64,
+    /// Zero means UNMEASURED, never "no room".
+    pub cols: u64,
+    pub rows: u64,
+    /// `StatusOutlet` — what `ILC_STATUS` used to say. A CAPABILITY.
+    pub status: u64,
+    /// `World` — what `ILC_WORLD` used to say. IDENTITY, and it travels in its
+    /// own nested message so the difference is visible in the bytes.
+    ///
+    /// No tier: an app was BUILT for its tier and does not need telling, and
+    /// `badge-normal` says rp2350 anyway.
+    pub world: u64,
+}
+
+pub fn encode(env_in: WorldManifest) -> Manifest {
+    let WorldManifest { revision, outlet, cols, rows, status, world } = env_in;
     // --- Filesystem ---------------------------------------------------------
     // ABSENT, stated rather than omitted. This world grants no root, and an app
     // that assumed one would have every write fail with an error it had no way
@@ -173,7 +197,7 @@ pub fn encode(revision: u64, outlet: u64, cols: u64, rows: u64) -> Manifest {
         text.varint(rows);
     }
 
-    // --- Environment --------------------------------------------------------
+    // --- WorldManifest --------------------------------------------------------
     let mut env = Buf::new();
     env.tag(1, WIRE_VARINT); // Environment.revision
     env.varint(revision);
@@ -184,9 +208,35 @@ pub fn encode(revision: u64, outlet: u64, cols: u64, rows: u64) -> Manifest {
     env.varint(text.len as u64);
     env.extend(text.as_slice());
 
-    // --- SetEnvironmentRequest ----------------------------------------------
+    // WHAT THIS WORLD IS. These were `ILC_TIER`, `ILC_WORLD` and `ILC_STATUS` in
+    // `wasi:cli/environment`, which is read once at `_initialize` and can never
+    // be corrected — the same reason the text budget moved here.
+    //
+    // Zero is the proto default and encodes to nothing, which is the right
+    // spelling of "this world did not say": an app reading UNSPECIFIED knows it
+    // was not told, rather than being handed a plausible wrong answer.
+    if status != 0 {
+        env.tag(5, WIRE_VARINT); // Environment.status
+        env.varint(status);
+    }
+
+    // --- Identity -----------------------------------------------------------
+    // NESTED, not flat, and that is the whole point: everything above is a
+    // CAPABILITY an app acts on, and this is WHO the world is, which an app
+    // should only ever report. The grouping is the rule — see `Identity` in
+    // platform.proto.
+    if world != 0 {
+        let mut who = Buf::new();
+        who.tag(1, WIRE_VARINT); // Identity.world
+        who.varint(world);
+        env.tag(6, WIRE_BYTES); // Environment.identity
+        env.varint(who.len as u64);
+        env.extend(who.as_slice());
+    }
+
+    // --- SetWorldManifestRequest ----------------------------------------------
     let mut req = Buf::new();
-    req.tag(1, WIRE_BYTES); // SetEnvironmentRequest.environment
+    req.tag(1, WIRE_BYTES); // SetWorldManifestRequest.environment
     req.varint(env.len as u64);
     req.extend(env.as_slice());
 
@@ -206,7 +256,14 @@ mod tests {
     /// so the expected encoding is written out by hand.
     #[test]
     fn encodes_the_expected_wire_shape() {
-        let m = encode(1, TEXT_OUTLET_DISPLAY, 40, 12);
+        let m = encode(WorldManifest {
+            revision: 1,
+            outlet: TEXT_OUTLET_DISPLAY,
+            cols: 40,
+            rows: 12,
+            status: 0,
+            world: 0,
+        });
         let want: &[u8] = &[
             0x0a, 0x0e, // field 1 (environment), 14 bytes
             0x08, 0x01, //   revision = 1
@@ -224,7 +281,14 @@ mod tests {
     /// "unmeasured" has exactly one spelling on the wire.
     #[test]
     fn unmeasured_budget_is_omitted() {
-        let m = encode(1, TEXT_OUTLET_UART, 0, 0);
+        let m = encode(WorldManifest {
+            revision: 1,
+            outlet: TEXT_OUTLET_UART,
+            cols: 0,
+            rows: 0,
+            status: 0,
+            world: 0,
+        });
         assert!(!m.as_bytes().contains(&0x18), "cols tag present for an unmeasured width");
         assert!(!m.as_bytes().contains(&0x20), "rows tag present for an unmeasured height");
     }
@@ -234,7 +298,14 @@ mod tests {
     /// re-sends on every allocation change WILL get there.
     #[test]
     fn multibyte_revision_encodes_as_a_varint() {
-        let m = encode(300, TEXT_OUTLET_DISPLAY, 40, 12);
+        let m = encode(WorldManifest {
+            revision: 300,
+            outlet: TEXT_OUTLET_DISPLAY,
+            cols: 40,
+            rows: 12,
+            status: 0,
+            world: 0,
+        });
         // 300 = 0xac 0x02 in LEB128.
         assert_eq!(&m.as_bytes()[2..5], &[0x08, 0xac, 0x02]);
     }
@@ -246,7 +317,14 @@ mod tests {
     /// decodes a truncated message or runs off the end.
     #[test]
     fn nested_lengths_match_their_contents() {
-        let m = encode(1, TEXT_OUTLET_DISPLAY, 40, 12);
+        let m = encode(WorldManifest {
+            revision: 1,
+            outlet: TEXT_OUTLET_DISPLAY,
+            cols: 40,
+            rows: 12,
+            status: 0,
+            world: 0,
+        });
         let bytes = m.as_bytes();
         assert_eq!(bytes[0], 0x0a, "outer field 1, length-delimited");
         let env_len = bytes[1] as usize;
@@ -256,7 +334,14 @@ mod tests {
     /// The buffer must never be the reason a manifest is truncated.
     #[test]
     fn capacity_holds_the_largest_message() {
-        let m = encode(u32::MAX as u64, TEXT_OUTLET_DISPLAY, 65535, 65535);
+        let m = encode(WorldManifest {
+            revision: u32::MAX as u64,
+            outlet: TEXT_OUTLET_DISPLAY,
+            cols: 65535,
+            rows: 65535,
+            status: 0,
+            world: 0,
+        });
         assert!(m.as_bytes().len() < CAPACITY, "len {} vs capacity {}", m.as_bytes().len(), CAPACITY);
     }
 }

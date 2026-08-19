@@ -6,6 +6,6 @@ devalbo.ilc.v1.PlatformService.GetCommandSurface 4
 devalbo.ilc.v1.PlatformService.ImportFs 101
 devalbo.ilc.v1.PlatformService.RebuildIndex 200
 devalbo.ilc.v1.PlatformService.ResetFs 102
-devalbo.ilc.v1.PlatformService.SetEnvironment 2
+devalbo.ilc.v1.PlatformService.SetWorldManifest 2
 devalbo.ilc.v1.PlatformService.Version 1
 devalbo.ilc.v1.PlatformService.[reserved].3 3

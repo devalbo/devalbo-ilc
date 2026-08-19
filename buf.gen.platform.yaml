@@ -33,3 +33,23 @@ plugins:
     opt:
       - paths=source_relative
       - lang=ts
+  # And the enum VALUES for the badge, which hand-decodes protobuf because it is
+  # no_std and cannot run protoc. Those numbers were retyped into control.rs by
+  # a person — 41 of them — and one transcription was wrong for a day: TextOutlet
+  # as DISPLAY=2, UART=3, which is alphabetical order rather than declared order.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: dlc-platform/gen/rust
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lang=rust
+  # The same values for the web package, written INSIDE it. `dlc-platform/web`
+  # is an npm package root: a path outside it is neither shipped nor resolvable,
+  # which is why these were hand-written there.
+  - local: ["go", "run", "github.com/devalbo/devalbo-ilc/dlc-platform/cmd/protoc-gen-dlc-registry"]
+    out: dlc-platform/web/gen
+    strategy: all
+    opt:
+      - paths=source_relative
+      - lang=ts
+      - only=enums

@@ -6,7 +6,7 @@
 
 /** Method ids for PlatformService. */
 export const MethodVersion = 1;
-export const MethodSetEnvironment = 2;
+export const MethodSetWorldManifest = 2;
 export const MethodGetCommandSurface = 4;
 export const MethodGetCommandSpec = 5;
 export const MethodExportFs = 100;
@@ -17,7 +17,7 @@ export const MethodRebuildIndex = 200;
 /** Every PlatformService id, for hosts that enumerate. */
 export const PlatformServiceMethods = {
   Version: 1,
-  SetEnvironment: 2,
+  SetWorldManifest: 2,
   GetCommandSurface: 4,
   GetCommandSpec: 5,
   ExportFs: 100,

@@ -333,6 +333,37 @@ fn service() {
     USB.try_with(service_locked);
 }
 
+/// CDC bulk endpoints, as a [`Link`](dlc_platform_embedded::link::Link).
+///
+/// # What this file stopped being
+///
+/// Everything below the log used to take a `&mut SerialPort` and call `read` and
+/// `write` on it directly — so the framing, the replies, the notices and the
+/// heartbeat all knew they were on USB, having inherited that by accident rather
+/// than by decision. This wrapper is the whole of the coupling now: one type,
+/// two methods, and the medium is named in exactly one place.
+///
+/// # The mapping is smaller than it looks
+///
+/// `usbd-serial` already has the two properties the seam asks for. `read` and
+/// `write` never block, and `WouldBlock` means "not now" — which is the same
+/// answer as "zero bytes went", so the error simply becomes a number. See the
+/// `link` module for why losing the distinction costs nothing here: the caller
+/// retries on the next service call either way.
+struct Cdc<'a, 'b> {
+    serial: &'a mut usbd_serial::SerialPort<'b, hal::usb::UsbBus>,
+}
+
+impl dlc_platform_embedded::link::Link for Cdc<'_, '_> {
+    fn receive(&mut self, into: &mut [u8]) -> usize {
+        self.serial.read(into).unwrap_or(0)
+    }
+
+    fn send(&mut self, bytes: &[u8]) -> usize {
+        self.serial.write(bytes).unwrap_or(0)
+    }
+}
+
 fn service_locked(usb: &mut Usb) {
     let (Some(device), Some(serial), Some(reset)) =
         (usb.device.as_mut(), usb.serial.as_mut(), usb.reset.as_mut())
@@ -363,9 +394,17 @@ fn service_locked(usb: &mut Usb) {
         WAS_OPEN.store(false, Ordering::Relaxed);
     }
 
+    // FROM HERE DOWN IT IS A LINK, not a serial port. `poll` and `dtr` above are
+    // the genuinely USB-shaped parts and stay named as such; everything after
+    // this line would work over a UART, a socket or a radio unchanged.
+    let mut link = Cdc { serial };
+    use dlc_platform_embedded::link::Link as _;
+
     // Drain anything the host typed; an unread RX buffer stalls some stacks.
+    // ONE USB PACKET. This number is USB's, not the protocol's — see limits.rs
+    // on why medium-specific sizes stay with the medium.
     let mut incoming = [0u8; 64];
-    let read = serial.read(&mut incoming).unwrap_or(0);
+    let read = link.receive(&mut incoming);
 
     #[cfg(badge_control)]
     {
@@ -380,7 +419,7 @@ fn service_locked(usb: &mut Usb) {
         // decision to frame the log stands (D8b); emitting it unconditionally
         // does not. It needs subscriptions, so a world stays silent until a
         // client asks.
-        if control_send(serial) {
+        if control_send(&mut link) {
             return;
         }
     }
@@ -395,10 +434,11 @@ fn service_locked(usb: &mut Usb) {
     // trusting what follows. It cannot be appended to the buffer: the buffer
     // being full is precisely what truncation means.
     if log.truncated() && !NOTICE_SENT.load(Ordering::Relaxed) {
-        if let Ok(n) = serial.write(TRUNCATION_NOTICE) {
-            if n == TRUNCATION_NOTICE.len() {
-                NOTICE_SENT.store(true, Ordering::Relaxed);
-            }
+        // ONLY WHEN IT WENT WHOLE. A link may take part of it, and marking it
+        // sent after a partial write would drop the rest of the one line a
+        // reader needs before they start trusting the log.
+        if link.send(TRUNCATION_NOTICE) == TRUNCATION_NOTICE.len() {
+            NOTICE_SENT.store(true, Ordering::Relaxed);
         }
         return;
     }
@@ -406,9 +446,7 @@ fn service_locked(usb: &mut Usb) {
     let sent = SENT.load(Ordering::Relaxed);
     let pending = log.pending(sent);
     if !pending.is_empty() {
-        if let Ok(n) = serial.write(pending) {
-            SENT.store(sent + n, Ordering::Relaxed);
-        }
+        SENT.store(sent + link.send(pending), Ordering::Relaxed);
         return;
     }
 
@@ -424,7 +462,14 @@ fn service_locked(usb: &mut Usb) {
     // a notice can only ever use a wire the text stream has finished with. A
     // frame can never delay the words it is a copy of.
     #[cfg(badge_control)]
-    if control_notices(serial) {
+    if control_notices(&mut link) {
+        return;
+    }
+
+    // AND LAST, THE BEAT — see `control_heartbeat` for why it is bottom of the
+    // ladder.
+    #[cfg(badge_control)]
+    if control_heartbeat(&mut link) {
         return;
     }
 
@@ -467,13 +512,16 @@ fn service_locked(usb: &mut Usb) {
         let mut beat = LineBuffer::new();
         use core::fmt::Write;
         let _ = write!(beat, "~ alive {uptime_ms} ms\r\n");
-        let _ = serial.write(beat.as_bytes());
+        link.send(beat.as_bytes());
     }
 }
 
 // HOW OFTEN TO SAY SO — a flash-time world parameter (build.rs). Zero disables
 // it, and the branch below compiles away entirely in that build.
 include!(concat!(env!("OUT_DIR"), "/heartbeat.rs"));
+
+// AND WHETHER THE FRAMED ONE BEATS BEFORE ANYONE ASKS (D8c). See build.rs.
+include!(concat!(env!("OUT_DIR"), "/beat_frames.rs"));
 
 /// Microseconds at the last heartbeat.
 static LAST_BEAT: AtomicUsize = AtomicUsize::new(0);
@@ -516,6 +564,41 @@ impl core::fmt::Write for LineBuffer {
 pub fn rewind() {
     SENT.store(0, Ordering::Relaxed);
     NOTICE_SENT.store(false, Ordering::Relaxed);
+}
+
+/// Drive the port from a panic handler, for as long as it takes.
+///
+/// # Why a panic needs its own path
+///
+/// `panic_halt` is `loop {}`. It does not re-enable interrupts — and every
+/// `Shared::with` body runs inside `cortex_m::interrupt::free`, which by now
+/// includes the whole USB service path, control parsing, the notice ring and the
+/// heartbeat. So a panic ANYWHERE in there leaves interrupts masked forever: no
+/// ISR, no log, and not even the picotool reset interface, which is why the only
+/// recovery is a finger on BOOT and RESET.
+///
+/// That is the exact failure this module was written to prevent, arriving
+/// through a door nobody had shut. The header says it plainly: "a device with no
+/// console is a device you debug by rebuilding it." A panic was producing
+/// silence.
+///
+/// # What it does
+///
+/// SEIZES the USB cell rather than borrowing it. The panic may well have
+/// happened inside a live `with`, so a polite `try_with` would answer `None`
+/// forever — and the one caller that most needs the device is this one.
+///
+/// It never returns. It polls the device and pushes the log, which now ends with
+/// the panic message, until somebody unplugs the badge.
+#[inline(never)]
+pub fn serve_after_panic() -> ! {
+    loop {
+        // SAFETY: a panic handler never returns, so no borrow abandoned by the
+        // panic can resume. Nothing else is running on this core.
+        unsafe {
+            USB.seize(service_locked);
+        }
+    }
 }
 
 /// Service the port from outside the interrupt. See `service`.
@@ -669,19 +752,58 @@ impl<B: usb_device::bus::UsbBus> usb_device::class::UsbClass<B> for PicoToolRese
 struct Control {
     /// Bytes received but not yet consumed. A frame may arrive split across USB
     /// packets, so what cannot be parsed yet has to be kept.
-    rx: [u8; 512],
+    rx: [u8; dlc_platform_embedded::limits::INBOUND],
     rx_len: usize,
     /// A reply waiting to go out, and how much of it has gone. The CDC endpoint
     /// takes 64 bytes at a time, so a reply drains across several interrupts.
-    tx: [u8; 512],
-    tx_len: usize,
+    /// A reply waiting to go out, and how much of it has gone.
+    ///
+    /// # Why this is not a fixed array
+    ///
+    /// It was `[u8; 512]`, filled with `copy_from_slice(&framed[..len.min(512)])`
+    /// — a `min` that silently sent the first 512 bytes of a longer frame. The
+    /// header then claimed more than the body, the client waited for a
+    /// completion that could never arrive, and it eventually blamed a build flag
+    /// for a buffer: "no reply within 30s — is BADGE_CONTROL=on in this build?"
+    ///
+    /// It hid because it depends on the ANSWER's size. Asking for one command's
+    /// spec fits, and did, for weeks. Asking for all four of an app's commands
+    /// does not — so the failure arrived looking like an intermittent transport
+    /// fault rather than a fixed limit being crossed.
+    ///
+    /// A BIGGER ARRAY IS NOT A FIX, it is the same cliff further away: the next
+    /// app with five commands finds it again, and finds it the same confusing
+    /// way. The world already HAS the whole reply on the heap when it queues one
+    /// — every reply is built as a `Vec` — so holding that `Vec` instead of
+    /// copying a prefix of it removes the limit rather than raising it.
+    ///
+    /// The bound that remains is the protocol's own `MAX_PAYLOAD`, which is a
+    /// declared 8 KB rather than an accident of a buffer size.
+    tx: alloc::vec::Vec<u8>,
+    /// A reply built on the STACK, for before the heap exists.
+    ///
+    /// # Why this is not just `tx`
+    ///
+    /// `tx` is a `Vec`, which is what removed the truncation cliff — and which
+    /// makes storing into it an ALLOCATION. The early-boot refusal exists
+    /// precisely because there is no allocator yet: PSRAM comes up at stage 4,
+    /// and stages 1 to 3 are when somebody debugging a bring-up is most likely
+    /// to ask a question.
+    ///
+    /// Putting that refusal in the `Vec` allocated against an uninitialised heap
+    /// — so the answer that says "no heap yet" needed a heap to say it. The
+    /// badge then panicked inside a critical section, which masks interrupts,
+    /// which killed the log, the USB stack and picotool's reset interface
+    /// together. Only a finger on BOOT and RESET recovered it.
+    fixed: [u8; dlc_platform_embedded::limits::REFUSAL_FRAME],
+    fixed_len: usize,
     tx_sent: usize,
     /// The notice frame in flight, and how much of it has gone.
     ///
     /// SEPARATE FROM `tx` because a reply has someone blocked on it and a notice
     /// does not. Sharing one buffer would let a log line overwrite an answer
     /// somebody was waiting for.
-    nx: [u8; 512],
+    nx: [u8; dlc_platform_embedded::limits::NOTICE_FRAME],
     nx_len: usize,
     nx_sent: usize,
     /// Which notice frame goes next — an index into the run, not into a buffer.
@@ -693,20 +815,32 @@ struct Control {
     notice_cursor: usize,
     /// Which notices the client asked for, as `1 << notice`.
     subscribed: u32,
+    /// The granted beat interval, and when the last one went out.
+    heartbeat_ms: u32,
+    last_beat_us: u64,
 }
 
 #[cfg(badge_control)]
 static CONTROL: crate::shared::Shared<Control> = crate::shared::Shared::new(Control {
-    rx: [0; 512],
+    rx: [0; dlc_platform_embedded::limits::INBOUND],
     rx_len: 0,
-    tx: [0; 512],
-    tx_len: 0,
+    tx: alloc::vec::Vec::new(),
+    fixed: [0; dlc_platform_embedded::limits::REFUSAL_FRAME],
+    fixed_len: 0,
     tx_sent: 0,
-    nx: [0; 512],
+    nx: [0; dlc_platform_embedded::limits::NOTICE_FRAME],
     nx_len: 0,
     nx_sent: 0,
     notice_cursor: 0,
-    subscribed: 0,
+    // WHAT A WORLD SENDS BEFORE IT IS ASKED. Zero unless the build says
+    // otherwise, which is the "silent until subscribed" default.
+    subscribed: if BEAT_FRAMES_MS > 0 {
+        1 << dlc_platform_embedded::control::NOTICE_HEARTBEAT
+    } else {
+        0
+    },
+    heartbeat_ms: BEAT_FRAMES_MS,
+    last_beat_us: 0,
 });
 
 /// Take bytes off the wire and answer any complete frame.
@@ -728,6 +862,10 @@ fn control_receive(bytes: &[u8]) {
                 // a frame larger than this world accepts. Dropping the oldest
                 // byte keeps the buffer moving so a later, valid frame still
                 // lands, rather than wedging until reset.
+                //
+                // A FRAME TOO BIG TO HOLD IS CAUGHT BELOW, before it gets here:
+                // sliding bytes for one of those would never terminate and the
+                // sender would never be told why.
                 c.rx.copy_within(1.., 0);
                 let last = c.rx.len() - 1;
                 c.rx[last] = *byte;
@@ -735,6 +873,41 @@ fn control_receive(bytes: &[u8]) {
         }
 
         loop {
+            // REFUSE WHAT CANNOT FIT, as soon as the header says how big it is.
+            //
+            // Without this a frame larger than `rx` is reassembled forever: the
+            // scanner answers Incomplete, the buffer fills, the oldest byte
+            // slides out, and the sender waits for an answer that has no way to
+            // come. Saying so costs one comparison and turns a hang into a
+            // sentence.
+            if let Some(total) = control::declared_len(&c.rx[..c.rx_len]) {
+                if total > c.rx.len() {
+                    let mut body = [0u8; dlc_platform_embedded::limits::REFUSAL_BODY];
+                    let mut framed = [0u8; dlc_platform_embedded::limits::REFUSAL_FRAME];
+                    let reply = control::Response {
+                        id: 0,
+                        ok: false,
+                        // NO CORRELATION ID: the id is inside the body, and the
+                        // body is what could not be received.
+                        error: "that request is larger than this world accepts",
+                        payload: &[],
+                    }
+                    .encode_into(&mut body)
+                    .and_then(|len| {
+                        control::frame_into(&mut framed, control::KIND_RESPONSE, &body[..len])
+                    });
+                    if let Some(len) = reply {
+                        c.fixed[..len].copy_from_slice(&framed[..len]);
+                        c.fixed_len = len;
+                        c.tx_sent = 0;
+                    }
+                    // Past the magic, so a later well-sized frame still lands.
+                    let skip = control::MAGIC.len().min(c.rx_len);
+                    c.rx.copy_within(skip..c.rx_len, 0);
+                    c.rx_len -= skip;
+                    return;
+                }
+            }
             match control::scan(&c.rx[..c.rx_len]) {
                 control::Found::Incomplete => return,
                 control::Found::Skip(n) => {
@@ -746,22 +919,24 @@ fn control_receive(bytes: &[u8]) {
                     // on the stack. Silence here would be indistinguishable from
                     // a wedged badge, which is the ambiguity this whole channel
                     // exists to remove.
-                    if !HEAP_READY.load(Ordering::Acquire) {
-                        let mut body = [0u8; 96];
-                        let mut framed = [0u8; 128];
-                        let reply = control::response_into(
-                            &mut body,
-                            false,
-                            "the world is still starting; no heap yet",
-                        )
+                    if !heap_ready() {
+                        let mut body = [0u8; dlc_platform_embedded::limits::REFUSAL_BODY];
+                        let mut framed = [0u8; dlc_platform_embedded::limits::REFUSAL_FRAME];
+                        let reply = control::Response {
+                            id: request.id,
+                            ok: false,
+                            error: "the world is still starting; no heap yet",
+                            payload: &[],
+                        }
+                        .encode_into(&mut body)
                         .and_then(|len| {
                             control::frame_into(&mut framed, control::KIND_RESPONSE, &body[..len])
                         });
                         c.rx.copy_within(consumed..c.rx_len, 0);
                         c.rx_len -= consumed;
                         if let Some(len) = reply {
-                            c.tx[..len].copy_from_slice(&framed[..len]);
-                            c.tx_len = len;
+                            c.fixed[..len].copy_from_slice(&framed[..len]);
+                            c.fixed_len = len;
                             c.tx_sent = 0;
                         }
                         return;
@@ -783,9 +958,13 @@ fn control_receive(bytes: &[u8]) {
                                 // looking exactly like this.
                                 _ => &[][..],
                             };
-                            control::parse_subscription(body).unwrap_or(0)
-                                & control::NOTICES_SUPPORTED
+                            control::parse_subscription(body).unwrap_or(control::Subscription {
+                                notices: 0,
+                                heartbeat_ms: 0,
+                            })
                         };
+                        let rate = control::heartbeat_rate(granted.heartbeat_ms);
+                        let granted = granted.notices & control::NOTICES_SUPPORTED;
                         let began = c.subscribed;
                         c.subscribed = granted;
                         // FROM THE TOP OF THE RUN, whenever the log is newly
@@ -802,9 +981,27 @@ fn control_receive(bytes: &[u8]) {
                         // how a reader desynchronises.
                         c.nx_len = 0;
                         c.nx_sent = 0;
+                        // THE CLOCK STARTS AT THE SUBSCRIPTION, so the first
+                        // beat is one interval away rather than immediate — a
+                        // beat that fires the instant you ask proves only that
+                        // the reply worked, which you already knew.
+                        c.heartbeat_ms = rate;
+                        c.last_beat_us = dlc_platform_embedded::clock::installed()
+                            .map(|clock| clock())
+                            .unwrap_or(0);
                         control::frame(
                             control::KIND_RESPONSE,
-                            &control::response(true, "", &control::subscription(granted)),
+                            &control::Response {
+                                id: request.id,
+                                ok: true,
+                                error: "",
+                                payload: &control::Subscription {
+                                    notices: granted,
+                                    heartbeat_ms: rate,
+                                }
+                                .encode(),
+                            }
+                            .encode(),
                         )
                     } else {
                         // The payload is borrowed out of `rx` for the call and
@@ -827,11 +1024,21 @@ fn control_receive(bytes: &[u8]) {
                     };
                     c.rx.copy_within(consumed..c.rx_len, 0);
                     c.rx_len -= consumed;
-                    // Queue it here, inside the same section, so a reply cannot
-                    // be overwritten by a second frame arriving between the two.
-                    let n = reply.len().min(c.tx.len());
-                    c.tx[..n].copy_from_slice(&reply[..n]);
-                    c.tx_len = n;
+                    // ASSIGNED DIRECTLY, because this code ALREADY HOLDS the
+                    // cell. Calling `queue_reply` here — which takes
+                    // `CONTROL.with` itself — was a reentrant borrow, and
+                    // `Shared::with` panics on those by design. It did, on a
+                    // badge, under any client that asked twice in quick
+                    // succession while a widget was on screen.
+                    //
+                    // It read as a tidy-up: two sites were storing a reply, so
+                    // one helper. The other site is `reply()`, called from MAIN,
+                    // which correctly needs the borrow. The mistake was assuming
+                    // two callers of the same shape wanted the same helper.
+                    //
+                    // Queued inside this section on purpose, so a reply cannot be
+                    // overwritten by a second frame arriving between the two.
+                    c.tx = reply;
                     c.tx_sent = 0;
                     // ONE ANSWER AT A TIME: the outbound buffer holds one reply,
                     // and a second would overwrite the first before it was sent.
@@ -853,6 +1060,9 @@ fn answer(
     request: &dlc_platform_embedded::control::Request,
     payload: &[u8],
 ) -> Option<alloc::vec::Vec<u8>> {
+    // ECHOED ON EVERY PATH BELOW, including the refusals: a client waiting on an
+    // id needs the answer that says no as much as the one that says yes.
+    let id = request.id;
     use dlc_platform_embedded::control;
 
     let payload = match request.verb {
@@ -860,29 +1070,23 @@ fn answer(
             let uptime_ms = dlc_platform_embedded::clock::installed()
                 .map(|clock| clock() / 1000)
                 .unwrap_or(0);
-            let state = control::WorldState {
-                world: crate::WORLD.code(),
-                tier: control::TIER_RP2350,
-                version: env!("CARGO_PKG_VERSION"),
-                screen: crate::world::screen_code(),
-                input: crate::world::input_code(),
-                text: crate::world::text_code(),
-                activity: ACTIVITY.load(Ordering::Relaxed) as u32,
-                app: "",
-                app_activity: dlc_platform_embedded::activity::get(),
-                uptime_ms,
-            };
-            control::response(true, "", &state.encode())
+            control::Response {
+                id,
+                ok: true,
+                error: "",
+                payload: &world_state(uptime_ms).encode(),
+            }
+            .encode()
         }
         // DRIVE IT (D3). A press queued here is consumed by the next widget
         // poll and is indistinguishable from a finger — see buttons.rs.
         control::VERB_PRESS_BUTTON => match control::parse_button(payload) {
-            Some(button) if crate::buttons::press(button) => control::response(true, "", &[]),
+            Some(button) if crate::buttons::press(button) => control::Response { id, ok: true, error: "", payload: &[] }.encode(),
             // NAMED REFUSAL. A caller built against a newer proto that asks for a
             // button this board does not have needs to know that now, not to
             // wait for an effect that is never coming.
-            Some(_) => control::response(false, "no such button on this world", &[]),
-            None => control::response(false, "malformed PressButtonRequest", &[]),
+            Some(_) => control::Response { id, ok: false, error: "no such button on this world", payload: &[] }.encode(),
+            None => control::Response { id, ok: false, error: "malformed PressButtonRequest", payload: &[] }.encode(),
         },
 
         // WHAT THE PANEL SAYS, taken from the same draw calls that reached it.
@@ -895,11 +1099,11 @@ fn answer(
                     crate::display::mirror::COLS as u32,
                     crate::display::mirror::ROWS as u32,
                 );
-                control::response(true, "", &out)
+                control::Response { id, ok: true, error: "", payload: &out }.encode()
             } else {
                 // BUSY IS NOT BLANK. Main holds the grid while it redraws, and
                 // answering with no rows would report an empty screen.
-                control::response(false, "the panel is being redrawn; ask again", &[])
+                control::Response { id, ok: false, error: "the panel is being redrawn; ask again", payload: &[] }.encode()
             }
         }
 
@@ -913,27 +1117,43 @@ fn answer(
                         Some((start, end)) => &payload[start..end],
                         None => &[][..],
                     };
-                    crate::passthrough::offer(method, bytes)
+                    crate::passthrough::offer(method, id, bytes)
                 }
                 None => {
                     return Some(control::frame(
                         control::KIND_RESPONSE,
-                        &control::response(false, "malformed ExecuteRequest", &[]),
+                        &control::Response { id, ok: false, error: "malformed ExecuteRequest", payload: &[] }.encode(),
                     ))
                 }
             };
             // NO REPLY YET is the whole point, so returning `None` here is not an
             // error path — the answer arrives from main once the app has run.
+            // NAME THE REASON. "Busy" and "there is no app running" are
+            // different facts and lead a caller to do different things.
+            if !crate::passthrough::session_is_open() {
+                return Some(control::frame(
+                    control::KIND_RESPONSE,
+                    &control::Response {
+                        id,
+                        ok: false,
+                        error: "no session is running; select a payload first",
+                        payload: &[],
+                    }
+                    .encode(),
+                ));
+            }
             return if accepted {
                 None
             } else {
                 Some(control::frame(
                     control::KIND_RESPONSE,
-                    &control::response(
-                        false,
-                        "a request is already running; one at a time",
-                        &[],
-                    ),
+                    &control::Response {
+                        id,
+                        ok: false,
+                        error: "a request is already running; one at a time",
+                        payload: &[],
+                    }
+                    .encode(),
                 ))
             };
         }
@@ -942,33 +1162,33 @@ fn answer(
         control::VERB_LIST_PAYLOADS => {
             let mut out = alloc::vec::Vec::new();
             let selected = crate::installed::each(|index, payload| {
-                control::payload_info(
-                    &mut out,
-                    index as u32,
-                    payload.name,
-                    payload.bytes.len() as u32,
-                    crate::installed::integrity_code(payload.integrity),
-                    payload.entry_method,
-                    payload.is_default(),
-                    payload.runnable(),
-                );
+                control::PayloadInfo {
+                    index: index as u32,
+                    name: payload.name,
+                    size: payload.bytes.len() as u32,
+                    integrity: crate::installed::integrity_code(payload.integrity),
+                    entry_method: payload.entry_method,
+                    is_default: payload.is_default(),
+                    runnable: payload.runnable(),
+                }
+                .append_to(&mut out);
             });
             match selected {
                 Some(selected) => {
                     control::payloads_selected(&mut out, selected as u32);
-                    control::response(true, "", &out)
+                    control::Response { id, ok: true, error: "", payload: &out }.encode()
                 }
-                None => control::response(false, "the catalog is busy; ask again", &[]),
+                None => control::Response { id, ok: false, error: "the catalog is busy; ask again", payload: &[] }.encode(),
             }
         }
 
         // CHOOSE WHAT RUNS NEXT. Noted, not run — see installed.rs.
         control::VERB_SELECT_PAYLOAD => match control::parse_index(payload) {
             Some(index) if crate::installed::request(index as usize) => {
-                control::response(true, "", &[])
+                control::Response { id, ok: true, error: "", payload: &[] }.encode()
             }
-            Some(_) => control::response(false, "no payload with that index", &[]),
-            None => control::response(false, "malformed SelectPayloadRequest", &[]),
+            Some(_) => control::Response { id, ok: false, error: "no payload with that index", payload: &[] }.encode(),
+            None => control::Response { id, ok: false, error: "malformed SelectPayloadRequest", payload: &[] }.encode(),
         },
 
         // START OVER.
@@ -980,13 +1200,19 @@ fn answer(
         // "it died" into "it said yes, then went".
         control::VERB_REBOOT => {
             REBOOT_WHEN_SENT.store(true, Ordering::Release);
-            control::response(true, "", &[])
+            control::Response { id, ok: true, error: "", payload: &[] }.encode()
         }
 
         // A VERB THIS WORLD DOES NOT KNOW is answered, not ignored. A caller
         // built against a newer proto gets a refusal naming the verb rather than
         // a silence it has to time out on.
-        other => control::response(false, "unknown verb", &[other as u8]),
+        other => control::Response {
+            id,
+            ok: false,
+            error: "unknown verb",
+            payload: &[other as u8],
+        }
+        .encode(),
     };
     Some(control::frame(control::KIND_RESPONSE, &payload))
 }
@@ -1037,10 +1263,10 @@ mod notices {
     use dlc_platform_embedded::control;
 
     /// Big enough for a frame around a full-width line and a stage name.
-    const SLOT: usize = 160;
+    const SLOT: usize = dlc_platform_embedded::limits::NOTICE_FRAME;
     /// About four screens of bring-up. Beyond that the oldest go, and the count
     /// of what went is reported rather than quietly dropped.
-    const SLOTS: usize = 40;
+    const SLOTS: usize = dlc_platform_embedded::limits::NOTICE_SLOTS;
 
     pub struct Notices {
         slots: [[u8; SLOT]; SLOTS],
@@ -1119,7 +1345,8 @@ mod notices {
         NOTICES.with(|n| {
             let mut body = [0u8; SLOT];
             let stage = n.stage;
-            let Some(len) = control::log_line_into(&mut body, uptime_ms, stage, level, scope, text)
+            let Some(len) = (control::LogLine { uptime_ms, stage, level, scope, text })
+                .encode_into(&mut body)
             else {
                 // TOO LONG TO FRAME IS DROPPED, NOT TRUNCATED. The text stream
                 // still carried it, and a short frame would desynchronise a
@@ -1179,6 +1406,25 @@ pub fn heap_is_ready() {
     HEAP_READY.store(true, Ordering::Release);
 }
 
+/// Whether a path that ALLOCATES may run.
+///
+/// # Check this from every such path, not from one caller
+///
+/// The guard existed and was checked in exactly one place — the inbound frame
+/// handler — because that was the only allocating path when it was written. The
+/// heartbeat was then added, allocates a `WorldState` to encode, beats from boot
+/// by default, and walked straight past it.
+///
+/// The window is not small: the clock is installed at main.rs:413 and the heap
+/// at main.rs:570, so the whole of stages 1 to 3 has a working clock and no
+/// allocator. The badge faulted on its first beat and produced NO OUTPUT AT ALL
+/// — not a hang with a log, which is the failure this whole module exists to
+/// prevent.
+#[cfg(badge_control)]
+fn heap_ready() -> bool {
+    HEAP_READY.load(Ordering::Acquire)
+}
+
 /// Declare what the next completed log line is. See `notices::mark`.
 #[cfg(badge_control)]
 pub fn mark(level: u32, scope: u32) {
@@ -1206,7 +1452,7 @@ pub fn stage_opened(stage: u32, scope: u32) {
 /// level want to come from the call sites that already know them, and until they
 /// do, saying nothing is the honest encoding.
 #[cfg(badge_control)]
-fn control_notices(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool {
+fn control_notices(link: &mut impl dlc_platform_embedded::link::Link) -> bool {
     use dlc_platform_embedded::control;
 
     CONTROL.with(|c| {
@@ -1218,9 +1464,7 @@ fn control_notices(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bo
         // sent whole: half of one followed by the start of another is how a
         // reader desynchronises, and it cannot recover without the next magic.
         if c.nx_sent < c.nx_len {
-            if let Ok(n) = serial.write(&c.nx[c.nx_sent..c.nx_len]) {
-                c.nx_sent += n;
-            }
+            c.nx_sent += link.send(&c.nx[c.nx_sent..c.nx_len]);
             return true;
         }
 
@@ -1233,9 +1477,7 @@ fn control_notices(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bo
         c.nx_len = len;
         c.nx_sent = 0;
         c.notice_cursor = next;
-        if let Ok(n) = serial.write(&c.nx[..c.nx_len]) {
-            c.nx_sent += n;
-        }
+        c.nx_sent += link.send(&c.nx[..c.nx_len]);
         true
     })
 }
@@ -1248,35 +1490,153 @@ fn control_notices(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bo
 pub fn reply(success: bool, output: &[u8], error: &str) {
     use dlc_platform_embedded::control;
 
+    // THE ID AND THE METHOD COME FROM THE SLOT, not from the caller. Main runs
+    // the command and knows what it ran; it does not know which request asked,
+    // because that was queued by the interrupt and answered a turn later. The
+    // slot is the only thing that saw both.
+    let (method, id) = crate::passthrough::answering();
     let framed = control::frame(
         control::KIND_RESPONSE,
         // `ok` is the WORLD's verdict and is true: it ran what it was asked. What
         // the app made of it is `success`, inside.
-        &control::response(
-            true,
-            "",
-            &control::execute_response(success, output, error),
-        ),
+        &control::Response {
+            id,
+            ok: true,
+            error: "",
+            payload: &control::ExecuteResponse { method, success, output, error }.encode(),
+        }
+        .encode(),
     );
+    queue_reply(framed);
+    crate::passthrough::finished();
+}
+
+/// Hand a finished frame to the interrupt to send.
+///
+/// NO SIZE CHECK, because there is no size limit to check against any more —
+/// see `Control::tx`. The frame was built on the heap and is kept there until it
+/// has gone out, however many service calls that takes.
+#[cfg(badge_control)]
+fn queue_reply(framed: alloc::vec::Vec<u8>) {
     CONTROL.with(|c| {
-        let len = framed.len().min(c.tx.len());
-        c.tx[..len].copy_from_slice(&framed[..len]);
-        c.tx_len = len;
+        c.tx = framed;
         c.tx_sent = 0;
     });
-    crate::passthrough::finished();
 }
 
 /// Set when a client asked for a reboot, cleared by going.
 #[cfg(badge_control)]
 static REBOOT_WHEN_SENT: AtomicBool = AtomicBool::new(false);
 
+/// What this world would say about itself right now.
+///
+/// ONE DESCRIPTION, TWO SENDERS: the `GetWorldState` verb answers with it and
+/// the heartbeat pushes it. Built in two places they would drift, and the drift
+/// would show up as a beat that disagreed with the answer to a question asked a
+/// moment later — which is precisely the confusion a heartbeat exists to remove.
+#[cfg(badge_control)]
+fn world_state(uptime_ms: u64) -> dlc_platform_embedded::control::WorldState<'static> {
+    use dlc_platform_embedded::control;
+
+    control::WorldState {
+        world: crate::WORLD.code(),
+        tier: control::TIER_RP2350,
+        version: env!("CARGO_PKG_VERSION"),
+        screen: crate::world::screen_code(),
+        input: crate::world::input_code(),
+        text: crate::world::text_code(),
+        activity: ACTIVITY.load(Ordering::Relaxed) as u32,
+        app: "",
+        app_activity: dlc_platform_embedded::activity::get(),
+        uptime_ms,
+        requests_offered: crate::passthrough::OFFERED.load(Ordering::Relaxed),
+        requests_taken: crate::passthrough::TAKEN.load(Ordering::Relaxed),
+        session_open: crate::passthrough::session_is_open(),
+    }
+}
+
+/// Send a heartbeat if one is due. Returns whether anything was sent.
+///
+/// # Where this sits, and why
+///
+/// BELOW the log frames, which are below the text stream. A beat exists to say
+/// "still here" when there is nothing else to say, so anything with actual news
+/// should go first — and a beat that delayed the log would be a liveness signal
+/// competing with the evidence of life.
+///
+/// # Driven by the clock, not by call count
+///
+/// The text heartbeat above learned this the hard way: it counted service calls
+/// and never fired, because once there is nothing left to send the host's polls
+/// are NAK'd and generate almost no interrupts. "Every second" is what a
+/// subscriber means, and it stays true however often this happens to run.
+#[cfg(badge_control)]
+fn control_heartbeat(link: &mut impl dlc_platform_embedded::link::Link) -> bool {
+    use dlc_platform_embedded::control;
+
+    let Some(clock) = dlc_platform_embedded::clock::installed() else {
+        // NO CLOCK, NO BEAT. A heartbeat at an unknown rate is not a liveness
+        // signal, it is noise that looks like one.
+        return false;
+    };
+    // AND NO HEAP, NO BEAT — encoding a `WorldState` allocates. The early-boot
+    // window is covered by the TEXT log, which streams from the first line and
+    // needs nothing but a buffer, so nothing is lost by waiting.
+    if !heap_ready() {
+        return false;
+    }
+    let now = clock();
+
+    CONTROL.with(|c| {
+        if c.subscribed & (1 << control::NOTICE_HEARTBEAT) == 0 || c.heartbeat_ms == 0 {
+            return false;
+        }
+        // FINISH WHAT IS IN FLIGHT first — a beat shares `nx` with log frames,
+        // and half a frame followed by another is how a reader desynchronises.
+        if c.nx_sent < c.nx_len {
+            c.nx_sent += link.send(&c.nx[c.nx_sent..c.nx_len]);
+            return true;
+        }
+        if now.saturating_sub(c.last_beat_us) < c.heartbeat_ms as u64 * 1_000 {
+            return false;
+        }
+        c.last_beat_us = now;
+
+        // THE SAME `WorldState` A CLIENT WOULD HAVE ASKED FOR. A beat carrying
+        // less would make a watcher poll for the rest, which is the thing a
+        // heartbeat exists to stop them doing.
+        let state = world_state(now / 1000);
+        let framed = control::frame(control::KIND_HEARTBEAT, &state.encode());
+        if framed.len() > c.nx.len() {
+            return false;
+        }
+        c.nx[..framed.len()].copy_from_slice(&framed);
+        c.nx_len = framed.len();
+        c.nx_sent = 0;
+        c.nx_sent += link.send(&c.nx[..c.nx_len]);
+        true
+    })
+}
+
 /// Push any pending reply. Returns whether one is still outstanding.
 #[cfg(badge_control)]
-fn control_send(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool {
+fn control_send(link: &mut impl dlc_platform_embedded::link::Link) -> bool {
     CONTROL.with(|c| {
-        if c.tx_sent >= c.tx_len {
-            c.tx_len = 0;
+        // THE STACK-BUILT ONE FIRST. It only exists when the heap did not, and
+        // in that state there can be no `Vec` reply to compete with it.
+        if c.fixed_len > 0 {
+            if c.tx_sent >= c.fixed_len {
+                c.fixed_len = 0;
+                c.tx_sent = 0;
+                return false;
+            }
+            c.tx_sent += link.send(&c.fixed[c.tx_sent..c.fixed_len]);
+            return c.tx_sent < c.fixed_len;
+        }
+        if c.tx_sent >= c.tx.len() {
+            // DONE WITH IT: release the heap the reply was holding rather than
+            // keeping the largest answer ever sent alive until the next one.
+            c.tx = alloc::vec::Vec::new();
             c.tx_sent = 0;
             // THE LAST BYTE IS OUT, so the promise made above has been kept and
             // the board can go. `reboot` does not return.
@@ -1287,9 +1647,7 @@ fn control_send(serial: &mut usbd_serial::SerialPort<hal::usb::UsbBus>) -> bool 
             }
             return false;
         }
-        if let Ok(n) = serial.write(&c.tx[c.tx_sent..c.tx_len]) {
-            c.tx_sent += n;
-        }
-        c.tx_sent < c.tx_len
+        c.tx_sent += link.send(&c.tx[c.tx_sent..]);
+        c.tx_sent < c.tx.len()
     })
 }

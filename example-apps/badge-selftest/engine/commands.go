@@ -66,7 +66,7 @@ type check struct {
 func handleSelfTest(req *badgeselftestv1.SelfTestRequest) (*badgeselftestv1.SelfTestResponse, error) {
 	var checks []check
 
-	checks = append(checks, checkAdvertisement()...)
+	checks = append(checks, checkManifest()...)
 	checks = append(checks, checkRandom())
 	checks = append(checks, checkClock())
 	if req.ReadOnly {
@@ -129,44 +129,40 @@ func handleSelfTest(req *badgeselftestv1.SelfTestRequest) (*badgeselftestv1.Self
 	}, nil
 }
 
-// checkAdvertisement reads what the TIER SAYS IT IS and reports it back.
+// checkManifest reads what the WORLD SAYS ABOUT ITSELF and reports it back.
 //
 // THE MOST VALUABLE CHECK HERE, because it is the one a host cannot self-report
-// honestly: firmware printing its own advertisement proves only that it can
-// print. Reading it from inside the guest proves the environment actually
-// crossed the boundary — and an app that adapts to `ILC_STDOUT=none` is relying
-// on exactly this path working.
-func checkAdvertisement() []check {
-	tier := os.Getenv("ILC_TIER")
-	world := os.Getenv("ILC_WORLD")
-
-	// THE OUTLET COMES FROM THE MANIFEST, not from `ILC_STDOUT`.
-	//
-	// The wasi key is still set by embedded worlds and still shows up in a boot
-	// log, but it is frozen at `_initialize` and nothing in the platform reads it
-	// any more. An allocation moves — a world that takes screen back for a menu
-	// corrects the manifest and cannot correct the key — so a self-test reading
-	// the key would report a value that was true before the app ever ran.
-	//
-	// Reading it the way an ordinary app does is also the more honest check: this
-	// exercises the path every other app depends on, rather than a debug surface
-	// only this one touches.
+// honestly: firmware printing its own manifest proves only that it can print.
+// Reading it from inside the guest proves the description actually crossed the
+// boundary — and an app that adapts to `TEXT_OUTLET_NONE` is relying on exactly
+// this path working.
+//
+// # It used to read environment variables
+//
+// `ILC_TIER` and `ILC_WORLD`, through `os.Getenv`. They are gone, and this app
+// is why they lasted as long as they did: it was the only reader, on the only
+// tier that set them.
+//
+// The manifest is better on every axis that matters here. It is TYPED, so a
+// world cannot report a slot nothing can name. It is REVISABLE, where the wasi
+// environment is frozen at `_initialize`. And it is the channel every tier
+// already sends, so this check now means something on the browser and the CLI
+// instead of reporting an empty string and concluding nothing.
+func checkManifest() []check {
+	// CAPABILITIES AND IDENTITY, READ SEPARATELY, because the manifest holds
+	// them separately and the distinction is the point: an app ACTS on the first
+	// and only ever REPORTS the second.
+	world := platform.CurrentWorld()
 	stdout := platform.Env().GetTextOut().GetOutlet().String()
 
 	// ABSENCE IS NOT A FAILURE, and an earlier version of this got that wrong —
-	// it reported FAIL on the native CLI, which advertises nothing because
-	// `undefined` is a legitimate and common world. A check that fails on correct
-	// behaviour trains people to ignore it.
-	//
-	// What IS checkable is CONSISTENCY: the advertisement is all-or-nothing, so a
-	// host that sets some keys and not others has a bug the app can actually
-	// detect. `ILC_TIER` without `ILC_WORLD` means somebody added a key and
-	// forgot the table it belongs to.
-	partial := (tier == "") != (world == "")
+	// it reported FAIL on the native CLI, which declares no world because
+	// `undefined` is a legitimate and common answer. A check that fails on
+	// correct behaviour trains people to ignore it.
 	out := []check{{
-		name:   "advertisement",
-		passed: !partial,
-		detail: advertisementDetail(tier, world, partial),
+		name:   "world",
+		passed: true,
+		detail: describeWorld(world),
 	}}
 
 	// Reported, never judged: no single command can prove a tier honours what it
@@ -176,17 +172,29 @@ func checkAdvertisement() []check {
 		passed: true,
 		detail: describeStdout(stdout),
 	})
+
+	// WHETHER A COLOUR REACHES ANYBODY — the capability that has no fallback, so
+	// an app that wants to be seen has to know.
+	out = append(out, check{
+		name:   "status",
+		passed: true,
+		detail: describeStatus(platform.CanShowStatus()),
+	})
 	return out
 }
 
-func advertisementDetail(tier, world string, partial bool) string {
-	if partial {
-		return "partial - one of ILC_TIER/ILC_WORLD is missing"
+func describeWorld(world platform.World) string {
+	if world == platform.WorldUndefined {
+		return "none declared (undefined world)"
 	}
-	if tier == "" && world == "" {
-		return "none (undefined world)"
+	return string(world)
+}
+
+func describeStatus(shown bool) string {
+	if shown {
+		return "a colour reaches somebody"
 	}
-	return tier + "/" + world
+	return "no indicator - print as well"
 }
 
 func describeStdout(stdout string) string {

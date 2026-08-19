@@ -145,3 +145,56 @@ func ParseStatus(payload []byte) (status1, status2, status3 byte, ok bool) {
 func CanShowText() bool {
 	return Env().GetTextOut().GetOutlet() != ilcv1.TextOutlet_TEXT_OUTLET_NONE
 }
+
+// CurrentWorld reports which host slot the app is running in.
+//
+// # Diagnostic, not a switch
+//
+// This is IDENTITY, and the manifest groups it under `identity` to say so. Read
+// it to REPORT what you are running in; do not branch on it. An app that writes
+// `if CurrentWorld() == names.WorldBadgeNormal` has re-implemented a capability
+// check against a name that will be wrong for the next world — and it will
+// compile, pass, and quietly do the wrong thing there. Ask CanShowText or
+// CanShowStatus instead; those adapt to worlds written after the app.
+//
+// # It returns names.World, not a second type
+//
+// A world already has a canonical list — names/WORLDS.tsv, generated into Go and
+// Rust, checked by `make verify-names`. The first draft of this returned a new
+// proto enum, and the Go compiler rejected it for colliding with the `World`
+// that was already three feet away. That collision was the correct answer to the
+// wrong idea.
+func CurrentWorld() World {
+	switch Env().GetIdentity().GetName() {
+	case ilcv1.WorldName_WORLD_NAME_NATIVE:
+		return WorldNative
+	case ilcv1.WorldName_WORLD_NAME_BROWSER:
+		return WorldBrowser
+	case ilcv1.WorldName_WORLD_NAME_BADGE_NORMAL:
+		return WorldBadgeNormal
+	case ilcv1.WorldName_WORLD_NAME_BADGE_MINIMAL:
+		return WorldBadgeMinimal
+	case ilcv1.WorldName_WORLD_NAME_UNKNOWN:
+		return WorldUnknown
+	default:
+		// NOBODY SAID, which is the common case: an app that runs everywhere has
+		// no reason to name a world, and most hosts never send one.
+		return WorldUndefined
+	}
+}
+
+// CanShowStatus reports whether SetStatus reaches anybody.
+//
+// FAILS CLOSED, unlike CanShowText, and the asymmetry is deliberate. Text has a
+// fallback a host can always provide — stdout exists everywhere, so printing
+// where nobody looks costs a few discarded bytes. A status indicator has no
+// fallback: a host either has one or does not, and there is nothing to degrade
+// to. So silence here means "no", and an app that wants to be seen prints as
+// well.
+//
+// It is never an ERROR either way: SetStatus is safe to call unconditionally on
+// every tier, and this exists so an app can skip work it knows is invisible —
+// not so it can decide whether calling is allowed.
+func CanShowStatus() bool {
+	return Env().GetStatus() == ilcv1.StatusOutlet_STATUS_OUTLET_COLOR
+}

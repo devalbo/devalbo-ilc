@@ -93,12 +93,25 @@ pub const fn profile_path_max(profile: &str) -> usize {
     PATH_MAX
 }
 
+/// `WorldName` in world_name.proto. Generated from the same rows, so the
+/// badge cannot report a number the schema does not name.
+pub const WORLD_NAME_UNSPECIFIED: u32 = 0;
+pub const WORLD_NAME_UNKNOWN: u32 = 1;
+pub const WORLD_NAME_NATIVE: u32 = 2;
+pub const WORLD_NAME_BROWSER: u32 = 3;
+pub const WORLD_NAME_BADGE_NORMAL: u32 = 4;
+pub const WORLD_NAME_BADGE_MINIMAL: u32 = 5;
+pub const WORLD_NAME_BADGE_BADGER_NORMAL: u32 = 6;
+pub const WORLD_NAME_BADGE_BADGER_MINIMAL: u32 = 7;
+
 /// The registry, minus the two non-worlds.
-pub const KNOWN_WORLDS: [&str; 4] = [
+pub const KNOWN_WORLDS: [&str; 6] = [
     "native",
     "browser",
     "badge-normal",
     "badge-minimal",
+    "badge-badger-normal",
+    "badge-badger-minimal",
 ];
 
 /// A world's rule set. Both non-worlds and anything unrecognised FAIL CLOSED
@@ -114,6 +127,12 @@ pub const fn world_name_profile(world: &str) -> &'static str {
         return "fat";
     }
     if str_eq(world, "badge-minimal") {
+        return "fat";
+    }
+    if str_eq(world, "badge-badger-normal") {
+        return "fat";
+    }
+    if str_eq(world, "badge-badger-minimal") {
         return "fat";
     }
     "portable"

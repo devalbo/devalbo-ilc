@@ -76,11 +76,13 @@ pub const WORLD: BadgeWorld = if cfg!(badge_world_minimal) {
 };
 
 impl BadgeWorld {
-    /// `WorldKind` in control.proto — what the control channel reports.
+    /// `World` in platform.proto — the canonical slot name, from
+    /// names/WORLDS.tsv. `badge-normal`, not `normal`: the tier is part of the
+    /// world's identity, which is why the manifest needs no separate tier field.
     pub const fn code(self) -> u32 {
         match self {
-            BadgeWorld::Normal => dlc_platform_embedded::control::WORLD_KIND_NORMAL,
-            BadgeWorld::Minimal => dlc_platform_embedded::control::WORLD_KIND_MINIMAL,
+            BadgeWorld::Normal => dlc_platform_embedded::control::WORLD_NAME_BADGE_NORMAL,
+            BadgeWorld::Minimal => dlc_platform_embedded::control::WORLD_NAME_BADGE_MINIMAL,
         }
     }
 
@@ -107,48 +109,6 @@ impl BadgeWorld {
         }
     }
 
-    /// The `wasi:cli/environment` table, DERIVED from the capability list.
-    ///
-    /// Derived rather than written out per world, because two hand-maintained
-    /// tables are how the subset invariant would quietly stop holding — the
-    /// advertisement cannot disagree with the capabilities if there is only one
-    /// source for both.
-    ///
-    /// Filled into a caller-owned buffer: this runs before the heap is trusted,
-    /// and it returns borrowed slices of `'static` strings, so nothing allocates.
-    pub fn advertise<'a>(
-        self,
-        buffer: &'a mut [(&'static str, &'static str); ADVERTISEMENT_MAX],
-    ) -> &'a [(&'static str, &'static str)] {
-        // Always true of every badge world, so they are not capabilities.
-        buffer[0] = ("ILC_TIER", "rp2350");
-        buffer[1] = ("ILC_WORLD", self.name());
-        let mut count = 2;
-
-        for capability in self.capabilities() {
-            buffer[count] = capability.advertisement();
-            count += 1;
-        }
-
-        // NO SCREEN BUDGET HERE. It briefly went out as `ILC_COLS`/`ILC_ROWS`,
-        // which cost a const integer-to-string formatter and a lookup table to
-        // produce two keys nothing ever read. The budget is an ALLOCATION and
-        // belongs in the manifest, which is the only channel that can correct it
-        // — see the `manifest` stage in `main.rs` and ENVIRONMENT-PLAN.md D12.
-
-        // THE ABSENCE IS THE MESSAGE, and it has to be said out loud. Every world
-        // provides `wasi:cli/stdout` — TinyGo will not instantiate without it — so
-        // an app cannot learn anything from its presence. A world lacking the text
-        // capability says so explicitly, and an app that reads this can emit an
-        // event instead of formatting a string nobody will see.
-        if !self.can(Capability::Text) {
-            buffer[count] = ("ILC_STDOUT", "none");
-            count += 1;
-        }
-
-        &buffer[..count]
-    }
-
     /// Whether this world has a capability. The check an app's host-side slot
     /// makes, and the one `advertise` makes about itself.
     pub fn can(self, capability: Capability) -> bool {
@@ -163,7 +123,7 @@ impl BadgeWorld {
 /// | | question | changes? | channel |
 /// | --- | --- | --- | --- |
 /// | **capability** | can this tier show text at all, and at most how much? | settled for the session | wasi env, at instantiation |
-/// | **allocation** | how much has the app got RIGHT NOW? | yes | the manifest (`SetEnvironment`) |
+/// | **allocation** | how much has the app got RIGHT NOW? | yes | the manifest (`SetWorldManifest`) |
 ///
 /// The wasi environment is read once, during `_initialize`, before any command
 /// has run. That makes it the right home for a fact settled for the session and
@@ -236,16 +196,6 @@ pub enum Capability {
     Text,
 }
 
-impl Capability {
-    /// How this capability announces itself to the app.
-    pub const fn advertisement(self) -> (&'static str, &'static str) {
-        match self {
-            Capability::Status => ("ILC_STATUS", "color"),
-            Capability::Text => ("ILC_STDOUT", text_sink()),
-        }
-    }
-}
-
 /// WHERE THE APP'S TEXT ACTUALLY GOES — **derived from the screen budget, not
 /// declared alongside it.**
 ///
@@ -267,15 +217,6 @@ impl Capability {
 /// The badge always has a UART on the clip pads, so `none` here is only ever a
 /// deliberate choice by a world with no text capability at all (`minimal`),
 /// never an accident of layout.
-/// How the panel is divided, as a word — for the SCREEN and the log, where a
-/// person reads it.
-pub const fn screen_name() -> &'static str {
-    match SCREEN {
-        ScreenLayout::Split => "split",
-        ScreenLayout::Full => "full",
-    }
-}
-
 pub const fn text_sink() -> &'static str {
     if crate::console::APP_ROWS > 0 {
         "display"
@@ -294,6 +235,7 @@ pub const fn text_sink() -> &'static str {
 // return the numbers declared in control.proto instead.
 
 /// `ScreenLayout`.
+#[cfg(badge_control)]
 pub const fn screen_code() -> u32 {
     match SCREEN {
         ScreenLayout::Split => dlc_platform_embedded::control::SCREEN_LAYOUT_SPLIT,
@@ -302,6 +244,7 @@ pub const fn screen_code() -> u32 {
 }
 
 /// `InputMode`. Mirrors `BADGE_INPUT`.
+#[cfg(badge_control)]
 pub const fn input_code() -> u32 {
     if cfg!(badge_input_off) {
         dlc_platform_embedded::control::INPUT_MODE_OFF
@@ -310,7 +253,20 @@ pub const fn input_code() -> u32 {
     }
 }
 
+/// `StatusOutlet` — what `ILC_STATUS` used to say.
+///
+/// Every badge has a backlight, so a world either renders status as a colour or
+/// has deliberately given the capability up.
+pub fn status_code(world: BadgeWorld) -> u32 {
+    if world.can(Capability::Status) {
+        dlc_platform_embedded::control::STATUS_OUTLET_COLOR
+    } else {
+        dlc_platform_embedded::control::STATUS_OUTLET_NONE
+    }
+}
+
 /// `TextOutlet` — the enum platform.proto already declares for this question.
+#[cfg(badge_control)]
 pub const fn text_code() -> u32 {
     if crate::console::APP_ROWS > 0 {
         dlc_platform_embedded::control::TEXT_OUTLET_DISPLAY
@@ -344,9 +300,6 @@ const _: () = {
     }
 };
 
-/// Room for the fixed pairs, every capability, and the `ILC_STDOUT=none` note.
-/// Sized against the largest world so `advertise` cannot overrun.
-pub const ADVERTISEMENT_MAX: usize = 2 + CAPABILITIES_NORMAL.len() + 1;
 
 /// What the badge is showing — the whole vocabulary of the minimal world.
 ///

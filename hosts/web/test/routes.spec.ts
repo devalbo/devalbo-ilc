@@ -119,7 +119,7 @@ test("a capability that goes away updates the inspector, and comes back", async 
   expect(drop).toBe(true);
 
   // No reload, and no explicit refresh call: the inspector heard
-  // `ilc.environment-changed` and asked the engine again.
+  // `ilc.world-manifest-changed` and asked the engine again.
   await expect(page.getByTestId("unavailable-export-fs")).toHaveCount(1);
   expect(await page.evaluate(() => (window as any).inspector.surface())).not.toContain(100);
 

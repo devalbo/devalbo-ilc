@@ -74,7 +74,7 @@ func TestCanShowTextFailsOpen(t *testing.T) {
 		ilcv1.TextOutlet_TEXT_OUTLET_TERMINAL,
 	} {
 		resetEnvironment()
-		if _, err := applyEnvironment(&ilcv1.Environment{
+		if _, err := applyEnvironment(&ilcv1.WorldManifest{
 			Revision: 1,
 			TextOut: &ilcv1.TextOut{
 				Outlet: outlet,
@@ -104,7 +104,7 @@ func TestOutletComesFromTheManifest(t *testing.T) {
 		t.Fatalf("wasi keys must not be read: got %v", got)
 	}
 
-	if _, err := applyEnvironment(&ilcv1.Environment{
+	if _, err := applyEnvironment(&ilcv1.WorldManifest{
 		Revision: 1,
 		TextOut: &ilcv1.TextOut{
 			Outlet: ilcv1.TextOutlet_TEXT_OUTLET_DISPLAY,
@@ -127,7 +127,7 @@ func TestOutletComesFromTheManifest(t *testing.T) {
 func TestOutletNoneSuppressesText(t *testing.T) {
 	defer resetEnvironment()
 	resetEnvironment()
-	if _, err := applyEnvironment(&ilcv1.Environment{
+	if _, err := applyEnvironment(&ilcv1.WorldManifest{
 		Revision: 1,
 		TextOut: &ilcv1.TextOut{
 			Outlet: ilcv1.TextOutlet_TEXT_OUTLET_NONE,
@@ -159,7 +159,7 @@ func TestOnEnvironmentChangeFiresOnlyOnChange(t *testing.T) {
 		sawRows = Env().GetTextOut().GetRows()
 	})
 
-	first := &ilcv1.Environment{Revision: 7, TextOut: &ilcv1.TextOut{Rows: 12}}
+	first := &ilcv1.WorldManifest{Revision: 7, TextOut: &ilcv1.TextOut{Rows: 12}}
 	if _, err := applyEnvironment(first); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestOnEnvironmentChangeFiresOnlyOnChange(t *testing.T) {
 	}
 
 	// The world takes four rows back.
-	if _, err := applyEnvironment(&ilcv1.Environment{Revision: 8, TextOut: &ilcv1.TextOut{Rows: 8}}); err != nil {
+	if _, err := applyEnvironment(&ilcv1.WorldManifest{Revision: 8, TextOut: &ilcv1.TextOut{Rows: 8}}); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 || sawRows != 8 {

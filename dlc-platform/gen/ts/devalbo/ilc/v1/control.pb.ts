@@ -4,8 +4,10 @@
 // @ts-nocheck
 
 import { createEnumType } from "@aptre/protobuf-es-lite/enum";
-import type { TextOutlet } from "./platform.pb.js";
-import { TextOutlet_Enum } from "./platform.pb.js";
+import type { WorldName } from "./world_name.pb.js";
+import { WorldName_Enum } from "./world_name.pb.js";
+import type { TextOutlet } from "./world_manifest.pb.js";
+import { TextOutlet_Enum } from "./world_manifest.pb.js";
 import type { MessageType } from "@aptre/protobuf-es-lite/message";
 import { createMessageType } from "@aptre/protobuf-es-lite/message";
 import { ScalarType } from "@aptre/protobuf-es-lite/scalar";
@@ -72,80 +74,6 @@ export const Activity_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Acti
   [3, "ACTIVITY_COLLECTING"],
   [4, "ACTIVITY_RUNNING"],
   [5, "ACTIVITY_RESTING"],
-]);
-
-/**
- * Which world a firmware was built as. Mirrors `BadgeWorld` in world.rs.
- *
- * @generated from enum devalbo.ilc.v1.WorldKind
- */
-export enum WorldKind {
-  /**
-   * @generated from enum value: WORLD_KIND_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * Text: the app's output is meant to be READ.
-   *
-   * @generated from enum value: WORLD_KIND_NORMAL = 1;
-   */
-  NORMAL = 1,
-
-  /**
-   * One colour, meaning "how is it going" — a deliberate simulation of a world
-   * with almost no output capability.
-   *
-   * @generated from enum value: WORLD_KIND_MINIMAL = 2;
-   */
-  MINIMAL = 2,
-}
-
-export const WorldKind_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.WorldKind", [
-  [0, "WORLD_KIND_UNSPECIFIED"],
-  [1, "WORLD_KIND_NORMAL"],
-  [2, "WORLD_KIND_MINIMAL"],
-]);
-
-/**
- * Which tier is answering. The same value an app sees as `ILC_TIER`, so a test
- * can assert that a world advertises what it claims.
- *
- * @generated from enum devalbo.ilc.v1.Tier
- */
-export enum Tier {
-  /**
-   * @generated from enum value: TIER_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: TIER_RP2350 = 1;
-   */
-  RP2350 = 1,
-
-  /**
-   * @generated from enum value: TIER_BROWSER = 2;
-   */
-  BROWSER = 2,
-
-  /**
-   * @generated from enum value: TIER_NATIVE = 3;
-   */
-  NATIVE = 3,
-
-  /**
-   * @generated from enum value: TIER_QEMU_ARMV7M = 4;
-   */
-  QEMU_ARMV7M = 4,
-}
-
-export const Tier_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Tier", [
-  [0, "TIER_UNSPECIFIED"],
-  [1, "TIER_RP2350"],
-  [2, "TIER_BROWSER"],
-  [3, "TIER_NATIVE"],
-  [4, "TIER_QEMU_ARMV7M"],
 ]);
 
 /**
@@ -405,6 +333,68 @@ export const Integrity_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Int
 ]);
 
 /**
+ * Which tier is answering.
+ *
+ * # Why this is NOT in an app's manifest
+ *
+ * Not because an app already knows — it does not, and that is the whole reason
+ * the manifest exists. An app is ONE portable artifact: the same engine package
+ * is linked natively, compiled to wasm for a browser, and AOT-compiled to a
+ * `.cwasm` that a badge runs for apps it was never built for. At runtime it
+ * cannot tell which of those happened.
+ *
+ * (An earlier version of this comment said the opposite — "a tier is what an app
+ * was built for" — which inverts the central premise of the architecture. It is
+ * recorded here because a schema comment is read as settled fact, and this one
+ * was wrong for a day.)
+ *
+ * The real reason is REDUNDANCY. `World` already determines the tier:
+ * `badge-normal` is rp2350, `browser` is the browser tier, `native` is native.
+ * Carrying both in the same message makes a disagreement EXPRESSIBLE — a world
+ * that reports `browser` and `rp2350` together — and this schema has spent its
+ * life removing exactly that shape: `TextOut.availability` beside `outlet`, the
+ * `config` map beside typed fields.
+ *
+ * So an app is told the more specific of the two, once.
+ *
+ * @generated from enum devalbo.ilc.v1.Tier
+ */
+export enum Tier {
+  /**
+   * @generated from enum value: TIER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: TIER_RP2350 = 1;
+   */
+  RP2350 = 1,
+
+  /**
+   * @generated from enum value: TIER_BROWSER = 2;
+   */
+  BROWSER = 2,
+
+  /**
+   * @generated from enum value: TIER_NATIVE = 3;
+   */
+  NATIVE = 3,
+
+  /**
+   * @generated from enum value: TIER_QEMU_ARMV7M = 4;
+   */
+  QEMU_ARMV7M = 4,
+}
+
+export const Tier_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Tier", [
+  [0, "TIER_UNSPECIFIED"],
+  [1, "TIER_RP2350"],
+  [2, "TIER_BROWSER"],
+  [3, "TIER_NATIVE"],
+  [4, "TIER_QEMU_ARMV7M"],
+]);
+
+/**
  * @generated from enum devalbo.ilc.v1.Level
  */
 export enum Level {
@@ -598,11 +588,29 @@ export enum Notice {
    * @generated from enum value: NOTICE_LOG = 1;
    */
   LOG = 1,
+
+  /**
+   * A periodic `WorldState`, so that SILENCE MEANS SOMETHING.
+   *
+   * Every other diagnostic here is "the world says things". None of them says
+   * "the world is still here", so silence had four readings — hung, finished,
+   * starved, or a reader already at the end — and no way to tell them apart
+   * without reflashing. That ambiguity cost an hour on 2026-08-17.
+   *
+   * A beat collapses it. If it stops, the world stopped. If it continues while
+   * nothing else arrives, the world is alive and the silence is about something
+   * else. That is a different claim from anything the log makes, and it is the
+   * one that was missing.
+   *
+   * @generated from enum value: NOTICE_HEARTBEAT = 2;
+   */
+  HEARTBEAT = 2,
 }
 
 export const Notice_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Notice", [
   [0, "NOTICE_UNSPECIFIED"],
   [1, "NOTICE_LOG"],
+  [2, "NOTICE_HEARTBEAT"],
 ]);
 
 /**
@@ -616,9 +624,9 @@ export const Notice_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Notice
  */
 export interface WorldState {
   /**
-   * @generated from field: devalbo.ilc.v1.WorldKind world = 9;
+   * @generated from field: devalbo.ilc.v1.WorldName world = 9;
    */
-  world?: WorldKind;
+  world?: WorldName;
   /**
    * @generated from field: devalbo.ilc.v1.Tier tier = 10;
    */
@@ -682,13 +690,38 @@ export interface WorldState {
    * @generated from field: uint64 uptime_ms = 7;
    */
   uptimeMs?: bigint;
+  /**
+   * PASS-THROUGH BOOKKEEPING, for the question a client cannot answer alone.
+   *
+   * "I sent a request and nothing happened" has three causes that are identical
+   * from the far end of a cable: it never arrived, it arrived and was refused,
+   * or it arrived and nobody collected it. One counter separates the first from
+   * the rest, and the pair separates the second from the third.
+   *
+   * Diagnostic, and kept: this cost an afternoon of writing throwaway probes to
+   * guess at it, which is exactly the work a control channel exists to make
+   * unnecessary.
+   *
+   * @generated from field: uint32 requests_offered = 14;
+   */
+  requestsOffered?: number;
+  /**
+   * @generated from field: uint32 requests_taken = 15;
+   */
+  requestsTaken?: number;
+  /**
+   * Whether an app is instantiated and could run one at all.
+   *
+   * @generated from field: bool session_open = 16;
+   */
+  sessionOpen?: boolean;
 
 };
 
 export const WorldState: MessageType<WorldState> = /* @__PURE__ */ createMessageType({
     typeName: "devalbo.ilc.v1.WorldState",
     fields: [
-        { no: 9, name: "world", kind: "enum", T: WorldKind_Enum },
+        { no: 9, name: "world", kind: "enum", T: WorldName_Enum },
         { no: 10, name: "tier", kind: "enum", T: Tier_Enum },
         { no: 3, name: "version", kind: "scalar", T: ScalarType.STRING },
         { no: 11, name: "screen", kind: "enum", T: ScreenLayout_Enum },
@@ -698,6 +731,9 @@ export const WorldState: MessageType<WorldState> = /* @__PURE__ */ createMessage
         { no: 6, name: "app", kind: "scalar", T: ScalarType.STRING },
         { no: 8, name: "app_activity", kind: "scalar", T: ScalarType.STRING },
         { no: 7, name: "uptime_ms", kind: "scalar", T: ScalarType.UINT64 },
+        { no: 14, name: "requests_offered", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 15, name: "requests_taken", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 16, name: "session_open", kind: "scalar", T: ScalarType.BOOL },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });
@@ -951,6 +987,19 @@ export const ExecuteRequest: MessageType<ExecuteRequest> = /* @__PURE__ */ creat
  */
 export interface ExecuteResponse {
   /**
+   * WHICH COMMAND THIS ANSWERS.
+   *
+   * Implicit until now: the caller sent a method id, so it knew. That holds
+   * only while the response never leaves the conversation that produced it —
+   * and the whole point of framing was that these bytes can be logged,
+   * replayed, or mirrored to another world (D8), where "what did I ask for" is
+   * no longer in scope. One varint makes the answer decodable on its own, which
+   * is also what lets a reader pick the right response spec for it.
+   *
+   * @generated from field: uint32 method_id = 4;
+   */
+  methodId?: number;
+  /**
    * WHETHER THE APP SUCCEEDED, which is not whether the world did.
    *
    * `ControlResponse.ok` says the world accepted the verb and ran something.
@@ -979,6 +1028,7 @@ export interface ExecuteResponse {
 export const ExecuteResponse: MessageType<ExecuteResponse> = /* @__PURE__ */ createMessageType({
     typeName: "devalbo.ilc.v1.ExecuteResponse",
     fields: [
+        { no: 4, name: "method_id", kind: "scalar", T: ScalarType.UINT32 },
         { no: 1, name: "success", kind: "scalar", T: ScalarType.BOOL },
         { no: 2, name: "output", kind: "scalar", T: ScalarType.BYTES },
         { no: 3, name: "error", kind: "scalar", T: ScalarType.STRING },
@@ -1012,6 +1062,35 @@ export interface ControlRequest {
    * @generated from field: bytes payload = 2;
    */
   payload?: Uint8Array;
+  /**
+   * A NUMBER THE CLIENT CHOOSES, echoed on the reply.
+   *
+   * # Why this exists before anything needs it
+   *
+   * Today a client pairs a reply with its request by there being only one in
+   * flight — `passthrough.rs` REFUSES a second pass-through for exactly that
+   * reason, and says so. That is not a design, it is the absence of one, and it
+   * holds only while three things stay true: one client, one link, and a
+   * transport that neither reorders nor duplicates.
+   *
+   * Each of those is already scheduled to stop being true. The browser mirror
+   * (D8) is a second client on the same wire. A UDP transport (D9 §1a) can
+   * deliver a reply twice, or out of order, or after the retry that replaced
+   * it — and an uncorrelated reply is then not merely unhelpful, it is WRONG,
+   * and wrong in a way nothing can detect after the fact.
+   *
+   * Adding it now costs a varint. Adding it later means every client that
+   * learned to depend on one-at-a-time is a client that breaks.
+   *
+   * # It is opaque to the world
+   *
+   * A world never interprets it, never validates it, and never remembers it
+   * beyond the reply it is echoing into. Zero means "not correlated", which is
+   * what a client that predates this field sends, and it keeps working.
+   *
+   * @generated from field: uint64 request_id = 3;
+   */
+  requestId?: bigint;
 
 };
 
@@ -1020,6 +1099,7 @@ export const ControlRequest: MessageType<ControlRequest> = /* @__PURE__ */ creat
     fields: [
         { no: 1, name: "verb", kind: "enum", T: Verb_Enum },
         { no: 2, name: "payload", kind: "scalar", T: ScalarType.BYTES },
+        { no: 3, name: "request_id", kind: "scalar", T: ScalarType.UINT64 },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });
@@ -1046,6 +1126,17 @@ export interface ControlResponse {
    * @generated from field: bytes payload = 3;
    */
   payload?: Uint8Array;
+  /**
+   * The `request_id` of the request this answers, copied verbatim.
+   *
+   * A client that sent one and receives a reply carrying a DIFFERENT id has
+   * learned something true and useful: this is not its answer. Skipping it and
+   * continuing to wait is correct, and is what makes a late reply from a
+   * timed-out request harmless rather than a wrong answer to the next question.
+   *
+   * @generated from field: uint64 request_id = 4;
+   */
+  requestId?: bigint;
 
 };
 
@@ -1055,6 +1146,7 @@ export const ControlResponse: MessageType<ControlResponse> = /* @__PURE__ */ cre
         { no: 1, name: "ok", kind: "scalar", T: ScalarType.BOOL },
         { no: 2, name: "error", kind: "scalar", T: ScalarType.STRING },
         { no: 3, name: "payload", kind: "scalar", T: ScalarType.BYTES },
+        { no: 4, name: "request_id", kind: "scalar", T: ScalarType.UINT64 },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });
@@ -1174,6 +1266,23 @@ export const LogLine: MessageType<LogLine> = /* @__PURE__ */ createMessageType({
  */
 export interface Subscription {
   /**
+   * How often to beat, for `NOTICE_HEARTBEAT`. Zero takes the world's own
+   * default.
+   *
+   * THE SUBSCRIBER CHOOSES, because the subscriber is the one who knows what it
+   * is watching for: a person watching a badge wants a second, a test watching
+   * for a hang in a ten-minute run does not. A world that fixed the rate would
+   * be guessing at both.
+   *
+   * A WORLD MAY STILL REFUSE THE NUMBER. It is clamped to what this world will
+   * actually sustain and the granted value comes back in the reply — asking for
+   * a beat every millisecond on a link that also carries a log is a request to
+   * starve the log, and quietly obeying would be worse than saying no.
+   *
+   * @generated from field: uint32 heartbeat_ms = 2;
+   */
+  heartbeatMs?: number;
+  /**
    * The notices wanted. EMPTY MEANS NONE, which is how a client unsubscribes.
    *
    * A world grants what it supports and no more, and the reply says which — so a
@@ -1189,6 +1298,7 @@ export interface Subscription {
 export const Subscription: MessageType<Subscription> = /* @__PURE__ */ createMessageType({
     typeName: "devalbo.ilc.v1.Subscription",
     fields: [
+        { no: 2, name: "heartbeat_ms", kind: "scalar", T: ScalarType.UINT32 },
         { no: 1, name: "notices", kind: "enum", T: Notice_Enum, repeated: true },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,

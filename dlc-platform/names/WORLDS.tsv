@@ -50,5 +50,25 @@ browser	portable	a DOM slot and OPFS
 # The badge's two worlds are the same component and the same imports — they are
 # not two WIT worlds (EMBEDDED-PLAN D10). They differ in what reaches a human,
 # and `badge-minimal` is a SIMULATION of a device with only a status LED.
-badge-normal	fat	RP2350: shows the app's text; FAT over USB
-badge-minimal	fat	RP2350: one status colour, no text; FAT over USB
+badge-normal	fat	RP2350 Tufty: shows the app's text; FAT over USB
+badge-minimal	fat	RP2350 Tufty: one status colour, no text; FAT over USB
+
+# THE BADGER 2350 — same tier, different hardware, and that is the point.
+#
+# It is RP2350, so the engine, the payload catalog and the control channel are
+# unchanged. What differs is the SURFACE: e-ink rather than a backlit TFT, which
+# is a genuine test of whether the capability model holds rather than a second
+# copy of the badge.
+#
+# Two things it will make us answer, both of which today's model leaves open:
+#
+#   - `StatusOutlet` has NONE and COLOR. E-ink has no colour and no backlight, so
+#     "how is it going" reaches a person as WORDS or not at all — a third outlet,
+#     or an admission that status is a colour and this world has none.
+#   - A partial refresh is hundreds of milliseconds and the panel HOLDS its image
+#     with the power off. Every repaint in this firmware assumes neither.
+#
+# Listed now so the vocabulary is ready before the hardware is, and so the enum
+# that mirrors this file gains it in one place.
+badge-badger-normal	fat	RP2350 Badger: e-ink, shows the app's text; FAT over USB
+badge-badger-minimal	fat	RP2350 Badger: e-ink, status only; FAT over USB
