@@ -50,6 +50,15 @@ pub const F_GET_COMMAND_SPEC_REQUEST_METHOD_ID: u32 = 1;
 // GetCommandSpecResponse
 pub const F_GET_COMMAND_SPEC_RESPONSE_COMMANDS: u32 = 1;
 
+// SchemaInfo
+pub const F_SCHEMA_INFO_SCHEMA_ID: u32 = 1;
+pub const F_SCHEMA_INFO_VERSION: u32 = 2;
+pub const F_SCHEMA_INFO_URL: u32 = 3;
+pub const F_SCHEMA_INFO_DESCRIPTOR: u32 = 4;
+
+// GetSchemaResponse
+pub const F_GET_SCHEMA_RESPONSE_SCHEMA: u32 = 1;
+
 // GetCommandSurfaceResponse
 pub const F_GET_COMMAND_SURFACE_RESPONSE_METHOD_IDS: u32 = 1;
 

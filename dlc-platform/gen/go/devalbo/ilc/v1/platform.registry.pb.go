@@ -13,6 +13,7 @@ const (
 	MethodSetWorldManifest  uint32 = 2
 	MethodGetCommandSurface uint32 = 4
 	MethodGetCommandSpec    uint32 = 5
+	MethodGetSchema         uint32 = 6
 	MethodExportFs          uint32 = 100
 	MethodImportFs          uint32 = 101
 	MethodResetFs           uint32 = 102
@@ -27,6 +28,7 @@ func PlatformServiceHandlers(
 	setWorldManifestFn func(*SetWorldManifestRequest) (*SetWorldManifestResponse, error),
 	getCommandSurfaceFn func(*GetCommandSurfaceRequest) (*GetCommandSurfaceResponse, error),
 	getCommandSpecFn func(*GetCommandSpecRequest) (*GetCommandSpecResponse, error),
+	getSchemaFn func(*GetSchemaRequest) (*GetSchemaResponse, error),
 	exportFsFn func(*ExportFsRequest) (*ExportFsResponse, error),
 	importFsFn func(*ImportFsRequest) (*ImportFsResponse, error),
 	resetFsFn func(*ResetFsRequest) (*ResetFsResponse, error),
@@ -72,6 +74,17 @@ func PlatformServiceHandlers(
 				return nil, err
 			}
 			resp, err := getCommandSpecFn(&req)
+			if err != nil {
+				return nil, err
+			}
+			return resp.MarshalVT()
+		},
+		MethodGetSchema: func(request []byte) ([]byte, error) {
+			var req GetSchemaRequest
+			if err := req.UnmarshalVT(request); err != nil {
+				return nil, err
+			}
+			resp, err := getSchemaFn(&req)
 			if err != nil {
 				return nil, err
 			}

@@ -595,6 +595,171 @@ func (x *GetCommandSpecResponse) GetCommands() []*SpecCommand {
 	return nil
 }
 
+// WHAT AN APP'S MESSAGES LOOK LIKE — enough for a client that was never built
+// against them to render its requests and responses.
+//
+// # Why this is HERE and not in the vendored standard set
+//
+// It was briefly in `devalbo.dlc.std.v1`, on the reasoning that describing your
+// own schema is an app-level concern. It is not: an app supplies four SCALARS to
+// `platform.SetSchema` and never constructs this message. The only code that
+// builds or reads one is a host or a client — which is the definition of
+// `devalbo.ilc.v1`.
+//
+// The mistake had a cost that named itself: `platform.proto` importing across
+// packages made the generated `platform.pb.ts` import a file no scaffolded app
+// generates, and the scaffold's browser tests failed on a missing module. The
+// standard set has a first test — "more than one app would declare it" — and
+// this fails it.
+//
+// # The problem
+//
+// A host can already encode a request BY NAME: `SpecFlag` describes each request
+// field, which is how a badge collected `-set opponent=<enum>` for an app it
+// knows nothing about. The response half stops short. `SpecResult` describes
+// flat fields only, so a reply whose payload is a nested message arrives as
+// `field 1 (not in the spec) 19 bytes: 0a09…` — correct bytes, no names.
+//
+// Extending `SpecResult` to nest would mean re-implementing a descriptor one
+// feature at a time: first nesting, then oneofs, then maps, then well-known
+// types, each arriving as a schema change plus four hand-decoders.
+//
+// # Prior art, and where it stops
+//
+// `react-qroma-lib` renders arbitrary protobuf messages in a browser from
+// `@protobuf-ts` runtime metadata — one component walks `IMessageType.fields[]`,
+// branches on `field.kind` (scalar / enum / message / oneof), and produces a
+// form. That proves generic rendering works from field metadata alone.
+//
+// What it does not do is DISCOVERY: its registry is populated from the app's
+// generated TypeScript, imported at build time, so the page must be compiled
+// against the same protos as the firmware. That is fine when one team ships
+// both. It is exactly the gap when a web page meets a device over WebSerial that
+// it was not built for.
+//
+// # What this carries, and why each field exists
+//
+// Four fields answering four different questions. They are not redundant:
+// `schema_id` says WHICH, `version` says HOW OLD, `url` says WHERE, and
+// `descriptor` says HERE.
+type SchemaInfo struct {
+	unknownFields []byte
+	// THE IDENTITY: a content hash of `descriptor`, whether or not it is carried.
+	//
+	// This is the field that makes every other one trustworthy. A client that
+	// fetches `url` compiles what it got, hashes it, and compares: match means the
+	// names it is about to show belong to the bytes it is about to show them for.
+	//
+	// WITHOUT IT A URL IS A LIE WAITING TO HAPPEN. The device was built from one
+	// version of a .proto; the URL resolves to whatever is there now. When they
+	// drift, a client renders wrong field names over correct bytes and nothing
+	// says so — the same silent-disagreement failure as an enum value transcribed
+	// by hand, one layer up.
+	//
+	// The payload catalog already learned this: it prints a checksum per entry
+	// because size alone could not say WHICH BUILD was on the board.
+	SchemaId string `protobuf:"bytes,1,opt,name=schema_id,json=schemaId,proto3" json:"schemaId,omitempty"`
+	// THE ORDER: the app's own version for this schema, e.g. "1.4.0".
+	//
+	// NOT A SUBSTITUTE FOR `schema_id`, and not substitutable by it. A hash can
+	// only say same-or-different; it cannot say the device is OLDER than a page
+	// expects, which is the question a client actually asks when it wants to
+	// decide whether to degrade gracefully or refuse.
+	//
+	// Free text rather than three integers: an app may version however it likes,
+	// and a platform that insisted on semver would be inventing a policy it cannot
+	// enforce. Clients that want ordering can parse it; clients that want equality
+	// have `schema_id`.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// WHERE A COPY MAY BE FETCHED. A HINT, never the truth.
+	//
+	// The point is size: a URL is tens of bytes where a descriptor is tens of
+	// kilobytes, which is the difference between "always ship it" and "opt in" on
+	// an Arduino-class device. It is safe to treat as a hint precisely because
+	// `schema_id` makes what comes back verifiable.
+	//
+	// A client that cannot reach it — offline, no CORS, air-gapped bench — has
+	// lost an optimisation, not correctness.
+	Url string `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	// THE SCHEMA ITSELF: a serialized FileDescriptorSet, if the app embedded one.
+	//
+	// The offline answer, and the only one that needs no network at all. Costs
+	// roughly 5-15 KB in the artifact, so it is opt-in per app rather than
+	// automatic — a badge on a bench renders fully, a microcontroller counting
+	// bytes ships `schema_id` and `url` alone.
+	//
+	// A FileDescriptorSet rather than a bespoke shape because every protobuf
+	// toolchain already reads one: protobuf-es and protobuf-ts in a browser,
+	// protoreflect in Go, `buf` on a command line. A format of our own would mean
+	// writing a reader for each.
+	Descriptor_ []byte `protobuf:"bytes,4,opt,name=descriptor,proto3" json:"descriptor,omitempty"`
+}
+
+func (x *SchemaInfo) Reset() {
+	*x = SchemaInfo{}
+}
+
+func (*SchemaInfo) ProtoMessage() {}
+
+func (x *SchemaInfo) GetSchemaId() string {
+	if x != nil {
+		return x.SchemaId
+	}
+	return ""
+}
+
+func (x *SchemaInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *SchemaInfo) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *SchemaInfo) GetDescriptor_() []byte {
+	if x != nil {
+		return x.Descriptor_
+	}
+	return nil
+}
+
+type GetSchemaRequest struct {
+	unknownFields []byte
+}
+
+func (x *GetSchemaRequest) Reset() {
+	*x = GetSchemaRequest{}
+}
+
+func (*GetSchemaRequest) ProtoMessage() {}
+
+type GetSchemaResponse struct {
+	unknownFields []byte
+	// Absent when the app declared none. AN EMPTY ANSWER IS STILL AN ANSWER: a
+	// client learns the app cannot describe itself and falls back to the flat
+	// `SpecResult`, rather than waiting on a verb that was never going to reply.
+	Schema *SchemaInfo `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
+}
+
+func (x *GetSchemaResponse) Reset() {
+	*x = GetSchemaResponse{}
+}
+
+func (*GetSchemaResponse) ProtoMessage() {}
+
+func (x *GetSchemaResponse) GetSchema() *SchemaInfo {
+	if x != nil {
+		return x.Schema
+	}
+	return nil
+}
+
 type GetCommandSurfaceRequest struct {
 	unknownFields []byte
 }
@@ -959,6 +1124,56 @@ func (m *GetCommandSpecResponse) CloneVT() *GetCommandSpecResponse {
 }
 
 func (m *GetCommandSpecResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *SchemaInfo) CloneVT() *SchemaInfo {
+	if m == nil {
+		return (*SchemaInfo)(nil)
+	}
+	r := new(SchemaInfo)
+	r.SchemaId = m.SchemaId
+	r.Version = m.Version
+	r.Url = m.Url
+	r.Descriptor_ = protobuf_go_lite.CloneBytes(m.Descriptor_)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *SchemaInfo) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *GetSchemaRequest) CloneVT() *GetSchemaRequest {
+	if m == nil {
+		return (*GetSchemaRequest)(nil)
+	}
+	r := new(GetSchemaRequest)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *GetSchemaRequest) CloneMessageVT() protobuf_go_lite.CloneMessage {
+	return m.CloneVT()
+}
+
+func (m *GetSchemaResponse) CloneVT() *GetSchemaResponse {
+	if m == nil {
+		return (*GetSchemaResponse)(nil)
+	}
+	r := new(GetSchemaResponse)
+	r.Schema = protobuf_go_lite.CloneVTValue(m.Schema)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = slices.Clone(m.unknownFields)
+	}
+	return r
+}
+
+func (m *GetSchemaResponse) CloneMessageVT() protobuf_go_lite.CloneMessage {
 	return m.CloneVT()
 }
 
@@ -1343,6 +1558,69 @@ func (this *GetCommandSpecResponse) EqualVT(that *GetCommandSpecResponse) bool {
 
 func (this *GetCommandSpecResponse) EqualMessageVT(thatMsg any) bool {
 	that, ok := thatMsg.(*GetCommandSpecResponse)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *SchemaInfo) EqualVT(that *SchemaInfo) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.SchemaId != that.SchemaId {
+		return false
+	}
+	if this.Version != that.Version {
+		return false
+	}
+	if this.Url != that.Url {
+		return false
+	}
+	if !protobuf_go_lite.EqualBytes(this.Descriptor_, that.Descriptor_) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *SchemaInfo) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*SchemaInfo)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *GetSchemaRequest) EqualVT(that *GetSchemaRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *GetSchemaRequest) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*GetSchemaRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *GetSchemaResponse) EqualVT(that *GetSchemaResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !protobuf_go_lite.IsEqualVT(this.Schema, that.Schema) {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *GetSchemaResponse) EqualMessageVT(thatMsg any) bool {
+	that, ok := thatMsg.(*GetSchemaResponse)
 	if !ok {
 		return false
 	}
@@ -2301,6 +2579,148 @@ func (x *GetCommandSpecResponse) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
+// MarshalProtoJSON marshals the SchemaInfo message to JSON.
+func (x *SchemaInfo) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.SchemaId != "" || s.HasField("schemaId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("schemaId")
+		s.WriteString(x.SchemaId)
+	}
+	if x.Version != "" || s.HasField("version") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("version")
+		s.WriteString(x.Version)
+	}
+	if x.Url != "" || s.HasField("url") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("url")
+		s.WriteString(x.Url)
+	}
+	if len(x.Descriptor_) > 0 || s.HasField("descriptor") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("descriptor")
+		s.WriteBytes(x.Descriptor_)
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the SchemaInfo to JSON.
+func (x *SchemaInfo) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the SchemaInfo message from JSON.
+func (x *SchemaInfo) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "schema_id", "schemaId":
+			s.AddField("schema_id")
+			x.SchemaId = s.ReadString()
+		case "version":
+			s.AddField("version")
+			x.Version = s.ReadString()
+		case "url":
+			s.AddField("url")
+			x.Url = s.ReadString()
+		case "descriptor":
+			s.AddField("descriptor")
+			x.Descriptor_ = s.ReadBytes()
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the SchemaInfo from JSON.
+func (x *SchemaInfo) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the GetSchemaRequest message to JSON.
+func (x *GetSchemaRequest) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the GetSchemaRequest to JSON.
+func (x *GetSchemaRequest) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the GetSchemaRequest message from JSON.
+func (x *GetSchemaRequest) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		// no fields
+	})
+}
+
+// UnmarshalJSON unmarshals the GetSchemaRequest from JSON.
+func (x *GetSchemaRequest) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the GetSchemaResponse message to JSON.
+func (x *GetSchemaResponse) MarshalProtoJSON(s *json.MarshalState) {
+	if x == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	var wroteField bool
+	if x.Schema != nil || s.HasField("schema") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("schema")
+		x.Schema.MarshalProtoJSON(s.WithField("schema"))
+	}
+	s.WriteObjectEnd()
+}
+
+// MarshalJSON marshals the GetSchemaResponse to JSON.
+func (x *GetSchemaResponse) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the GetSchemaResponse message from JSON.
+func (x *GetSchemaResponse) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	if s.ReadNil() {
+		return
+	}
+	s.ReadObject(func(key string) {
+		switch key {
+		default:
+			s.Skip() // ignore unknown field
+		case "schema":
+			if s.ReadNil() {
+				x.Schema = nil
+				return
+			}
+			x.Schema = &SchemaInfo{}
+			x.Schema.UnmarshalProtoJSON(s.WithField("schema", true))
+		}
+	})
+}
+
+// UnmarshalJSON unmarshals the GetSchemaResponse from JSON.
+func (x *GetSchemaResponse) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the GetCommandSurfaceRequest message to JSON.
 func (x *GetCommandSurfaceRequest) MarshalProtoJSON(s *json.MarshalState) {
 	if x == nil {
@@ -3196,6 +3616,132 @@ func (m *GetCommandSpecResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error
 	return len(dAtA) - i, nil
 }
 
+func (m *SchemaInfo) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SchemaInfo) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *SchemaInfo) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Descriptor_) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Descriptor_)
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.Url) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Url)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Version) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Version)
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.SchemaId) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.SchemaId)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetSchemaRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetSchemaRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *GetSchemaRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetSchemaResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetSchemaResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *GetSchemaResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Schema != nil {
+		size, err := m.Schema.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *GetCommandSurfaceRequest) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -4030,6 +4576,132 @@ func (m *GetCommandSpecResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int,
 	return len(dAtA) - i, nil
 }
 
+func (m *SchemaInfo) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SchemaInfo) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *SchemaInfo) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if len(m.Descriptor_) > 0 {
+		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Descriptor_)
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.Url) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Url)
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Version) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.Version)
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.SchemaId) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.SchemaId)
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetSchemaRequest) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetSchemaRequest) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *GetSchemaRequest) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetSchemaResponse) MarshalVTStrict() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVTStrict(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetSchemaResponse) MarshalToVTStrict(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVTStrict(dAtA[:size])
+}
+
+func (m *GetSchemaResponse) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
+	}
+	if m.Schema != nil {
+		size, err := m.Schema.MarshalToSizedBufferVTStrict(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *GetCommandSurfaceRequest) MarshalVTStrict() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -4562,6 +5234,44 @@ func (m *GetCommandSpecResponse) SizeVT() (n int) {
 	return n
 }
 
+func (m *SchemaInfo) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.SchemaId)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Version)
+	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Url)
+	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Descriptor_)
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *GetSchemaRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *GetSchemaResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Schema != nil {
+		l = m.Schema.SizeVT()
+		n += protobuf_go_lite.SizeMessage(1, l)
+	}
+	n += len(m.unknownFields)
+	return n
+}
+
 func (m *GetCommandSurfaceRequest) SizeVT() (n int) {
 	if m == nil {
 		return 0
@@ -4934,6 +5644,53 @@ func (x *GetCommandSpecResponse) MarshalProtoText() string {
 }
 
 func (x *GetCommandSpecResponse) String() string {
+	return x.MarshalProtoText()
+}
+func (x *SchemaInfo) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "SchemaInfo")
+	if x.SchemaId != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "schema_id")
+		protobuf_go_lite.TextWriteString(&sb, x.SchemaId)
+	}
+	if x.Version != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "version")
+		protobuf_go_lite.TextWriteString(&sb, x.Version)
+	}
+	if x.Url != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "url")
+		protobuf_go_lite.TextWriteString(&sb, x.Url)
+	}
+	if len(x.Descriptor_) != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "descriptor")
+		protobuf_go_lite.TextWriteBytes(&sb, x.Descriptor_)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *SchemaInfo) String() string {
+	return x.MarshalProtoText()
+}
+func (x *GetSchemaRequest) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	protobuf_go_lite.TextStartMessage(&sb, "GetSchemaRequest")
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *GetSchemaRequest) String() string {
+	return x.MarshalProtoText()
+}
+func (x *GetSchemaResponse) MarshalProtoText() string {
+	var sb protobuf_go_lite.TextBuilder
+	initialLen := protobuf_go_lite.TextStartMessage(&sb, "GetSchemaResponse")
+	if x.Schema != nil {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "schema")
+		protobuf_go_lite.TextWriteTextMarshaler(&sb, x.Schema)
+	}
+	return protobuf_go_lite.TextFinishMessage(&sb)
+}
+
+func (x *GetSchemaResponse) String() string {
 	return x.MarshalProtoText()
 }
 func (x *GetCommandSurfaceRequest) MarshalProtoText() string {
@@ -5735,6 +6492,185 @@ func (m *GetCommandSpecResponse) UnmarshalVT(dAtA []byte) error {
 			}
 			m.Commands = append(m.Commands, &SpecCommand{})
 			if err := m.Commands[len(m.Commands)-1].UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SchemaInfo) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SchemaInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SchemaInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SchemaId", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.SchemaId = v
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Version = v
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Url", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Url = v
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Descriptor_", wireType)
+			}
+			m.Descriptor_, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Descriptor_, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetSchemaRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetSchemaRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetSchemaRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetSchemaResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetSchemaResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetSchemaResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Schema", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			if m.Schema == nil {
+				m.Schema = &SchemaInfo{}
+			}
+			if err := m.Schema.UnmarshalVT(dAtA[msgStart:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -7004,6 +7940,185 @@ func (m *GetCommandSpecResponse) UnmarshalVTUnsafe(dAtA []byte) error {
 			}
 			m.Commands = append(m.Commands, &SpecCommand{})
 			if err := m.Commands[len(m.Commands)-1].UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SchemaInfo) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SchemaInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SchemaInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SchemaId", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.SchemaId = v
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Version = v
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Url", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.Url = v
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Descriptor_", wireType)
+			}
+			m.Descriptor_, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetSchemaRequest) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetSchemaRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetSchemaRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protobuf_go_lite.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetSchemaResponse) UnmarshalVTUnsafe(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	var err error
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		wire, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+		if err != nil {
+			return err
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetSchemaResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetSchemaResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Schema", wireType)
+			}
+			msgStart, postIndex, err := protobuf_go_lite.DecodeLengthDelimited(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			if m.Schema == nil {
+				m.Schema = &SchemaInfo{}
+			}
+			if err := m.Schema.UnmarshalVTUnsafe(dAtA[msgStart:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

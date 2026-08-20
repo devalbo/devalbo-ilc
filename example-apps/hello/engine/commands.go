@@ -103,7 +103,12 @@ func handleGreet(req *hellov1.GreetRequest) (*hellov1.GreetResponse, error) {
 	// AND ALWAYS THE STATUS BYTES. This is the channel that survives when text
 	// does not: a tier with one LED can render it, and a tier with nothing
 	// discards it. Absence is a no-op, never an error.
-	platform.SetStatus(1, 0, 0)
+	//
+	// NAMED, NOT NUMBERED. This was the literal `1`, which meant "ok" under a
+	// mapping nobody had written down; `StatusLevel` now declares it and 1 is
+	// IDLE. The number moved and the meaning did not, which is precisely the
+	// silent failure a declared enum exists to make impossible.
+	platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelOK})
 
 	return &hellov1.GreetResponse{Text: text}, nil
 }
@@ -140,7 +145,8 @@ func handleCount(req *hellov1.CountRequest) (*hellov1.CountResponse, error) {
 			fmt.Println(phrase(req.Style, remaining))
 		}
 		// STATUS ON EVERY TICK, so a world with only a light still sees motion.
-		platform.SetStatus(1, byte(remaining), 0)
+		// Slot 2 carries the count: the CHANGE is the point, not the value.
+		platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelOK, Activity: byte(remaining)})
 		// AND IN WORDS, for a world that can show them. The dispatcher already
 		// publishes the command's name by default, so an app that says nothing
 		// still reports something true; this REFINES that, which is the only
@@ -155,7 +161,7 @@ func handleCount(req *hellov1.CountRequest) (*hellov1.CountResponse, error) {
 	if platform.CanShowText() {
 		fmt.Println(text)
 	}
-	platform.SetStatus(1, 0, 0)
+	platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelOK})
 	return &hellov1.CountResponse{Text: text, Counted: int32(counted)}, nil
 }
 
@@ -224,7 +230,7 @@ func handleMath(req *hellov1.MathRequest) (*hellov1.MathResponse, error) {
 		// AMBER, NOT RED. Red is for a world reporting that something is broken;
 		// this is a warning about what was asked, and the badge across the room
 		// should say so differently.
-		platform.SetStatus(2, 0, 0)
+		platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelWarning})
 		if platform.CanShowText() {
 			fmt.Println("cannot divide by zero")
 		}
@@ -247,7 +253,7 @@ func handleMath(req *hellov1.MathRequest) (*hellov1.MathResponse, error) {
 		result = left + right
 	}
 
-	platform.SetStatus(1, 0, 0)
+	platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelOK})
 	text := expression(left, req.Op, right) + " = " + fmt.Sprint(result)
 	if platform.CanShowText() {
 		fmt.Println(text)
@@ -297,18 +303,18 @@ func handleLight(req *hellov1.LightRequest) (*hellov1.LightResponse, error) {
 	// The app keeps its own `Colour` because that is its CLI vocabulary —
 	// `light green` reads better than `light ok` — but the mapping onto the
 	// platform's meaning now goes through names that cannot drift.
-	var status byte
+	var level platform.StatusLevel
 	switch req.Colour {
 	case hellov1.Colour_COLOUR_AMBER:
-		status = platform.StatusLevelWarning
+		level = platform.StatusLevelWarning
 	case hellov1.Colour_COLOUR_RED:
-		status = platform.StatusLevelError
+		level = platform.StatusLevelError
 	case hellov1.Colour_COLOUR_OFF:
-		status = platform.StatusLevelOff
+		level = platform.StatusLevelOff
 	default:
-		status = platform.StatusLevelOK
+		level = platform.StatusLevelOK
 	}
-	platform.SetStatus(status, 0, 0)
+	platform.SetStatus(platform.Status{IndicatorStatus: level})
 
 	// WHETHER IT REACHED ANYTHING. There is no capability query for a light, so
 	// this reports the nearest true thing the platform can answer — a world that

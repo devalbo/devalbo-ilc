@@ -50,6 +50,15 @@ const (
 	// GetCommandSpecResponse
 	F_GET_COMMAND_SPEC_RESPONSE_COMMANDS = 1
 
+	// SchemaInfo
+	F_SCHEMA_INFO_SCHEMA_ID  = 1
+	F_SCHEMA_INFO_VERSION    = 2
+	F_SCHEMA_INFO_URL        = 3
+	F_SCHEMA_INFO_DESCRIPTOR = 4
+
+	// GetSchemaResponse
+	F_GET_SCHEMA_RESPONSE_SCHEMA = 1
+
 	// GetCommandSurfaceResponse
 	F_GET_COMMAND_SURFACE_RESPONSE_METHOD_IDS = 1
 

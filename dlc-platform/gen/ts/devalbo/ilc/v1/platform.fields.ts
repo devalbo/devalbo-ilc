@@ -46,6 +46,15 @@ export const F_GET_COMMAND_SPEC_REQUEST_METHOD_ID = 1;
 // GetCommandSpecResponse
 export const F_GET_COMMAND_SPEC_RESPONSE_COMMANDS = 1;
 
+// SchemaInfo
+export const F_SCHEMA_INFO_SCHEMA_ID = 1;
+export const F_SCHEMA_INFO_VERSION = 2;
+export const F_SCHEMA_INFO_URL = 3;
+export const F_SCHEMA_INFO_DESCRIPTOR = 4;
+
+// GetSchemaResponse
+export const F_GET_SCHEMA_RESPONSE_SCHEMA = 1;
+
 // GetCommandSurfaceResponse
 export const F_GET_COMMAND_SURFACE_RESPONSE_METHOD_IDS = 1;
 

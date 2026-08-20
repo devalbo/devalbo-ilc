@@ -206,9 +206,11 @@ func run() error {
 			}
 		}
 
-		if enumsOnly {
-			continue
-		}
+		// NO `enumsOnly` GATE HERE ANY MORE. It used to sit above `servicesOf`,
+		// so a constants-only invocation never parsed a service and could not
+		// emit method ids — which is why `dlc-platform/web` hand-wrote
+		// `METHOD_SET_WORLD_MANIFEST = 2`. The gate now sits AFTER the registry is
+		// rendered, so "constants only" means "no dispatch code", not "no ids".
 
 		// RUST GETS ENUM VALUES AND NOTHING ELSE. The dispatch map and the CLI
 		// surface are Go and TypeScript ideas — the badge has neither a registry
@@ -273,6 +275,13 @@ func run() error {
 			Name:    proto.String(name),
 			Content: proto.String(content),
 		})
+
+		// CONSTANTS ONLY STOPS HERE. What follows — the CLI surface, the event
+		// helpers — is data a richer consumer wants and an npm package that only
+		// needs numbers does not.
+		if enumsOnly {
+			continue
+		}
 
 		// The CLI surface (Decision 29), emitted for BOTH languages. The web tier
 		// reads the same data as the native host — that is what keeps an in-page

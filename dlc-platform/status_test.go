@@ -17,7 +17,7 @@ func TestStatusRoundTrip(t *testing.T) {
 	SetEventSink(func(tp string, pl []byte) { topic, payload = tp, pl })
 	defer SetEventSink(nil)
 
-	SetStatus(1, 2, 3)
+	SetStatus(Status{IndicatorStatus: StatusLevelOK, Activity: 2, Detail: 3})
 
 	if topic != StatusTopic {
 		t.Fatalf("emitted on %q, want %q", topic, StatusTopic)
@@ -25,12 +25,13 @@ func TestStatusRoundTrip(t *testing.T) {
 	if len(payload) != StatusBytes {
 		t.Fatalf("payload is %d bytes, want %d", len(payload), StatusBytes)
 	}
-	s1, s2, s3, ok := ParseStatus(payload)
+	got, ok := ParseStatus(payload)
 	if !ok {
 		t.Fatal("ParseStatus refused a payload SetStatus produced")
 	}
-	if s1 != 1 || s2 != 2 || s3 != 3 {
-		t.Errorf("round trip got (%d,%d,%d), want (1,2,3)", s1, s2, s3)
+	want := Status{IndicatorStatus: StatusLevelOK, Activity: 2, Detail: 3}
+	if got != want {
+		t.Errorf("round trip got %+v, want %+v", got, want)
 	}
 }
 
@@ -40,7 +41,7 @@ func TestStatusRoundTrip(t *testing.T) {
 // payload that happens to share a name.
 func TestParseStatusRefusesWrongShape(t *testing.T) {
 	for _, payload := range [][]byte{nil, {}, {1}, {1, 2}, {1, 2, 3, 4}} {
-		if _, _, _, ok := ParseStatus(payload); ok {
+		if _, ok := ParseStatus(payload); ok {
 			t.Errorf("accepted a %d-byte payload", len(payload))
 		}
 	}
@@ -51,7 +52,7 @@ func TestParseStatusRefusesWrongShape(t *testing.T) {
 // whether anything is watching.
 func TestStatusIsANoOpWithoutAHost(t *testing.T) {
 	SetEventSink(nil)
-	SetStatus(1, 2, 3) // must not panic
+	SetStatus(Status{IndicatorStatus: StatusLevelOK, Activity: 2, Detail: 3}) // must not panic
 }
 
 // TestCanShowTextFailsOpen — an unset advertisement must mean "print".

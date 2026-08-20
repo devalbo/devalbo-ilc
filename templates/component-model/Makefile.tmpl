@@ -1,10 +1,40 @@
 # {{.ProjectName}} — build & verify.
 # Run inside `devbox shell`.
 
-.PHONY: gen
-gen: ## generate proto bindings, command dispatch, and dlcconfig from dlc.toml
+.PHONY: proto
+proto: ## recompile the protos ONLY — after editing anything under proto/
+	# THE ONE YOU WANT AFTER EDITING A .proto. `gen` below does this and more
+	# (dlcconfig from dlc.toml), which is right for a build and noisy when all
+	# you changed was a message.
 	cd proto && buf lint
 	dlc gen
+
+.PHONY: gen
+gen: proto schema ## generate proto bindings, command dispatch, dlcconfig, and the schema
+
+.PHONY: schema
+schema: ## build the descriptor a browser needs to render this app's messages
+	# WHAT THIS IS FOR. A host can already build a REQUEST for this app without
+	# being compiled against it — the command spec describes every request field.
+	# Reading a RESPONSE needs the message shapes, and a page meeting this app
+	# over WebSerial has no way to know them.
+	#
+	# `buf build` emits exactly what every protobuf toolchain already reads: a
+	# FileDescriptorSet. protobuf-es and protobuf-ts consume one in a browser,
+	# protoreflect in Go.
+	# INTO engine/, not gen/, because `go:embed` refuses a path containing `..`
+	# and the embedding file lives in engine/. A generated artifact beside source
+	# is the price of that rule.
+	cd proto && buf build -o ../engine/schema.binpb
+	@echo "  engine/schema.binpb  $$(wc -c < engine/schema.binpb) bytes"
+	@echo "  sha256               $$(shasum -a 256 engine/schema.binpb | cut -d" " -f1)"
+	# ALREADY WIRED UP — engine/commands.go embeds this file and declares it at
+	# init, so a fresh project describes itself with no further work. `gen`
+	# depends on this target for that reason: a missing schema.binpb would be a
+	# `go:embed` failure rather than a missing feature.
+	#
+	# To publish it instead of shipping it — tens of bytes on the device rather
+	# than the whole descriptor — see the HOSTED note in engine/commands.go.
 
 .PHONY: build
 build: gen ## build the native CLI (engine linked in-process)

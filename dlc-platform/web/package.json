@@ -36,7 +36,8 @@
     "./terminal": "./terminal.ts",
     "./terminal-ui": "./terminal-ui.ts",
     "./files": "./files.ts",
-    "./inspector": "./inspector.ts"
+    "./inspector": "./inspector.ts",
+    "./schema": "./schema.ts"
   },
   "files": [
     "*.ts",

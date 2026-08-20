@@ -56,32 +56,143 @@ const StatusTopic = "ilc.status"
 // StatusBytes is what a tier receives: three bytes, in a fixed order.
 const StatusBytes = 3
 
-// Slot indices into the payload. See the package note above: the names are
-// placeholders on purpose.
+// Slot indices into the payload. THE WIRE IS STILL THREE BYTES AND AN ORDER —
+// that is the contract with every world, and the struct below is a shape for
+// Go, not a change to it.
 const (
 	Status1 = 0
 	Status2 = 1
 	Status3 = 2
 )
 
-// WHAT SLOT 1 MEANS, as the enum that now declares it.
+// StatusLevel is slot 1: how it is going.
 //
-// Re-exported here rather than left for each app to reach into the generated
-// package, because this is the one slot with a settled meaning and an app should
-// not have to know which .proto file it came from to set a light.
+// WHAT IT ACTUALLY DOES, which is the part a generic name cannot carry. On the
+// badge (`world.rs: status_from_slot1`) each value becomes a panel colour and a
+// backlight state:
 //
-// THE VALUES WERE A CONTRACT NOBODY WROTE DOWN. `hello` had its own `Colour`
-// enum and translated it into literals here; the badge hand-decoded the same
-// numbers at the other end. They agreed for three values and disagreed at both
-// ends — `COLOUR_OFF` was sent as 0, which the badge read as IDLE and rendered
-// blue. Naming them is what makes that kind of disagreement a compile error.
+//	StatusLevelIdle     ->  blue    alive, nothing to do
+//	StatusLevelOK       ->  green   working, or finished and fine
+//	StatusLevelWarning  ->  amber   look at this; NOT a failure
+//	StatusLevelError    ->  red     it went wrong
+//	StatusLevelOff      ->  (none)  leave the indicator alone
+//	StatusLevelUnspecified -> (none) same, but because nobody spoke
+//
+// The last two land in the same place for OPPOSITE reasons, and a richer world
+// may act on the difference: "go dark" is a decision, silence is not. A world
+// that cannot show a colour discards all of it, which is a no-op and never an
+// error — that is what makes this safe to call unconditionally.
+type StatusLevel byte
+
+// Status is what an app says about how it is going — the channel that survives
+// when text does not.
+//
+// # What renders this TODAY, per field
+//
+// These names are generic because the idea is, and a generic name is exactly the
+// one that needs its effect stated where it is declared:
+//
+//	field            | badge (rp2350)           | native CLI | browser
+//	-----------------|--------------------------|------------|--------
+//	IndicatorStatus  | panel colour + backlight | —          | —
+//	Activity         | nothing yet              | —          | —
+//	Detail           | nothing yet              | —          | —
+//
+// ONLY THE BADGE RENDERS ANY OF IT, and only `IndicatorStatus`: `main.rs` reads `body[0]`
+// and ignores the rest. `Activity` and `Detail` have NO reader anywhere in this
+// repo. They are written by `hello`'s countdown and go nowhere — kept because
+// the wire is three bytes and an order, and a world that grows an indicator
+// should not need an app change to drive it.
+//
+// Stating that plainly matters more than it sounds: an app author reading only
+// the field names would reasonably assume something acts on them.
+//
+// # Typical use
+//
+//	// the common case — one line, at the end of a command
+//	platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelOK})
+//
+//	// a warning the app handled, so the badge shows amber rather than red
+//	platform.SetStatus(platform.Status{IndicatorStatus: platform.StatusLevelWarning})
+//
+//	// motion during long work: the CHANGE is the point, not the value
+//	platform.SetStatus(platform.Status{
+//		IndicatorStatus: platform.StatusLevelOK,
+//		Activity:        byte(remaining),
+//	})
+//
+// # Why a struct and not three bytes
+//
+// It was `SetStatus(status1, status2, status3 byte)`, and every call but one
+// read `SetStatus(x, 0, 0)` — two trailing zeros of noise at each site, and a
+// signature where passing a level into slot 2 compiles cleanly. Positional
+// arguments are a schema written in argument ORDER, which is the one part of a
+// signature the compiler cannot check when the parameters share a type. The
+// control channel's own encoders were taken this way for the same reason.
+//
+// # Why not simply an enum
+//
+// Because `Activity` has a use even without a renderer: it is the only field
+// whose CHANGE is meaningful, so a tier that grows a blink can drive it from
+// apps that already exist.
+//
+// # The names
+//
+// The package note above kept these as `Status1/2/3` because naming them would
+// freeze a decision still being made, and listed ACTIVITY and DETAIL as
+// candidates. Slot 1 is now settled — it is `StatusLevel`, in the DLC standard
+// set — so naming it is honest rather than premature. The other two adopt the
+// candidate names; if that turns out wrong they are a rename in one file, not a
+// wire change.
+type Status struct {
+	// THE PERSISTENT CONDITION — true until changed, and the one field anything
+	// currently renders. See `StatusLevel` above for the colour each value
+	// becomes on a badge.
+	//
+	// NAMED FOR WHAT IT DRIVES — the tier's indicator — rather than for the byte
+	// it is. `Level` alone said nothing and left a reader to find the meaning
+	// elsewhere, which is the cost of a generic name on a struct an app author
+	// meets before any of the prose above.
+	//
+	// NOT A CLAIM THAT SOMETHING IS WRONG: `IDLE` and `OK` are the common
+	// values. A tier renders the whole range however it can — a colour on the
+	// badge, nothing at all where there is no indicator, which is a no-op and
+	// never an error.
+	IndicatorStatus StatusLevel
+
+	// A SHORT-TERM value where the CHANGE is the point, not the number.
+	//
+	// NOTHING READS THIS YET. `hello`'s countdown writes the remaining ticks so
+	// a world with one indicator could show motion; no world does. See
+	// `SetActivity` in activity.go for the same idea as a STRING, which a tier
+	// with a screen can show and which is rendered today.
+	Activity byte
+
+	// App-defined: progress, sub-mode, error class — whatever a richer tier can
+	// show and a poorer one ignores.
+	//
+	// NOTHING READS THIS YET EITHER, and nothing writes it. It exists because
+	// the wire carries three bytes; spending the third on "whatever the app
+	// means" costs nothing and avoids a protocol change the day something wants
+	// it.
+	Detail byte
+}
+
+// THE VALUES, from the DLC standard enum rather than retyped.
+//
+// Re-exported here so an app does not have to know which generated package they
+// came from to set a light. They were literals at every call site — `hello` had
+// its own `Colour` enum and translated it into numbers here, the badge decoded
+// the same numbers at the other end, and the two agreed for three values and
+// disagreed at both ends: `COLOUR_OFF` went as 0, which the badge read as IDLE
+// and rendered BLUE. Naming them is what makes that a compile error.
 const (
-	StatusLevelUnspecified = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_UNSPECIFIED)
-	StatusLevelIdle        = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_IDLE)
-	StatusLevelOK          = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_OK)
-	StatusLevelWarning     = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_WARNING)
-	StatusLevelError       = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_ERROR)
-	StatusLevelOff         = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_OFF)
+	StatusLevelUnspecified = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_UNSPECIFIED)
+	StatusLevelIdle        = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_IDLE)
+	StatusLevelOK          = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_OK)
+	StatusLevelWarning     = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_WARNING)
+	StatusLevelError       = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_ERROR)
+	StatusLevelOff         = StatusLevel(dlcstdv1.StatusLevel_STATUS_LEVEL_OFF)
 )
 
 // SetStatus publishes the three status bytes.
@@ -89,8 +200,8 @@ const (
 // Cheap and safe to call as often as the app likes. An app should NOT rate-limit
 // on the assumption that something is watching: that is the tier's decision, and
 // an app that guesses will guess differently on every tier.
-func SetStatus(status1, status2, status3 byte) {
-	Emit(StatusTopic, []byte{status1, status2, status3})
+func SetStatus(s Status) {
+	Emit(StatusTopic, []byte{byte(s.IndicatorStatus), s.Activity, s.Detail})
 }
 
 // ParseStatus reads the three bytes back out of an event payload.
@@ -105,11 +216,15 @@ func SetStatus(status1, status2, status3 byte) {
 // For HOSTS, not apps. Returns false if the payload is the wrong shape, because
 // a tier must not render garbage from a topic that happens to collide — events
 // are strings and any app may emit any topic it likes.
-func ParseStatus(payload []byte) (status1, status2, status3 byte, ok bool) {
+func ParseStatus(payload []byte) (Status, bool) {
 	if len(payload) != StatusBytes {
-		return 0, 0, 0, false
+		return Status{}, false
 	}
-	return payload[Status1], payload[Status2], payload[Status3], true
+	return Status{
+		IndicatorStatus: StatusLevel(payload[Status1]),
+		Activity:        payload[Status2],
+		Detail:          payload[Status3],
+	}, true
 }
 
 // ---------------------------------------------------------------------------

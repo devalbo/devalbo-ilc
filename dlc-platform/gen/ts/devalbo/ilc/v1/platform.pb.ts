@@ -537,6 +537,169 @@ export const GetCommandSpecResponse: MessageType<GetCommandSpecResponse> = /* @_
 });
 
 /**
+ * WHAT AN APP'S MESSAGES LOOK LIKE — enough for a client that was never built
+ * against them to render its requests and responses.
+ *
+ * # Why this is HERE and not in the vendored standard set
+ *
+ * It was briefly in `devalbo.dlc.std.v1`, on the reasoning that describing your
+ * own schema is an app-level concern. It is not: an app supplies four SCALARS to
+ * `platform.SetSchema` and never constructs this message. The only code that
+ * builds or reads one is a host or a client — which is the definition of
+ * `devalbo.ilc.v1`.
+ *
+ * The mistake had a cost that named itself: `platform.proto` importing across
+ * packages made the generated `platform.pb.ts` import a file no scaffolded app
+ * generates, and the scaffold's browser tests failed on a missing module. The
+ * standard set has a first test — "more than one app would declare it" — and
+ * this fails it.
+ *
+ * # The problem
+ *
+ * A host can already encode a request BY NAME: `SpecFlag` describes each request
+ * field, which is how a badge collected `-set opponent=<enum>` for an app it
+ * knows nothing about. The response half stops short. `SpecResult` describes
+ * flat fields only, so a reply whose payload is a nested message arrives as
+ * `field 1 (not in the spec) 19 bytes: 0a09…` — correct bytes, no names.
+ *
+ * Extending `SpecResult` to nest would mean re-implementing a descriptor one
+ * feature at a time: first nesting, then oneofs, then maps, then well-known
+ * types, each arriving as a schema change plus four hand-decoders.
+ *
+ * # Prior art, and where it stops
+ *
+ * `react-qroma-lib` renders arbitrary protobuf messages in a browser from
+ * `@protobuf-ts` runtime metadata — one component walks `IMessageType.fields[]`,
+ * branches on `field.kind` (scalar / enum / message / oneof), and produces a
+ * form. That proves generic rendering works from field metadata alone.
+ *
+ * What it does not do is DISCOVERY: its registry is populated from the app's
+ * generated TypeScript, imported at build time, so the page must be compiled
+ * against the same protos as the firmware. That is fine when one team ships
+ * both. It is exactly the gap when a web page meets a device over WebSerial that
+ * it was not built for.
+ *
+ * # What this carries, and why each field exists
+ *
+ * Four fields answering four different questions. They are not redundant:
+ * `schema_id` says WHICH, `version` says HOW OLD, `url` says WHERE, and
+ * `descriptor` says HERE.
+ *
+ * @generated from message devalbo.ilc.v1.SchemaInfo
+ */
+export interface SchemaInfo {
+  /**
+   * THE IDENTITY: a content hash of `descriptor`, whether or not it is carried.
+   *
+   * This is the field that makes every other one trustworthy. A client that
+   * fetches `url` compiles what it got, hashes it, and compares: match means the
+   * names it is about to show belong to the bytes it is about to show them for.
+   *
+   * WITHOUT IT A URL IS A LIE WAITING TO HAPPEN. The device was built from one
+   * version of a .proto; the URL resolves to whatever is there now. When they
+   * drift, a client renders wrong field names over correct bytes and nothing
+   * says so — the same silent-disagreement failure as an enum value transcribed
+   * by hand, one layer up.
+   *
+   * The payload catalog already learned this: it prints a checksum per entry
+   * because size alone could not say WHICH BUILD was on the board.
+   *
+   * @generated from field: string schema_id = 1;
+   */
+  schemaId?: string;
+  /**
+   * THE ORDER: the app's own version for this schema, e.g. "1.4.0".
+   *
+   * NOT A SUBSTITUTE FOR `schema_id`, and not substitutable by it. A hash can
+   * only say same-or-different; it cannot say the device is OLDER than a page
+   * expects, which is the question a client actually asks when it wants to
+   * decide whether to degrade gracefully or refuse.
+   *
+   * Free text rather than three integers: an app may version however it likes,
+   * and a platform that insisted on semver would be inventing a policy it cannot
+   * enforce. Clients that want ordering can parse it; clients that want equality
+   * have `schema_id`.
+   *
+   * @generated from field: string version = 2;
+   */
+  version?: string;
+  /**
+   * WHERE A COPY MAY BE FETCHED. A HINT, never the truth.
+   *
+   * The point is size: a URL is tens of bytes where a descriptor is tens of
+   * kilobytes, which is the difference between "always ship it" and "opt in" on
+   * an Arduino-class device. It is safe to treat as a hint precisely because
+   * `schema_id` makes what comes back verifiable.
+   *
+   * A client that cannot reach it — offline, no CORS, air-gapped bench — has
+   * lost an optimisation, not correctness.
+   *
+   * @generated from field: string url = 3;
+   */
+  url?: string;
+  /**
+   * THE SCHEMA ITSELF: a serialized FileDescriptorSet, if the app embedded one.
+   *
+   * The offline answer, and the only one that needs no network at all. Costs
+   * roughly 5-15 KB in the artifact, so it is opt-in per app rather than
+   * automatic — a badge on a bench renders fully, a microcontroller counting
+   * bytes ships `schema_id` and `url` alone.
+   *
+   * A FileDescriptorSet rather than a bespoke shape because every protobuf
+   * toolchain already reads one: protobuf-es and protobuf-ts in a browser,
+   * protoreflect in Go, `buf` on a command line. A format of our own would mean
+   * writing a reader for each.
+   *
+   * @generated from field: bytes descriptor = 4;
+   */
+  descriptor?: Uint8Array;
+
+};
+
+export const SchemaInfo: MessageType<SchemaInfo> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.SchemaInfo",
+    fields: [
+        { no: 1, name: "schema_id", kind: "scalar", T: ScalarType.STRING },
+        { no: 2, name: "version", kind: "scalar", T: ScalarType.STRING },
+        { no: 3, name: "url", kind: "scalar", T: ScalarType.STRING },
+        { no: 4, name: "descriptor", kind: "scalar", T: ScalarType.BYTES },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
+ * @generated from message devalbo.ilc.v1.GetSchemaRequest
+ */
+export interface GetSchemaRequest {
+
+};
+
+export const GetSchemaRequest: MessageType<GetSchemaRequest> = /* @__PURE__ */ createEmptyMessageType<GetSchemaRequest>("devalbo.ilc.v1.GetSchemaRequest", true);
+
+/**
+ * @generated from message devalbo.ilc.v1.GetSchemaResponse
+ */
+export interface GetSchemaResponse {
+  /**
+   * Absent when the app declared none. AN EMPTY ANSWER IS STILL AN ANSWER: a
+   * client learns the app cannot describe itself and falls back to the flat
+   * `SpecResult`, rather than waiting on a verb that was never going to reply.
+   *
+   * @generated from field: devalbo.ilc.v1.SchemaInfo schema = 1;
+   */
+  schema?: SchemaInfo;
+
+};
+
+export const GetSchemaResponse: MessageType<GetSchemaResponse> = /* @__PURE__ */ createMessageType({
+    typeName: "devalbo.ilc.v1.GetSchemaResponse",
+    fields: [
+        { no: 1, name: "schema", kind: "message", T: () => SchemaInfo },
+    ] satisfies readonly PartialFieldInfo[],
+    packedByDefault: true,
+});
+
+/**
  * @generated from message devalbo.ilc.v1.GetCommandSurfaceRequest
  */
 export interface GetCommandSurfaceRequest {
