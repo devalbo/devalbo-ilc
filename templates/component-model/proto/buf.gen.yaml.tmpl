@@ -30,3 +30,20 @@ plugins:
     opt:
       - paths=source_relative
       - lang=ts
+# GENERATE THIS APP'S OWN PACKAGE, AND NOTHING ELSE.
+#
+# Without this, buf emits code for every proto in the module — including the
+# VENDORED `devalbo/**`, which produces a second Go package for types the
+# platform already ships. That duplicate was dead code with a live cost: two Go
+# types for one proto enum, so `StdVersion` from here and `StdVersion` from
+# dlc-platform were incompatible and every crossing needed a conversion.
+#
+# Nothing ever imported the duplicates — every host already imports
+# `dlc-platform/gen/go/devalbo/ilc/v1` directly — so they were pure output.
+#
+# The vendored .proto is still needed: `commands.proto` imports it and buf must
+# RESOLVE it. Resolving is not generating.
+inputs:
+  - directory: .
+    paths:
+      - {{.PkgName}}/v1

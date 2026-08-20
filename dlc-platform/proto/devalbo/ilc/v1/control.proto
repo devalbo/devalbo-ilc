@@ -11,6 +11,10 @@ option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/
 // vocabularies to keep in step. They were defined here first only because the
 // control channel needed them first — and they now live in the file named for
 // the idea rather than in either consumer.
+// For `since` and `renamed_from` — when a field arrived, and what it used to be
+// called. See the note on those options: `reserved` records removals and the id
+// lock records ids, but nothing recorded arrivals or renames.
+import "devalbo/options/v1/options.proto";
 import "devalbo/ilc/v1/world_manifest.proto";
 import "devalbo/ilc/v1/world_name.proto";
 
@@ -112,7 +116,9 @@ message WorldState {
   // 16 has always meant this. It was `session_open`, which named the same thing
   // as `PHASE_SESSION` while outliving it by a whole phase; "instance" is the
   // thing with a lifetime.
-  bool instance_open = 16;
+  bool instance_open = 16 [
+    (devalbo.options.v1.renamed_from) = "session_open"
+  ];
 
   // WHERE THE WORLD IS IN ITS OWN LIFE, at two resolutions.
   //
@@ -123,9 +129,9 @@ message WorldState {
   //
   // Both are published as the world enters them, from values that need no heap,
   // so they are readable in the window where boot hangs are actually found.
-  Phase phase = 17;
+  Phase phase = 17 [(devalbo.options.v1.since) = "0.2.0"];
   // The stage within that phase, or `STAGE_UNSPECIFIED` between stages.
-  Stage stage = 18;
+  Stage stage = 18 [(devalbo.options.v1.since) = "0.2.0"];
 
   // How many transitions the world took that its own table calls impossible.
   //
@@ -134,13 +140,34 @@ message WorldState {
   // rather than only in the log because a fault nobody was watching for is
   // exactly the one worth catching — a client seeing a non-zero count knows to
   // go and find the line that explains it.
-  uint32 phase_faults = 19;
+  uint32 phase_faults = 19 [(devalbo.options.v1.since) = "0.2.0"];
+
+  // WHICH BUILD OF THE WORLD THIS IS.
+  //
+  // `version` above is the firmware's semver, and it has been "0.1.0" since the
+  // first commit — it answers "which release" and cannot answer "is the board
+  // running what I just built". That second question is the one that actually
+  // costs time: a flash that silently did not take looks exactly like a change
+  // that did not work, and this session lost an investigation to precisely that
+  // ambiguity before the reboot path was fixed.
+  //
+  // Set at compile time and CHANGES WHEN THE BINARY DOES, so a host can compare
+  // it against the artifact it just produced. The payload catalog already
+  // learned this and prints a checksum per entry, because size alone could not
+  // say which build a payload was.
+  string build_id = 21 [(devalbo.options.v1.since) = "0.2.0"];
+  // WHAT THE APP CALLS ITSELF — the app's own version, not the world's.
+  //
+  // Read from the app once, at instantiation, through the `Version` verb every
+  // app inherits. `app` above says WHICH app; this says which build of it, and
+  // the two together are what make a bug report reproducible.
+  string app_version = 22 [(devalbo.options.v1.since) = "0.2.0"];
 
   // HOW THE LAST THING WENT — the badge's own judgement, as a value.
   //
   // The same one the panel shows as a colour and the log prints as a word, which
   // until now were its only outlets: a client had to read prose to learn it.
-  Verdict verdict = 20;
+  Verdict verdict = 20 [(devalbo.options.v1.since) = "0.2.0"];
 }
 
 // THE WORLD'S OWN JUDGEMENT of how the last thing it did went.

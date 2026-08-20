@@ -72,7 +72,7 @@ func TestGetSchemaAnswersWhenNothingWasDeclared(t *testing.T) {
 
 func TestSetHostedSchemaDerivesTheURL(t *testing.T) {
 	t.Cleanup(func() { appSchema = nil })
-	SetHostedSchema(SchemaHost{Base: "/schemas"}, "deadbeef", "1.4.0", nil)
+	SetHostedSchema(SchemaHost{Base: "/schemas"}, SchemaDecl{ID: "deadbeef", Version: "1.4.0"})
 	got := Schema()
 	if got.GetUrl() != "/schemas/deadbeef.binpb" {
 		t.Fatalf("url = %q", got.GetUrl())

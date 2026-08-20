@@ -4,12 +4,12 @@
 # path                                              bytes  sha256
 .gitignore                                            394  80a777a96e0cf485
 AGENTS.md                                            3933  22c217e779111c3b
-Makefile                                             3359  c9cffb2f9ed3240d
+Makefile                                             3650  82d2ed1f152e4ce3
 README.md                                            1867  11d2a460986f28e8
 cmd/engine-component/main.go                          803  c1c88a6dd5485a45
 devbox.json                                           618  4853c4738446d6ac
 dlc.toml                                             1691  6899dc4901184b3a
-engine/commands.go                                   6046  7259e39097edfb51
+engine/commands.go                                   7110  083fd0e5c45e6d31
 engine/commands_test.go                               776  2c81312f6b196d71
 go.mod                                                764  ba4570940bc76fd0
 hosts/native/main.go                                 7115  12af6ab7b1f322f1
@@ -32,9 +32,10 @@ hosts/web/test/terminal.spec.ts                      1197  8ef7c79746d0ca0f
 hosts/web/test/web.spec.ts                           1171  b9d852f434bdd63e
 hosts/web/tsconfig.json                               349  4e3a1a73137f089b
 hosts/web/vite.config.ts                             1232  718e2942281fdbec
-proto/buf.gen.yaml                                   1316  92fd327e7f64efbf
+proto/buf.gen.yaml                                   2086  fab1578fa461db1d
 proto/buf.yaml                                        363  1c9951bd88411837
 proto/devalbo/dlc/std/v1/status.proto                5655  58526a891f396667
+proto/devalbo/dlc/std/v1/version.proto               3085  20d4a127b21faf75
 proto/devalbo/options/v1/README.md                   1027  5648fb3456992968
-proto/devalbo/options/v1/options.proto               8145  69f80888602b1a6c
+proto/devalbo/options/v1/options.proto               9853  3531b3d0c30ccab7
 proto/golden_app/v1/commands.proto                    964  3a7685fd539969ca

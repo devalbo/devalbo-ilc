@@ -8,6 +8,8 @@ import type { MessageType } from "@aptre/protobuf-es-lite/message";
 import { createEmptyMessageType, createMessageType } from "@aptre/protobuf-es-lite/message";
 import { ScalarType } from "@aptre/protobuf-es-lite/scalar";
 import type { PartialFieldInfo } from "@aptre/protobuf-es-lite/field";
+import type { StdVersion } from "../../dlc/std/v1/version.pb.js";
+import { StdVersion_Enum } from "../../dlc/std/v1/version.pb.js";
 
 export const protobufPackage = "devalbo.ilc.v1";
 
@@ -653,6 +655,20 @@ export interface SchemaInfo {
    * @generated from field: bytes descriptor = 4;
    */
   descriptor?: Uint8Array;
+  /**
+   * WHICH VERSION OF THE STANDARD VOCABULARY this app was built against.
+   *
+   * Not the app's version and not its schema's — the version of the SHARED
+   * definitions it speaks, which it vendored as byte copies at build time. An
+   * app reports what its own copy declares, so it cannot claim a vocabulary it
+   * has never seen.
+   *
+   * ORDERED, which is the reason it is an enum: a host asking "is this older
+   * than what I speak" needs `<`, and neither free text nor a hash provides it.
+   *
+   * @generated from field: devalbo.dlc.std.v1.StdVersion std_version = 5;
+   */
+  stdVersion?: StdVersion;
 
 };
 
@@ -663,6 +679,7 @@ export const SchemaInfo: MessageType<SchemaInfo> = /* @__PURE__ */ createMessage
         { no: 2, name: "version", kind: "scalar", T: ScalarType.STRING },
         { no: 3, name: "url", kind: "scalar", T: ScalarType.STRING },
         { no: 4, name: "descriptor", kind: "scalar", T: ScalarType.BYTES },
+        { no: 5, name: "std_version", kind: "enum", T: StdVersion_Enum },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

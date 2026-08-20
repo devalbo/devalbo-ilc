@@ -82,12 +82,9 @@ pub struct Flag {
 /// and the app takes a proto default for whatever went missing and reports
 /// success.
 use crate::proto_enums::platform::fields::{
-    F_GET_COMMAND_SPEC_RESPONSE_COMMANDS as RESPONSE_COMMANDS,
-    F_SPEC_COMMAND_FLAGS as COMMAND_FLAGS, F_SPEC_FLAG_DEFAULT_VALUE as FLAG_DEFAULT,
-    F_SPEC_FLAG_ENUM_NUMBERS as FLAG_ENUM_NUMBERS, F_SPEC_FLAG_ENUM_VALUES as FLAG_ENUM_VALUES,
-    F_SPEC_FLAG_FIELD as FLAG_FIELD, F_SPEC_FLAG_HELP as FLAG_HELP, F_SPEC_FLAG_KIND as FLAG_KIND,
-    F_SPEC_FLAG_NAME as FLAG_NAME, F_SPEC_FLAG_POSITIONAL as FLAG_POSITIONAL,
-    F_SPEC_FLAG_SOURCE as FLAG_SOURCE,
+    F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, F_SPEC_COMMAND_FLAGS, F_SPEC_FLAG_DEFAULT_VALUE,
+    F_SPEC_FLAG_ENUM_NUMBERS, F_SPEC_FLAG_ENUM_VALUES, F_SPEC_FLAG_FIELD, F_SPEC_FLAG_HELP,
+    F_SPEC_FLAG_KIND, F_SPEC_FLAG_NAME, F_SPEC_FLAG_POSITIONAL, F_SPEC_FLAG_SOURCE,
 };
 
 /// `SpecKind` — RE-EXPORTED, not retyped.
@@ -105,15 +102,13 @@ use crate::proto_enums::platform::fields::{
 /// disagreed about `7` would collect a string where a menu was meant, and the
 /// app would take a proto default and report success.
 pub use crate::proto_enums::platform::{
-    SPEC_KIND_BOOL as KIND_BOOL, SPEC_KIND_BYTES as KIND_BYTES, SPEC_KIND_ENUM as KIND_ENUM,
-    SPEC_KIND_INT32 as KIND_INT32, SPEC_KIND_INT64 as KIND_INT64,
-    SPEC_KIND_STRING as KIND_STRING, SPEC_KIND_UINT32 as KIND_UINT32,
-    SPEC_KIND_UINT64 as KIND_UINT64,
+    SPEC_KIND_BOOL, SPEC_KIND_BYTES, SPEC_KIND_ENUM, SPEC_KIND_INT32, SPEC_KIND_INT64,
+    SPEC_KIND_STRING, SPEC_KIND_UINT32, SPEC_KIND_UINT64,
 };
 
 /// Whether this kind is a whole number, and so wants the spinner.
 pub fn is_integer(kind: u32) -> bool {
-    matches!(kind, KIND_INT32 | KIND_INT64 | KIND_UINT32 | KIND_UINT64)
+    matches!(kind, SPEC_KIND_INT32 | SPEC_KIND_INT64 | SPEC_KIND_UINT32 | SPEC_KIND_UINT64)
 }
 
 /// The FIRST flag of the first command in a `GetCommandSpecResponse`.
@@ -126,7 +121,7 @@ pub fn is_integer(kind: u32) -> bool {
 pub fn first_flag(response: &[u8]) -> Option<Flag> {
     let mut cursor = Cursor::new(response);
     while let Some((field, wire)) = cursor.tag() {
-        if field == RESPONSE_COMMANDS && wire == 2 {
+        if field == F_GET_COMMAND_SPEC_RESPONSE_COMMANDS && wire == 2 {
             let command = cursor.bytes()?;
             if let Some(flag) = first_flag_of_command(response, command) {
                 return Some(flag);
@@ -175,13 +170,13 @@ pub fn flags_into(response: &[u8], out: &mut [Flag]) -> usize {
     let mut count = 0usize;
     let mut cursor = Cursor::new(response);
     while let Some((field, wire)) = cursor.tag() {
-        if field == RESPONSE_COMMANDS && wire == 2 {
+        if field == F_GET_COMMAND_SPEC_RESPONSE_COMMANDS && wire == 2 {
             let Some(command) = cursor.bytes() else {
                 break;
             };
             let mut inner = Cursor::at(response, command);
             while let Some((field, wire)) = inner.tag() {
-                if field == COMMAND_FLAGS && wire == 2 {
+                if field == F_SPEC_COMMAND_FLAGS && wire == 2 {
                     let Some(span) = inner.bytes() else {
                         break;
                     };
@@ -227,7 +222,7 @@ pub fn enum_count(response: &[u8], flag: &Flag) -> usize {
     let mut count = 0usize;
     let mut cursor = Cursor::at(response, flag.span);
     while let Some((field, wire)) = cursor.tag() {
-        if field == FLAG_ENUM_VALUES && wire == 2 {
+        if field == F_SPEC_FLAG_ENUM_VALUES && wire == 2 {
             if cursor.bytes().is_none() {
                 break;
             }
@@ -262,7 +257,7 @@ pub fn enum_choice<'a>(response: &'a [u8], flag: &Flag, index: usize) -> Option<
     let mut cursor = Cursor::at(response, flag.span);
     while let Some((field, wire)) = cursor.tag() {
         match (field, wire) {
-            (FLAG_ENUM_VALUES, 2) => {
+            (F_SPEC_FLAG_ENUM_VALUES, 2) => {
                 let span = cursor.bytes()?;
                 if names == index {
                     name = core::str::from_utf8(response.get(span.0..span.1)?).ok();
@@ -272,7 +267,7 @@ pub fn enum_choice<'a>(response: &'a [u8], flag: &Flag, index: usize) -> Option<
             // PACKED OR NOT. proto3 packs a repeated int32 by default, and a
             // hand-written encoder may not — accepting only one of them would be
             // a decoder that works until somebody writes a second generator.
-            (FLAG_ENUM_NUMBERS, 2) => {
+            (F_SPEC_FLAG_ENUM_NUMBERS, 2) => {
                 let (start, end) = cursor.bytes()?;
                 let mut inner = Cursor::at(response, (start, end));
                 while let Some(value) = inner.varint() {
@@ -282,7 +277,7 @@ pub fn enum_choice<'a>(response: &'a [u8], flag: &Flag, index: usize) -> Option<
                     numbers += 1;
                 }
             }
-            (FLAG_ENUM_NUMBERS, 0) => {
+            (F_SPEC_FLAG_ENUM_NUMBERS, 0) => {
                 let value = cursor.varint()?;
                 if numbers == index {
                     number = Some(value as i64);
@@ -303,6 +298,64 @@ pub fn name_of<'a>(response: &'a [u8], flag: &Flag) -> Option<&'a str> {
 }
 
 /// Resolve a flag's help text against the buffer it was parsed from.
+/// One varint at `at`, and how many bytes it used.
+fn read_varint(bytes: &[u8], at: usize) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    let mut used = 0usize;
+    while at + used < bytes.len() {
+        let byte = bytes[at + used];
+        value |= ((byte & 0x7f) as u64) << shift;
+        used += 1;
+        if byte & 0x80 == 0 {
+            return Some((value, used));
+        }
+        shift += 7;
+        if shift > 63 {
+            return None;
+        }
+    }
+    None
+}
+
+/// The first length-delimited field with this number, as a string.
+///
+/// FOR ONE-FIELD REPLIES, of which the platform has several — `VersionResponse`
+/// is a single string, and decoding it should not need a message type on a
+/// world that hand-decodes everything.
+pub fn first_string(message: &[u8], field: u32) -> Option<&str> {
+    let mut at = 0usize;
+    while at < message.len() {
+        let (tag, used) = read_varint(message, at)?;
+        at += used;
+        let number = (tag >> 3) as u32;
+        match tag & 7 {
+            2 => {
+                let (len, used) = read_varint(message, at)?;
+                at += used;
+                let end = at.checked_add(len as usize)?;
+                if end > message.len() {
+                    return None;
+                }
+                if number == field {
+                    return core::str::from_utf8(&message[at..end]).ok();
+                }
+                at = end;
+            }
+            0 => {
+                let (_, used) = read_varint(message, at)?;
+                at += used;
+            }
+            5 => at = at.checked_add(4)?,
+            1 => at = at.checked_add(8)?,
+            // An unknown wire type leaves the rest unparseable; stop rather than
+            // guess a length and read someone else's bytes.
+            _ => return None,
+        }
+    }
+    None
+}
+
 pub fn help_of<'a>(response: &'a [u8], flag: &Flag) -> Option<&'a str> {
     let (start, end) = flag.help?;
     core::str::from_utf8(response.get(start..end)?).ok()
@@ -348,7 +401,7 @@ pub fn default_number(response: &[u8], flag: &Flag) -> i64 {
 fn first_flag_of_command(base: &[u8], command: (usize, usize)) -> Option<Flag> {
     let mut cursor = Cursor::at(base, command);
     while let Some((field, wire)) = cursor.tag() {
-        if field == COMMAND_FLAGS && wire == 2 {
+        if field == F_SPEC_COMMAND_FLAGS && wire == 2 {
             let flag = cursor.bytes()?;
             return parse_flag(base, flag);
         }
@@ -371,13 +424,13 @@ fn parse_flag(base: &[u8], span: (usize, usize)) -> Option<Flag> {
     };
     while let Some((field, wire)) = cursor.tag() {
         match (field, wire) {
-            (FLAG_FIELD, 0) => flag.field = cursor.varint()? as u32,
-            (FLAG_KIND, 0) => flag.kind = cursor.varint()? as u32,
-            (FLAG_SOURCE, 0) => flag.source = cursor.varint()? as u32,
-            (FLAG_HELP, 2) => flag.help = Some(cursor.bytes()?),
-            (FLAG_DEFAULT, 2) => flag.default_value = Some(cursor.bytes()?),
-            (FLAG_NAME, 2) => flag.name = Some(cursor.bytes()?),
-            (FLAG_POSITIONAL, 0) => flag.positional = cursor.varint()? as u32,
+            (F_SPEC_FLAG_FIELD, 0) => flag.field = cursor.varint()? as u32,
+            (F_SPEC_FLAG_KIND, 0) => flag.kind = cursor.varint()? as u32,
+            (F_SPEC_FLAG_SOURCE, 0) => flag.source = cursor.varint()? as u32,
+            (F_SPEC_FLAG_HELP, 2) => flag.help = Some(cursor.bytes()?),
+            (F_SPEC_FLAG_DEFAULT_VALUE, 2) => flag.default_value = Some(cursor.bytes()?),
+            (F_SPEC_FLAG_NAME, 2) => flag.name = Some(cursor.bytes()?),
+            (F_SPEC_FLAG_POSITIONAL, 0) => flag.positional = cursor.varint()? as u32,
             // UNKNOWN FIELDS ARE SKIPPED BY WIRE TYPE, which is what keeps a
             // firmware readable by a spec that grew fields after it shipped.
             _ => cursor.skip(wire)?,
@@ -502,30 +555,30 @@ mod tests {
     /// Build the response a real engine sends for one command with one flag.
     fn response(field: u32, kind: u32, source: u32, help: &str, name: &str) -> Vec<u8> {
         let mut flag = Vec::new();
-        delimited(&mut flag, FLAG_NAME, name.as_bytes());
-        tag(&mut flag, FLAG_FIELD, 0);
+        delimited(&mut flag, F_SPEC_FLAG_NAME, name.as_bytes());
+        tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
         varint(&mut flag, field as u64);
-        tag(&mut flag, FLAG_KIND, 0);
+        tag(&mut flag, F_SPEC_FLAG_KIND, 0);
         varint(&mut flag, kind as u64);
-        tag(&mut flag, FLAG_SOURCE, 0);
+        tag(&mut flag, F_SPEC_FLAG_SOURCE, 0);
         varint(&mut flag, source as u64);
-        delimited(&mut flag, FLAG_HELP, help.as_bytes());
+        delimited(&mut flag, F_SPEC_FLAG_HELP, help.as_bytes());
 
         let mut command = Vec::new();
         delimited(&mut command, 1, b"count"); // SpecCommand.name
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
 
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         out
     }
 
     #[test]
     fn reads_the_field_kind_and_help() {
-        let bytes = response(1, KIND_STRING, 3, "count down from this number", "from");
+        let bytes = response(1, SPEC_KIND_STRING, 3, "count down from this number", "from");
         let flag = first_flag(&bytes).expect("a flag");
         assert_eq!(flag.field, 1);
-        assert_eq!(flag.kind, KIND_STRING);
+        assert_eq!(flag.kind, SPEC_KIND_STRING);
         assert_eq!(flag.source, 3);
         assert_eq!(help_of(&bytes, &flag), Some("count down from this number"));
     }
@@ -534,7 +587,7 @@ mod tests {
     /// hardcoding hello's shape.
     #[test]
     fn a_field_other_than_one_is_carried() {
-        let bytes = response(7, KIND_STRING, 1, "help", "other");
+        let bytes = response(7, SPEC_KIND_STRING, 1, "help", "other");
         assert_eq!(first_flag(&bytes).unwrap().field, 7);
     }
 
@@ -544,7 +597,7 @@ mod tests {
         let mut command = Vec::new();
         delimited(&mut command, 1, b"tick");
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         assert_eq!(first_flag(&out), None);
     }
 
@@ -562,19 +615,19 @@ mod tests {
         tag(&mut flag, 99, 0); // a varint field from the future
         varint(&mut flag, 12345);
         delimited(&mut flag, 98, b"a bytes field from the future");
-        tag(&mut flag, FLAG_FIELD, 0);
+        tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
         varint(&mut flag, 3);
-        tag(&mut flag, FLAG_KIND, 0);
-        varint(&mut flag, KIND_STRING as u64);
+        tag(&mut flag, F_SPEC_FLAG_KIND, 0);
+        varint(&mut flag, SPEC_KIND_STRING as u64);
 
         let mut command = Vec::new();
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
 
         let parsed = first_flag(&out).expect("still parses");
         assert_eq!(parsed.field, 3);
-        assert_eq!(parsed.kind, KIND_STRING);
+        assert_eq!(parsed.kind, SPEC_KIND_STRING);
     }
 
     /// TRUNCATED INPUT MUST NOT PANIC. These bytes come off a wire; a firmware
@@ -582,7 +635,7 @@ mod tests {
     /// declining to prompt.
     #[test]
     fn truncated_input_declines_rather_than_panics() {
-        let full = response(1, KIND_STRING, 3, "help", "from");
+        let full = response(1, SPEC_KIND_STRING, 3, "help", "from");
         for cut in 0..full.len() {
             let _ = first_flag(&full[..cut]);
         }
@@ -592,15 +645,15 @@ mod tests {
     #[test]
     fn a_default_is_read_as_a_number() {
         let mut flag = Vec::new();
-        tag(&mut flag, FLAG_FIELD, 0);
+        tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
         varint(&mut flag, 1);
-        tag(&mut flag, FLAG_KIND, 0);
-        varint(&mut flag, KIND_INT32 as u64);
-        delimited(&mut flag, FLAG_DEFAULT, b"5");
+        tag(&mut flag, F_SPEC_FLAG_KIND, 0);
+        varint(&mut flag, SPEC_KIND_INT32 as u64);
+        delimited(&mut flag, F_SPEC_FLAG_DEFAULT_VALUE, b"5");
         let mut command = Vec::new();
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
 
         let parsed = first_flag(&out).expect("a flag");
         assert!(is_integer(parsed.kind));
@@ -613,13 +666,13 @@ mod tests {
     fn a_bad_default_is_zero_not_an_error() {
         for text in [&b"not a number"[..], b"", b"12x", b"-"] {
             let mut flag = Vec::new();
-            tag(&mut flag, FLAG_FIELD, 0);
+            tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
             varint(&mut flag, 1);
-            delimited(&mut flag, FLAG_DEFAULT, text);
+            delimited(&mut flag, F_SPEC_FLAG_DEFAULT_VALUE, text);
             let mut command = Vec::new();
-            delimited(&mut command, COMMAND_FLAGS, &flag);
+            delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
             let mut out = Vec::new();
-            delimited(&mut out, RESPONSE_COMMANDS, &command);
+            delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
             let parsed = first_flag(&out).expect("a flag");
             assert_eq!(default_number(&out, &parsed), 0, "{text:?}");
         }
@@ -629,13 +682,13 @@ mod tests {
     #[test]
     fn a_negative_default_is_read() {
         let mut flag = Vec::new();
-        tag(&mut flag, FLAG_FIELD, 0);
+        tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
         varint(&mut flag, 1);
-        delimited(&mut flag, FLAG_DEFAULT, b"-40");
+        delimited(&mut flag, F_SPEC_FLAG_DEFAULT_VALUE, b"-40");
         let mut command = Vec::new();
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         let parsed = first_flag(&out).expect("a flag");
         assert_eq!(default_number(&out, &parsed), -40);
     }
@@ -644,10 +697,10 @@ mod tests {
     /// without deciding its widget is a test failure rather than a silent skip.
     #[test]
     fn integer_kinds_are_recognised() {
-        for kind in [KIND_INT32, KIND_INT64, KIND_UINT32, KIND_UINT64] {
+        for kind in [SPEC_KIND_INT32, SPEC_KIND_INT64, SPEC_KIND_UINT32, SPEC_KIND_UINT64] {
             assert!(is_integer(kind), "kind {kind}");
         }
-        for kind in [KIND_STRING, KIND_BOOL, 7, 8, 0] {
+        for kind in [SPEC_KIND_STRING, SPEC_KIND_BOOL, 7, 8, 0] {
             assert!(!is_integer(kind), "kind {kind}");
         }
     }
@@ -657,11 +710,11 @@ mod tests {
     #[test]
     fn a_flag_without_a_field_number_is_refused() {
         let mut flag = Vec::new();
-        delimited(&mut flag, FLAG_HELP, b"help but no number");
+        delimited(&mut flag, F_SPEC_FLAG_HELP, b"help but no number");
         let mut command = Vec::new();
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         assert_eq!(first_flag(&out), None);
     }
 
@@ -675,19 +728,19 @@ mod tests {
         delimited(&mut command, 1, b"calc");
         for (field, kind, name, positional) in flags {
             let mut flag = Vec::new();
-            delimited(&mut flag, FLAG_NAME, name.as_bytes());
-            tag(&mut flag, FLAG_FIELD, 0);
+            delimited(&mut flag, F_SPEC_FLAG_NAME, name.as_bytes());
+            tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
             varint(&mut flag, *field as u64);
-            tag(&mut flag, FLAG_KIND, 0);
+            tag(&mut flag, F_SPEC_FLAG_KIND, 0);
             varint(&mut flag, *kind as u64);
             if *positional != 0 {
-                tag(&mut flag, FLAG_POSITIONAL, 0);
+                tag(&mut flag, F_SPEC_FLAG_POSITIONAL, 0);
                 varint(&mut flag, *positional as u64);
             }
-            delimited(&mut command, COMMAND_FLAGS, &flag);
+            delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         }
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         out
     }
 
@@ -759,13 +812,13 @@ mod tests {
     /// A flag offering choices, with the wire numbers the app declared.
     fn with_choices(names: &[&str], numbers: &[i64], packed: bool) -> Vec<u8> {
         let mut flag = Vec::new();
-        delimited(&mut flag, FLAG_NAME, b"op");
-        tag(&mut flag, FLAG_FIELD, 0);
+        delimited(&mut flag, F_SPEC_FLAG_NAME, b"op");
+        tag(&mut flag, F_SPEC_FLAG_FIELD, 0);
         varint(&mut flag, 2);
-        tag(&mut flag, FLAG_KIND, 0);
-        varint(&mut flag, KIND_ENUM as u64);
+        tag(&mut flag, F_SPEC_FLAG_KIND, 0);
+        varint(&mut flag, SPEC_KIND_ENUM as u64);
         for name in names {
-            delimited(&mut flag, FLAG_ENUM_VALUES, name.as_bytes());
+            delimited(&mut flag, F_SPEC_FLAG_ENUM_VALUES, name.as_bytes());
         }
         if !numbers.is_empty() {
             if packed {
@@ -773,19 +826,19 @@ mod tests {
                 for number in numbers {
                     varint(&mut body, *number as u64);
                 }
-                delimited(&mut flag, FLAG_ENUM_NUMBERS, &body);
+                delimited(&mut flag, F_SPEC_FLAG_ENUM_NUMBERS, &body);
             } else {
                 for number in numbers {
-                    tag(&mut flag, FLAG_ENUM_NUMBERS, 0);
+                    tag(&mut flag, F_SPEC_FLAG_ENUM_NUMBERS, 0);
                     varint(&mut flag, *number as u64);
                 }
             }
         }
         let mut command = Vec::new();
         delimited(&mut command, 1, b"calc");
-        delimited(&mut command, COMMAND_FLAGS, &flag);
+        delimited(&mut command, F_SPEC_COMMAND_FLAGS, &flag);
         let mut out = Vec::new();
-        delimited(&mut out, RESPONSE_COMMANDS, &command);
+        delimited(&mut out, F_GET_COMMAND_SPEC_RESPONSE_COMMANDS, &command);
         out
     }
 

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	dlcstdv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/dlc/std/v1"
 	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
@@ -31,22 +32,66 @@ import (
 // to a verb that is missing, which a client can only discover by timing out.
 var appSchema *ilcv1.SchemaInfo
 
-// SetSchema declares this app's schema. Call it from the app's init.
+// EVERY FIELD IS OPTIONAL EXCEPT `ID`, and `ID` is what makes the rest worth
+// anything: it is a content hash of the descriptor, so a client that fetched
+// `URL` can check that what it got matches what these bytes were built from.
+// Without it a URL is a promise nobody can verify, and a schema fetched from a
+// drifted URL renders wrong names over correct bytes — silently, which is the
+// failure this whole mechanism exists to avoid.
+// StdVersion is which release of the DLC standard vocabulary something speaks.
 //
-// EVERY FIELD IS OPTIONAL EXCEPT THE FIRST, and the first is what makes the rest
-// worth anything: `schemaID` is a content hash of the descriptor, so a client
-// that fetched `url` can check that what it got matches what these bytes were
-// built from. Without it a URL is a promise nobody can verify, and a schema
-// fetched from a drifted URL renders wrong names over correct bytes — silently,
-// which is the failure this whole mechanism exists to avoid.
-func SetSchema(schemaID, version, at string, descriptor []byte) {
-	// `at` rather than `url`: the parameter would shadow the imported `net/url`,
-	// which compiles today only because this function does not use the package.
+// Mirrors `StatusLevel`: a platform-level named type over the generated enum, so
+// an app names it through the package it already imports rather than reaching
+// into a generated tree to find out which one the API wants.
+type StdVersion int32
+
+const (
+	StdVersionUnspecified = StdVersion(dlcstdv1.StdVersion_STD_VERSION_UNSPECIFIED)
+	StdVersionV1          = StdVersion(dlcstdv1.StdVersion_STD_VERSION_V1)
+)
+
+// SchemaDecl is what an app declares about its own messages.
+//
+// A STRUCT because this was four positional parameters and a fifth was about to
+// be added — the same shape `SetStatus` was taken out of, and for the same
+// reason: three of these are strings, so the compiler cannot tell an id from a
+// url from a version if two are swapped.
+type SchemaDecl struct {
+	// Content hash of Descriptor. THE IDENTITY — see `SchemaInfo` in
+	// platform.proto for why every other field depends on it.
+	ID string
+	// The app's own version for this schema, e.g. "1.4.0". Free text.
+	Version string
+	// Where a copy may be fetched. A HINT, verified against ID.
+	URL string
+	// A serialized FileDescriptorSet, if the app ships one.
+	Descriptor []byte
+	// WHICH VERSION OF THE STANDARD VOCABULARY this app was built against,
+	// from the app's OWN vendored copy of `devalbo/dlc/std/v1/version.proto`.
+	//
+	// ONE TYPE ACROSS THE BOUNDARY. This was briefly an `int32`, on the grounds
+	// that an app's generated `myapp/gen/go/…StdVersion` is a different Go type
+	// from this package's — which was true, and was a symptom rather than a
+	// reason. Apps were generating Go for the VENDORED protos they never
+	// imported, producing duplicate types for one proto enum. They now generate
+	// their own package only, so there is one `StdVersion` and nothing to
+	// convert.
+	//
+	// Which copy an app speaks is then answered by go.mod — the platform version
+	// it depends on — rather than by a vendored file nobody compiled. The
+	// vendored .proto still exists so `commands.proto` can import it; resolving
+	// is not generating.
+	StdVersion StdVersion
+}
+
+// SetSchema declares this app's schema. Call it from the app's init.
+func SetSchema(decl SchemaDecl) {
 	appSchema = &ilcv1.SchemaInfo{
-		SchemaId:    schemaID,
-		Version:     version,
-		Url:         at,
-		Descriptor_: descriptor,
+		SchemaId:    decl.ID,
+		Version:     decl.Version,
+		Url:         decl.URL,
+		Descriptor_: decl.Descriptor,
+		StdVersion:  dlcstdv1.StdVersion(decl.StdVersion),
 	}
 }
 
@@ -90,8 +135,9 @@ func SchemaURL(host SchemaHost, schemaID string) string {
 // The common case: an app knows its base route from config and its id from its
 // build, and should not have to concatenate them itself — that is where a
 // trailing slash or a missing extension becomes an afternoon.
-func SetHostedSchema(host SchemaHost, schemaID, version string, descriptor []byte) {
-	SetSchema(schemaID, version, SchemaURL(host, schemaID), descriptor)
+func SetHostedSchema(host SchemaHost, decl SchemaDecl) {
+	decl.URL = SchemaURL(host, decl.ID)
+	SetSchema(decl)
 }
 
 // Schema returns what this app declared, or nil.

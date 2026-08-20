@@ -82,13 +82,27 @@ func copyPlatformTS(m *Manifest) error {
 	// inherited surface and `gen/ts` holds dlc's own commands. An app inherits
 	// the first and has no business carrying the second — dlc is an app like any
 	// other, and its command surface is not part of what other apps inherit.
-	src := filepath.Join(m.PlatformPath, "dlc-platform", "gen", "ts", "devalbo", "ilc")
+	// THE WHOLE `devalbo` TREE, not a named subdirectory.
+	//
+	// This said `"devalbo", "ilc"`, and the omission cost three separate
+	// failures as the platform grew a second namespace: `platform.proto`
+	// imports `SchemaInfo`, which imports `StdVersion` from
+	// `devalbo/dlc/std/v1`, so an app given only `ilc` had TypeScript importing
+	// a file that was never copied. Every time it surfaced as a browser test
+	// timing out on a missing module, naming nothing.
+	//
+	// The distinction that matters is already made by the path above: this is
+	// the PLATFORM's generated tree (`dlc-platform/gen/ts`), as opposed to
+	// dlc's own (`gen/ts`), and an app inherits all of the first and none of the
+	// second. Naming subdirectories inside it re-litigates a decision the path
+	// already made, and goes stale the next time a namespace is added.
+	src := filepath.Join(m.PlatformPath, "dlc-platform", "gen", "ts", "devalbo")
 	if _, err := os.Stat(src); err != nil {
 		// The platform has not generated its own TS yet. Not fatal: an app that
 		// never touches an inherited command still builds.
 		return nil
 	}
-	dst := filepath.Join("gen", "ts", "devalbo", "ilc")
+	dst := filepath.Join("gen", "ts", "devalbo")
 	return copyTree(src, dst)
 }
 

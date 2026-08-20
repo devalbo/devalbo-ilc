@@ -1669,6 +1669,8 @@ fn world_state(uptime_ms: u64) -> dlc_platform_embedded::control::WorldState<'st
         stage,
         phase_faults: crate::progress::faults(),
         verdict: crate::progress::last_verdict(),
+        build_id: crate::BUILD_ID,
+        app_version: dlc_platform_embedded::appversion::get(),
     }
 }
 

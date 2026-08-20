@@ -41,6 +41,11 @@ fn main() {
     println!("cargo::rerun-if-env-changed=BADGE_INPUT");
     println!("cargo::rerun-if-env-changed=BADGE_CONTROL");
     println!("cargo::rerun-if-env-changed=BADGE_BEAT_FRAMES_MS");
+    // WHICH BUILD THIS IS, so a host can tell whether the board is running what
+    // it just produced. The Makefile passes a fresh value per build and records
+    // the same one beside the artifact; `rerun-if-env-changed` is what makes a
+    // new value actually reach the binary.
+    println!("cargo::rerun-if-env-changed=BADGE_BUILD_ID");
 
     // Declared so that a typo in a `cfg` name is a warning rather than a branch
     // that quietly never compiles.
@@ -221,6 +226,24 @@ fn main() {
         ),
     )
     .expect("writing beat_frames.rs");
+
+    // WHICH BUILD THIS IS. Empty when nobody said, which is honest: a cargo
+    // build outside the Makefile has no id to compare against and should not
+    // invent one that looks meaningful.
+    let build_id = std::env::var("BADGE_BUILD_ID").unwrap_or_default();
+    std::fs::write(
+        out.join("build_id.rs"),
+        format!(
+            "/// Which build of the firmware this is. Empty outside `make badge-uf2`.\n\
+             ///\n\
+             /// The Makefile passes a fresh value per build and records the same one\n\
+             /// beside the artifact, so a host can ask the board whether it is running\n\
+             /// what was just produced — the question `version` cannot answer, having\n\
+             /// read 0.1.0 since the first commit.\n\
+             pub const BUILD_ID: &str = \"{build_id}\";\n"
+        ),
+    )
+    .expect("writing build_id.rs");
     // ANNOUNCED WHEN IT IS OFF, not when it is on: the default is now the
     // unsurprising case, and a build that will NOT beat is the one somebody
     // needs told, because they may be about to read a silence as a hang.

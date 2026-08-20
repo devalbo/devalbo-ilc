@@ -53,7 +53,8 @@ sync-std-proto: ## vendor the DLC STANDARD protos into the template AND the exam
 # `verify-std-proto` then holds every copy to it.
 STD_PROTOS := \
 	dlc-platform/proto/devalbo/options/v1/options.proto \
-	dlc-platform/proto/devalbo/dlc/std/v1/status.proto
+	dlc-platform/proto/devalbo/dlc/std/v1/status.proto \
+	dlc-platform/proto/devalbo/dlc/std/v1/version.proto
 
 .PHONY: verify-std-proto
 verify-std-proto: ## fail if any vendored copy has drifted from the source
@@ -74,8 +75,28 @@ verify-std-proto: ## fail if any vendored copy has drifted from the source
 .PHONY: sync-template-proto
 sync-template-proto: sync-std-proto
 .PHONY: build-host
-build-host: sync-template-proto ## native dlc binary — engine linked in-process (Decision 26)
-	go build -o $(DLC) $(HOST_SRC)
+build-host: sync-std-proto ## native dlc binary — engine linked in-process (Decision 26)
+	# INSTALLED INTO DEVBOX'S GOBIN, not built into the repo root.
+	#
+	# This was `go build -o $(DLC)`, which wrote `./dlc` — and NOTHING RAN IT.
+	# `$(DLC)` is the bare word `dlc`, so every invocation resolved through PATH
+	# to `.devbox/gobin/dlc`, whatever had been installed there and whenever.
+	# Two binaries, and the one you just built was not the one that ran.
+	#
+	# That is the same failure the badge's `build_id` exists to catch, one tier
+	# up: an app would `dlc gen` with a stale generator and get stale output,
+	# with nothing anywhere saying so. It cost a debugging cycle today —
+	# `copyPlatformTS` was fixed, the app regenerated, and the fix did not
+	# appear, because the fix was in `./dlc` and the app ran the other one.
+	#
+	# BUILT INTO GOBIN BY NAME. `go install` would honour devbox's GOBIN but
+	# names the binary after its DIRECTORY — `./hosts/native` installs as
+	# `native`, which is not the command anybody types. So the output path is
+	# given explicitly, which also keeps the name in one place ($(DLC)).
+	#
+	# GOBIN is set by devbox.json's init_hook and is first on PATH, so this is
+	# the `dlc` every later target and every example app will run.
+	go build -o "$$(go env GOBIN)/$(DLC)" $(HOST_SRC)
 
 .PHONY: build-engine
 build-engine: gen ## TinyGo -target=wasip2 -> engine.component.wasm (wasip2-direct, Spike 1)
@@ -205,6 +226,17 @@ hello-component: ## hello's wasm component — what the badge payload is AOT-com
 		go build -buildvcs=false -o "$$BIN/dlc" $(HOST_SRC) \
 		&& PATH="$$BIN:$$PATH" $(MAKE) -C example-apps/hello build-web
 
+# WHICH BUILD THE FIRMWARE IS, so a host can ask the board whether it is running
+# what was just produced. `version` cannot answer that — it has read 0.1.0 since
+# the first commit — and a flash that silently did not take looks exactly like a
+# change that did not work.
+#
+# A TIMESTAMP RATHER THAN A HASH because the firmware cannot checksum itself: it
+# would have to hash the image it is executing from, before it knows where that
+# image ends. The Makefile knows what it built and records the same value beside
+# the artifact, which is all a comparison needs.
+BADGE_BUILD_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+
 .PHONY: badge-uf2
 badge-uf2: ## build the badge firmware (an empty loader by default) as a flashable .uf2
 	# THE DEFAULT IS AN EMPTY LOADER: app-agnostic firmware that runs whatever has
@@ -279,9 +311,13 @@ badge-uf2: ## build the badge firmware (an empty loader by default) as a flashab
 		BADGE_BEAT_MS="$(BADGE_BEAT_MS)" \
 		BADGE_CONTROL="$(BADGE_CONTROL)" \
 		BADGE_BEAT_FRAMES_MS="$(BADGE_BEAT_FRAMES_MS)" \
+		BADGE_BUILD_ID="$(BADGE_BUILD_ID)" \
 		cargo build --release
 	@mkdir -p build
 	@cp dlc-platform/embedded/rp2350/target/thumbv8m.main-none-eabihf/release/dlc-rp2350-bringup build/badge-bringup.elf
+	# RECORDED BESIDE THE ARTIFACT, so a check can compare what is on the board
+	# with what is on disk without re-reading the ELF.
+	@echo "$(BADGE_BUILD_ID)" > build/badge-bringup.buildid
 	picotool uf2 convert build/badge-bringup.elf build/badge-bringup.uf2
 	# THE GATE. A UF2 whose family is not rp2350 will not boot this board, and the
 	# only symptom is a badge that does nothing at all. Fail here instead — see

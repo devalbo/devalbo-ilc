@@ -47,8 +47,17 @@
 //! would be comments (AGENTS.md §5). Here they run on the host on every push,
 //! which for a hand-rolled wire encoder is the whole point.
 
-/// `SetWorldManifest` — the core-lifecycle block, id 2. See platform.proto.
-pub const METHOD_SET_WORLD_MANIFEST: u32 = 2;
+/// THE METHOD IDS, GENERATED — not transcribed.
+///
+/// These were `= 2` and `= 1` written out here under comments naming the block
+/// they came from, which is the same arrangement that put a wrong `TextOutlet`
+/// on the wire for a day. The plugin now emits them for Rust as it already did
+/// for Go and TypeScript; the badge needed them all along and was the one tier
+/// still typing them.
+///
+/// Both are INHERITED BY EVERY APP through `RegisterAll`, which is what lets a
+/// world drive an app it has never heard of.
+pub use crate::proto_enums::platform::methods::{METHOD_ID_SET_WORLD_MANIFEST, METHOD_ID_VERSION};
 
 /// `Availability` and `TextOutlet` — RE-EXPORTED, not retyped.
 ///

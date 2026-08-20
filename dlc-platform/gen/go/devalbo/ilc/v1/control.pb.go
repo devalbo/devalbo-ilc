@@ -8,6 +8,7 @@ import (
 	fmt "fmt"
 	protobuf_go_lite "github.com/aperturerobotics/protobuf-go-lite"
 	json "github.com/aperturerobotics/protobuf-go-lite/json"
+	_ "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/options/v1"
 	io "io"
 	slices "slices"
 	strconv "strconv"
@@ -880,6 +881,26 @@ type WorldState struct {
 	// exactly the one worth catching — a client seeing a non-zero count knows to
 	// go and find the line that explains it.
 	PhaseFaults uint32 `protobuf:"varint,19,opt,name=phase_faults,json=phaseFaults,proto3" json:"phaseFaults,omitempty"`
+	// WHICH BUILD OF THE WORLD THIS IS.
+	//
+	// `version` above is the firmware's semver, and it has been "0.1.0" since the
+	// first commit — it answers "which release" and cannot answer "is the board
+	// running what I just built". That second question is the one that actually
+	// costs time: a flash that silently did not take looks exactly like a change
+	// that did not work, and this session lost an investigation to precisely that
+	// ambiguity before the reboot path was fixed.
+	//
+	// Set at compile time and CHANGES WHEN THE BINARY DOES, so a host can compare
+	// it against the artifact it just produced. The payload catalog already
+	// learned this and prints a checksum per entry, because size alone could not
+	// say which build a payload was.
+	BuildId string `protobuf:"bytes,21,opt,name=build_id,json=buildId,proto3" json:"buildId,omitempty"`
+	// WHAT THE APP CALLS ITSELF — the app's own version, not the world's.
+	//
+	// Read from the app once, at instantiation, through the `Version` verb every
+	// app inherits. `app` above says WHICH app; this says which build of it, and
+	// the two together are what make a bug report reproducible.
+	AppVersion string `protobuf:"bytes,22,opt,name=app_version,json=appVersion,proto3" json:"appVersion,omitempty"`
 	// HOW THE LAST THING WENT — the badge's own judgement, as a value.
 	//
 	// The same one the panel shows as a colour and the log prints as a word, which
@@ -1003,6 +1024,20 @@ func (x *WorldState) GetPhaseFaults() uint32 {
 		return x.PhaseFaults
 	}
 	return 0
+}
+
+func (x *WorldState) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
+	}
+	return ""
+}
+
+func (x *WorldState) GetAppVersion() string {
+	if x != nil {
+		return x.AppVersion
+	}
+	return ""
 }
 
 func (x *WorldState) GetVerdict() Verdict {
@@ -1624,6 +1659,8 @@ func (m *WorldState) CloneVT() *WorldState {
 	r.Phase = m.Phase
 	r.Stage = m.Stage
 	r.PhaseFaults = m.PhaseFaults
+	r.BuildId = m.BuildId
+	r.AppVersion = m.AppVersion
 	r.Verdict = m.Verdict
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
@@ -1889,6 +1926,12 @@ func (this *WorldState) EqualVT(that *WorldState) bool {
 		return false
 	}
 	if this.Verdict != that.Verdict {
+		return false
+	}
+	if this.BuildId != that.BuildId {
+		return false
+	}
+	if this.AppVersion != that.AppVersion {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -2793,6 +2836,16 @@ func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("verdict")
 		x.Verdict.MarshalProtoJSON(s)
 	}
+	if x.BuildId != "" || s.HasField("buildId") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("buildId")
+		s.WriteString(x.BuildId)
+	}
+	if x.AppVersion != "" || s.HasField("appVersion") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("appVersion")
+		s.WriteString(x.AppVersion)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2861,6 +2914,12 @@ func (x *WorldState) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "verdict":
 			s.AddField("verdict")
 			x.Verdict.UnmarshalProtoJSON(s)
+		case "build_id", "buildId":
+			s.AddField("build_id")
+			x.BuildId = s.ReadString()
+		case "app_version", "appVersion":
+			s.AddField("app_version")
+			x.AppVersion = s.ReadString()
 		}
 	})
 }
@@ -3584,6 +3643,20 @@ func (m *WorldState) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if len(m.AppVersion) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.AppVersion)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xb2
+	}
+	if len(m.BuildId) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.BuildId)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xaa
+	}
 	if m.Verdict != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Verdict))
 		i--
@@ -4242,6 +4315,20 @@ func (m *WorldState) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if len(m.AppVersion) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.AppVersion)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xb2
+	}
+	if len(m.BuildId) > 0 {
+		i = protobuf_go_lite.EncodeString(dAtA, i, m.BuildId)
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xaa
+	}
 	if m.Verdict != 0 {
 		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Verdict))
 		i--
@@ -4894,6 +4981,8 @@ func (m *WorldState) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(2, m.Stage)
 	n += protobuf_go_lite.SizeVarintNonZero(2, m.PhaseFaults)
 	n += protobuf_go_lite.SizeVarintNonZero(2, m.Verdict)
+	n += protobuf_go_lite.SizeStringNonEmpty(2, m.BuildId)
+	n += protobuf_go_lite.SizeStringNonEmpty(2, m.AppVersion)
 	n += len(m.unknownFields)
 	return n
 }
@@ -5154,6 +5243,14 @@ func (x *WorldState) MarshalProtoText() string {
 	if x.Verdict != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "verdict")
 		protobuf_go_lite.TextWriteStringer(&sb, Verdict(x.Verdict))
+	}
+	if x.BuildId != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "build_id")
+		protobuf_go_lite.TextWriteString(&sb, x.BuildId)
+	}
+	if x.AppVersion != "" {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "app_version")
+		protobuf_go_lite.TextWriteString(&sb, x.AppVersion)
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -5607,6 +5704,26 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		case 21:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildId", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.BuildId = v
+		case 22:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AppVersion", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeString(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.AppVersion = v
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -6638,6 +6755,26 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
+		case 21:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildId", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.BuildId = v
+		case 22:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AppVersion", wireType)
+			}
+			var v string
+			v, iNdEx, err = protobuf_go_lite.DecodeStringUnsafe(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+			m.AppVersion = v
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

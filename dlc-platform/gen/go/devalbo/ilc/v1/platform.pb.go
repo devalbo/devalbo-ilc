@@ -8,6 +8,7 @@ import (
 	fmt "fmt"
 	protobuf_go_lite "github.com/aperturerobotics/protobuf-go-lite"
 	json "github.com/aperturerobotics/protobuf-go-lite/json"
+	v1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/dlc/std/v1"
 	_ "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/options/v1"
 	io "io"
 	slices "slices"
@@ -693,6 +694,16 @@ type SchemaInfo struct {
 	// protoreflect in Go, `buf` on a command line. A format of our own would mean
 	// writing a reader for each.
 	Descriptor_ []byte `protobuf:"bytes,4,opt,name=descriptor,proto3" json:"descriptor,omitempty"`
+	// WHICH VERSION OF THE STANDARD VOCABULARY this app was built against.
+	//
+	// Not the app's version and not its schema's — the version of the SHARED
+	// definitions it speaks, which it vendored as byte copies at build time. An
+	// app reports what its own copy declares, so it cannot claim a vocabulary it
+	// has never seen.
+	//
+	// ORDERED, which is the reason it is an enum: a host asking "is this older
+	// than what I speak" needs `<`, and neither free text nor a hash provides it.
+	StdVersion v1.StdVersion `protobuf:"varint,5,opt,name=std_version,json=stdVersion,proto3" json:"stdVersion,omitempty"`
 }
 
 func (x *SchemaInfo) Reset() {
@@ -727,6 +738,13 @@ func (x *SchemaInfo) GetDescriptor_() []byte {
 		return x.Descriptor_
 	}
 	return nil
+}
+
+func (x *SchemaInfo) GetStdVersion() v1.StdVersion {
+	if x != nil {
+		return x.StdVersion
+	}
+	return v1.StdVersion(0)
 }
 
 type GetSchemaRequest struct {
@@ -1135,6 +1153,7 @@ func (m *SchemaInfo) CloneVT() *SchemaInfo {
 	r.SchemaId = m.SchemaId
 	r.Version = m.Version
 	r.Url = m.Url
+	r.StdVersion = m.StdVersion
 	r.Descriptor_ = protobuf_go_lite.CloneBytes(m.Descriptor_)
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
@@ -1579,6 +1598,9 @@ func (this *SchemaInfo) EqualVT(that *SchemaInfo) bool {
 		return false
 	}
 	if !protobuf_go_lite.EqualBytes(this.Descriptor_, that.Descriptor_) {
+		return false
+	}
+	if this.StdVersion != that.StdVersion {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -2607,6 +2629,11 @@ func (x *SchemaInfo) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("descriptor")
 		s.WriteBytes(x.Descriptor_)
 	}
+	if x.StdVersion != 0 || s.HasField("stdVersion") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("stdVersion")
+		x.StdVersion.MarshalProtoJSON(s)
+	}
 	s.WriteObjectEnd()
 }
 
@@ -2636,6 +2663,9 @@ func (x *SchemaInfo) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "descriptor":
 			s.AddField("descriptor")
 			x.Descriptor_ = s.ReadBytes()
+		case "std_version", "stdVersion":
+			s.AddField("std_version")
+			x.StdVersion.UnmarshalProtoJSON(s)
 		}
 	})
 }
@@ -3645,6 +3675,11 @@ func (m *SchemaInfo) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.StdVersion != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.StdVersion))
+		i--
+		dAtA[i] = 0x28
+	}
 	if len(m.Descriptor_) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Descriptor_)
 		i--
@@ -4605,6 +4640,11 @@ func (m *SchemaInfo) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
+	if m.StdVersion != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.StdVersion))
+		i--
+		dAtA[i] = 0x28
+	}
 	if len(m.Descriptor_) > 0 {
 		i = protobuf_go_lite.EncodeBytes(dAtA, i, m.Descriptor_)
 		i--
@@ -5244,6 +5284,7 @@ func (m *SchemaInfo) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Version)
 	n += protobuf_go_lite.SizeStringNonEmpty(1, m.Url)
 	n += protobuf_go_lite.SizeBytesNonEmpty(1, m.Descriptor_)
+	n += protobuf_go_lite.SizeVarintNonZero(1, m.StdVersion)
 	n += len(m.unknownFields)
 	return n
 }
@@ -5664,6 +5705,10 @@ func (x *SchemaInfo) MarshalProtoText() string {
 	if len(x.Descriptor_) != 0 {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "descriptor")
 		protobuf_go_lite.TextWriteBytes(&sb, x.Descriptor_)
+	}
+	if x.StdVersion != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "std_version")
+		protobuf_go_lite.TextWriteStringer(&sb, v1.StdVersion(x.StdVersion))
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -6572,6 +6617,17 @@ func (m *SchemaInfo) UnmarshalVT(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Descriptor_", wireType)
 			}
 			m.Descriptor_, iNdEx, err = protobuf_go_lite.DecodeBytesAppend(m.Descriptor_, dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StdVersion", wireType)
+			}
+			m.StdVersion = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.StdVersion = v1.StdVersion(_v)
 			if err != nil {
 				return err
 			}
@@ -8020,6 +8076,17 @@ func (m *SchemaInfo) UnmarshalVTUnsafe(dAtA []byte) error {
 				return fmt.Errorf("proto: wrong wireType = %d for field Descriptor_", wireType)
 			}
 			m.Descriptor_, iNdEx, err = protobuf_go_lite.DecodeBytes(dAtA, iNdEx, false)
+			if err != nil {
+				return err
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StdVersion", wireType)
+			}
+			m.StdVersion = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.StdVersion = v1.StdVersion(_v)
 			if err != nil {
 				return err
 			}

@@ -23,6 +23,8 @@ const (
 	F_WORLD_STATE_PHASE            = 17
 	F_WORLD_STATE_STAGE            = 18
 	F_WORLD_STATE_PHASE_FAULTS     = 19
+	F_WORLD_STATE_BUILD_ID         = 21
+	F_WORLD_STATE_APP_VERSION      = 22
 	F_WORLD_STATE_VERDICT          = 20
 
 	// PressButtonRequest

@@ -55,6 +55,7 @@ pub const F_SCHEMA_INFO_SCHEMA_ID: u32 = 1;
 pub const F_SCHEMA_INFO_VERSION: u32 = 2;
 pub const F_SCHEMA_INFO_URL: u32 = 3;
 pub const F_SCHEMA_INFO_DESCRIPTOR: u32 = 4;
+pub const F_SCHEMA_INFO_STD_VERSION: u32 = 5;
 
 // GetSchemaResponse
 pub const F_GET_SCHEMA_RESPONSE_SCHEMA: u32 = 1;

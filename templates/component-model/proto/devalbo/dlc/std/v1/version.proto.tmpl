@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package devalbo.dlc.std.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/dlc/std/v1;dlcstdv1";
+
+// ===========================================================================
+// DLC STANDARD — vendored. Do not edit this copy.
+//
+//   source:  dlc-platform/proto/devalbo/dlc/std/v1/version.proto
+//   refresh: make sync-std-proto
+//   verify:  make verify-std-proto   (CI fails when a copy has drifted)
+// ===========================================================================
+
+// WHICH VERSION OF THE DLC STANDARD SET AN APP WAS BUILT AGAINST.
+//
+// # The hole this fills
+//
+// The standard protos are COPIED into every app — `make sync-std-proto` vendors
+// them, and CI holds every in-repo copy byte-identical to the source. That works
+// exactly as far as this repo reaches. An app built somewhere else could carry a
+// six-month-old `status.proto`, send values from a vocabulary that has since
+// moved, and nothing anywhere would notice.
+//
+// This is the same question `schema_id` answers about an app's own messages,
+// asked one layer up about the vocabulary they are written in.
+//
+// # Why an ENUM and not a version string
+//
+// Because the point is ORDER. `SchemaInfo.version` is free text, deliberately —
+// an app versions itself however it likes and a platform cannot police that. But
+// a host asking "is this app older than the vocabulary I speak" needs to
+// COMPARE, and free text cannot be compared: "1.10" against "1.9" is a parser
+// and a convention, and a hash can only ever say same-or-different.
+//
+// A declared enum is an ordered, closed set. `>` works. This is the one idea
+// worth taking from TypeSpec's versioning library, where a version is an enum
+// the schema is projected through rather than a string somebody parses.
+//
+// # Why the version travels with the copy
+//
+// An app reports the value ITS vendored copy declares. That is the whole trick:
+// an old copy declares an old maximum, so an app cannot claim a version of the
+// vocabulary it has never seen — the answer is a property of the bytes it was
+// compiled with rather than a number somebody typed.
+enum StdVersion {
+  STD_VERSION_UNSPECIFIED = 0;
+
+  // The first published set: `status.proto` (`StatusLevel`) and this file.
+  STD_VERSION_V1 = 1;
+}
+
+// # There is deliberately no `STD_VERSION_LATEST`
+//
+// One was written, as an `allow_alias` duplicate of the newest value, so an app
+// could report "whatever my copy knows" without naming a version. `buf lint`
+// refused it, and the rule is right: an alias means two names decode to one
+// value, and an enum whose values are not distinct is one a reader cannot
+// round-trip.
+//
+// So an app names the version explicitly. That is a visible line to change when
+// the vendored set is refreshed — which reads worse and behaves better than a
+// symbol that silently starts meaning something else. In-repo, staleness is
+// caught anyway: `make verify-std-proto` holds every copy byte-identical to the
+// source, and the scaffold golden lists the file with its hash.

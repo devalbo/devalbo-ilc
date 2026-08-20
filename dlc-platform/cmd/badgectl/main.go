@@ -270,6 +270,12 @@ func run(port string, wait time.Duration) error {
 	fmt.Printf("world     %s\n", state.GetWorld())
 	fmt.Printf("tier      %s\n", state.GetTier())
 	fmt.Printf("version   %s\n", state.GetVersion())
+	// WHICH BUILD, as opposed to which release. `version` has read 0.1.0 since
+	// the first commit; this changes whenever the firmware does, which is what
+	// makes "is the board running what I just built" answerable.
+	if id := state.GetBuildId(); id != "" {
+		fmt.Printf("build     %s\n", id)
+	}
 	fmt.Printf("screen    %s\n", state.GetScreen())
 	fmt.Printf("input     %s\n", state.GetInput())
 	fmt.Printf("text      %s\n", state.GetText())
@@ -300,6 +306,11 @@ func run(port string, wait time.Duration) error {
 	// covers a countdown on tick 3 and an import on file 400 alike.
 	if app := state.GetAppActivity(); app != "" {
 		fmt.Printf("app       %s\n", app)
+	}
+	// WHICH BUILD OF THE APP. The world asks once at instantiation, so this is
+	// what the running instance calls itself — `app` above says which app.
+	if v := state.GetAppVersion(); v != "" {
+		fmt.Printf("app ver   %s\n", v)
 	}
 	// THE VERDICT, as a value. It has always existed as a colour on the panel and
 	// a word at the end of the log; both reach a person, and a client had to

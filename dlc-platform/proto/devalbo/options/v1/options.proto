@@ -168,4 +168,36 @@ extend google.protobuf.FieldOptions {
   // everything remaining and so must be last; and there can be only one of
   // those.
   uint32 cli_positional = 50009;
+
+  // ---- when this field arrived, and what it used to be called ----------
+  //
+  // TypeSpec's versioning library annotates the CHANGE ON THE THING THAT
+  // CHANGED — `@added(v2)`, `@renamedFrom("oldName")` — rather than keeping a
+  // changelog beside the schema. That is the idea worth having, and protobuf
+  // custom options express it directly.
+  //
+  // WHAT IT FIXES HERE. `reserved` records removals and `method-ids.lock`
+  // records ids, but nothing records ARRIVALS. A client meeting an older device
+  // finds a field missing, which is indistinguishable from the field being
+  // empty — the same ambiguity `STATUS_LEVEL_UNSPECIFIED` exists to remove one
+  // layer down.
+
+  // The version this field first existed in, e.g. "0.2.0".
+  //
+  // Free text, matching `SchemaInfo.version`: a platform that insisted on semver
+  // would be inventing a policy it cannot enforce across apps. What it buys is
+  // not comparison but EXPLANATION — a reader of the schema learns when a field
+  // appeared without going to the history, and a generated client can say "your
+  // device predates this" rather than showing a blank.
+  string since = 50013;
+
+  // What this field used to be called.
+  //
+  // A RENAME IS INVISIBLE OTHERWISE. The field number carries the identity, so
+  // renaming is not a wire break and nothing records that it happened — two
+  // renames landed here in one session (`session_open` to `instance_open`, and
+  // `Level` through two more names to `IndicatorStatus`) with nothing anywhere
+  // connecting the old name to the new. A reader of old logs, an old client, or
+  // anyone grepping for the previous name finds nothing at all.
+  string renamed_from = 50014;
 }

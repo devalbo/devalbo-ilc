@@ -71,14 +71,35 @@ func init() {
 	//
 	//	platform.SetHostedSchema(
 	//		platform.SchemaHost{Base: "https://schemas.example.com/dlc"},
-	//		schemaID, dlcconfig.Version, nil)
+	//		platform.SchemaDecl{ID: schemaID, Version: dlcconfig.Version})
 	//
 	// A client fetches it, hashes what it got, and compares against the id — so
 	// a schema that drifted from this build is DETECTED rather than rendered as
 	// if it were right.
 	schemaSum := sha256.Sum256(schemaDescriptor)
-	schemaID := hex.EncodeToString(schemaSum[:])
-	platform.SetSchema(schemaID, dlcconfig.Version, "", schemaDescriptor)
+	platform.SetSchema(platform.SchemaDecl{
+		ID:         hex.EncodeToString(schemaSum[:]),
+		Version:    dlcconfig.Version,
+		Descriptor: schemaDescriptor,
+		// WHICH STANDARD VOCABULARY THIS PROJECT SPEAKS, named from the copy
+		// vendored under proto/devalbo/dlc/std/v1.
+		//
+		// ONE TYPE, from the platform package this file already imports.
+		//
+		// This briefly named a constant from THIS project's generated copy of
+		// the standard set and converted it — because buf was emitting Go for
+		// the vendored `devalbo/**`, giving two Go types for one proto enum.
+		// Nothing ever used those duplicates; `proto/buf.gen.yaml` now generates
+		// this project's package only, and the types come from the platform
+		// module, which go.mod already pins.
+		//
+		// NAMED EXPLICITLY, and a line to change when a newer standard set
+		// exists. A `LATEST` symbol was considered and rejected: it would have
+		// to be an enum alias, which `buf lint` refuses because two names
+		// decoding to one value is ambiguous — and a symbol that silently starts
+		// meaning something else is worse than a visible edit.
+		StdVersion: platform.StdVersionV1,
+	})
 
 	platform.RegisterRaw({{.PkgName}}v1.AppServiceHandlers(handleGreet))
 

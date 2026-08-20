@@ -196,7 +196,7 @@ use dlc_platform_embedded::minimal::MinimalHost;
         // `undefined` is the honest answer and the common one.
         world: 0,
     });
-    match host.execute(manifest::METHOD_SET_WORLD_MANIFEST, env.as_bytes()) {
+    match host.execute(manifest::METHOD_ID_SET_WORLD_MANIFEST, env.as_bytes()) {
         Ok(r) if r.success => {
             let _ = writeln!(out, "set-environment: success");
         }

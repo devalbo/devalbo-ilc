@@ -23,6 +23,8 @@ pub const F_WORLD_STATE_INSTANCE_OPEN: u32 = 16;
 pub const F_WORLD_STATE_PHASE: u32 = 17;
 pub const F_WORLD_STATE_STAGE: u32 = 18;
 pub const F_WORLD_STATE_PHASE_FAULTS: u32 = 19;
+pub const F_WORLD_STATE_BUILD_ID: u32 = 21;
+pub const F_WORLD_STATE_APP_VERSION: u32 = 22;
 pub const F_WORLD_STATE_VERDICT: u32 = 20;
 
 // PressButtonRequest

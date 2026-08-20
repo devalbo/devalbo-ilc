@@ -18,6 +18,7 @@
 extern crate alloc;
 
 pub mod activity;
+pub mod appversion;
 pub mod block_on;
 pub mod catalog;
 pub mod clock;

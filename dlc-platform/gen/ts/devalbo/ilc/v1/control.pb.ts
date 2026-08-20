@@ -970,6 +970,34 @@ export interface WorldState {
    */
   phaseFaults?: number;
   /**
+   * WHICH BUILD OF THE WORLD THIS IS.
+   *
+   * `version` above is the firmware's semver, and it has been "0.1.0" since the
+   * first commit — it answers "which release" and cannot answer "is the board
+   * running what I just built". That second question is the one that actually
+   * costs time: a flash that silently did not take looks exactly like a change
+   * that did not work, and this session lost an investigation to precisely that
+   * ambiguity before the reboot path was fixed.
+   *
+   * Set at compile time and CHANGES WHEN THE BINARY DOES, so a host can compare
+   * it against the artifact it just produced. The payload catalog already
+   * learned this and prints a checksum per entry, because size alone could not
+   * say which build a payload was.
+   *
+   * @generated from field: string build_id = 21;
+   */
+  buildId?: string;
+  /**
+   * WHAT THE APP CALLS ITSELF — the app's own version, not the world's.
+   *
+   * Read from the app once, at instantiation, through the `Version` verb every
+   * app inherits. `app` above says WHICH app; this says which build of it, and
+   * the two together are what make a bug report reproducible.
+   *
+   * @generated from field: string app_version = 22;
+   */
+  appVersion?: string;
+  /**
    * HOW THE LAST THING WENT — the badge's own judgement, as a value.
    *
    * The same one the panel shows as a colour and the log prints as a word, which
@@ -1000,6 +1028,8 @@ export const WorldState: MessageType<WorldState> = /* @__PURE__ */ createMessage
         { no: 17, name: "phase", kind: "enum", T: Phase_Enum },
         { no: 18, name: "stage", kind: "enum", T: Stage_Enum },
         { no: 19, name: "phase_faults", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 21, name: "build_id", kind: "scalar", T: ScalarType.STRING },
+        { no: 22, name: "app_version", kind: "scalar", T: ScalarType.STRING },
         { no: 20, name: "verdict", kind: "enum", T: Verdict_Enum },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,

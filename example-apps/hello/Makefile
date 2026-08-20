@@ -24,12 +24,20 @@ gen-web: gen ## copy generated es-lite messages into the Vite root
 	# outside hosts/web/ — so the messages are copied in rather than aliased.
 	rm -rf hosts/web/src/gen
 	mkdir -p hosts/web/src/gen
-	cp -R gen/ts/hello hosts/web/src/gen/
-	# The INHERITED platform messages, put here by `dlc gen`. Without them a
-	# browser front end cannot invoke version/export-fs/import-fs/reset-fs at
-	# all — the Go host gets them from the platform module; TypeScript has no
-	# equivalent, so dlc supplies them the same way it supplies the WIT world.
-	@test -d gen/ts/devalbo/ilc && mkdir -p hosts/web/src/gen/devalbo && cp -R gen/ts/devalbo/ilc hosts/web/src/gen/devalbo/ || true
+	# EVERYTHING THAT WAS GENERATED, rather than a list of subtrees.
+	#
+	# This used to name them one by one — the app's own package, then
+	# `devalbo/ilc`, then `devalbo/dlc` — and each addition arrived as a bug: the
+	# platform messages import `SchemaInfo`, which imports `StdVersion`, and a
+	# copy missing that last tree left the bundler resolving
+	# `../../dlc/std/v1/version.pb.js` to nothing. It failed twice that way, both
+	# times surfacing as a browser test timing out on a missing module rather
+	# than anything naming the cause.
+	#
+	# A list of what to copy is a list that goes stale. `gen/ts` holds exactly
+	# what `dlc gen` produced for this tier, so copying all of it is both simpler
+	# and correct by construction.
+	cp -R gen/ts/. hosts/web/src/gen/
 
 .PHONY: build-web
 build-web: gen-web ## build the wasm component + jco transpile (needs dlc on PATH)

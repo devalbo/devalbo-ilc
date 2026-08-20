@@ -19,6 +19,8 @@ export const F_WORLD_STATE_INSTANCE_OPEN = 16;
 export const F_WORLD_STATE_PHASE = 17;
 export const F_WORLD_STATE_STAGE = 18;
 export const F_WORLD_STATE_PHASE_FAULTS = 19;
+export const F_WORLD_STATE_BUILD_ID = 21;
+export const F_WORLD_STATE_APP_VERSION = 22;
 export const F_WORLD_STATE_VERDICT = 20;
 
 // PressButtonRequest

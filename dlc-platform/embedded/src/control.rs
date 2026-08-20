@@ -995,6 +995,10 @@ pub struct WorldState<'a> {
     pub phase_faults: u32,
     /// How the last thing went — see `Verdict` in control.proto.
     pub verdict: u32,
+    /// Which build of the FIRMWARE this is. Empty outside `make badge-uf2`.
+    pub build_id: &'a str,
+    /// Which build of the APP is running, or empty when none is.
+    pub app_version: &'a str,
 }
 
 impl WorldState<'_> {
@@ -1022,6 +1026,8 @@ impl WorldState<'_> {
         put_varint_field(&mut out, f::F_WORLD_STATE_STAGE, self.stage as u64);
         put_varint_field(&mut out, f::F_WORLD_STATE_PHASE_FAULTS, self.phase_faults as u64);
         put_varint_field(&mut out, f::F_WORLD_STATE_VERDICT, self.verdict as u64);
+        put_string(&mut out, f::F_WORLD_STATE_BUILD_ID, self.build_id);
+        put_string(&mut out, f::F_WORLD_STATE_APP_VERSION, self.app_version);
         out
     }
 }
@@ -1486,6 +1492,8 @@ mod tests {
             stage: STAGE_EXECUTE,
             phase_faults: 0,
             verdict: VERDICT_OK,
+            build_id: "20260820T120000Z",
+            app_version: "0.4.2",
         };
         let payload = Response { id: 0, ok: true, error: "", payload: &state.encode() }.encode();
         let framed = frame(KIND_RESPONSE, &payload);

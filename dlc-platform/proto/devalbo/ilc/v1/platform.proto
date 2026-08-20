@@ -10,6 +10,12 @@ import "devalbo/options/v1/options.proto";
 // file — this one is the command surface, the bundle format and the index, and
 // it only needs the manifest to name the rpc that delivers it.
 import "devalbo/ilc/v1/world_manifest.proto";
+// For `StdVersion`. THIS IMPORT IS SAFE and an earlier one was not: every app
+// vendors `devalbo/dlc/std/v1`, so the generated TypeScript this produces
+// resolves in a scaffolded project. `schema.proto` briefly lived there too and
+// did NOT get vendored, which made `platform.pb.ts` import a file no app
+// generated — the scaffold's browser tests failed on a missing module.
+import "devalbo/dlc/std/v1/version.proto";
 
 // The ILC platform's own command surface — the verbs EVERY app inherits rather
 // than writes (§16.3). Apps depend on these; they never inline them, so a fix
@@ -407,6 +413,17 @@ message SchemaInfo {
   // protoreflect in Go, `buf` on a command line. A format of our own would mean
   // writing a reader for each.
   bytes descriptor = 4;
+
+  // WHICH VERSION OF THE STANDARD VOCABULARY this app was built against.
+  //
+  // Not the app's version and not its schema's — the version of the SHARED
+  // definitions it speaks, which it vendored as byte copies at build time. An
+  // app reports what its own copy declares, so it cannot claim a vocabulary it
+  // has never seen.
+  //
+  // ORDERED, which is the reason it is an enum: a host asking "is this older
+  // than what I speak" needs `<`, and neither free text nor a hash provides it.
+  devalbo.dlc.std.v1.StdVersion std_version = 5 [(devalbo.options.v1.since) = "0.2.0"];
 }
 
 message GetSchemaRequest {}

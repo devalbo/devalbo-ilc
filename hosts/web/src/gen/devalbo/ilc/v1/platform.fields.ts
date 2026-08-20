@@ -51,6 +51,7 @@ export const F_SCHEMA_INFO_SCHEMA_ID = 1;
 export const F_SCHEMA_INFO_VERSION = 2;
 export const F_SCHEMA_INFO_URL = 3;
 export const F_SCHEMA_INFO_DESCRIPTOR = 4;
+export const F_SCHEMA_INFO_STD_VERSION = 5;
 
 // GetSchemaResponse
 export const F_GET_SCHEMA_RESPONSE_SCHEMA = 1;
