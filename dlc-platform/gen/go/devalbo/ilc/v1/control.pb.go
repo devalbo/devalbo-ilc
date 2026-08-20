@@ -13,6 +13,70 @@ import (
 	strconv "strconv"
 )
 
+// THE WORLD'S OWN JUDGEMENT of how the last thing it did went.
+//
+// # Why this is on the wire at all
+//
+// It was not, and it is the oldest thing the badge says: a colour on the panel
+// and a word at the end of the log. Both reach a PERSON. A client had to scrape
+// `verdict: OK` out of log prose to learn it — which is exactly the "parse the
+// text to find out what happened" that this whole channel exists to replace, and
+// it is fragile in the usual way: the word is produced by `Status::name`, so
+// renaming a state silently breaks every reader.
+//
+// # Why it is separate from `Activity` and `Phase`
+//
+// They answer *where* and *what is it doing*; this answers *how did it go*. A
+// world can be `INSTANCE_RUNNING`, `ACTIVITY_RESTING` and `VERDICT_FAILED` all
+// at once, and each of the three is the only one that can say its own thing.
+type Verdict int32
+
+const (
+	Verdict_VERDICT_UNSPECIFIED Verdict = 0
+	// Ran, and the command reported success.
+	Verdict_VERDICT_OK Verdict = 1
+	// Ran, and the command reported failure. NOT a crash — an app-level error.
+	Verdict_VERDICT_FAILED Verdict = 2
+	// Alive, with nothing to run. A badge waiting for a payload has done
+	// everything asked of it, which is why this is a verdict and not a failure.
+	Verdict_VERDICT_IDLE Verdict = 3
+	// Could not get far enough to have an opinion: instantiation failed, or the
+	// board did not come up.
+	Verdict_VERDICT_BROKEN Verdict = 4
+)
+
+// Enum value maps for Verdict.
+var (
+	Verdict_name = map[int32]string{
+		0: "VERDICT_UNSPECIFIED",
+		1: "VERDICT_OK",
+		2: "VERDICT_FAILED",
+		3: "VERDICT_IDLE",
+		4: "VERDICT_BROKEN",
+	}
+	Verdict_value = map[string]int32{
+		"VERDICT_UNSPECIFIED": 0,
+		"VERDICT_OK":          1,
+		"VERDICT_FAILED":      2,
+		"VERDICT_IDLE":        3,
+		"VERDICT_BROKEN":      4,
+	}
+)
+
+func (x Verdict) Enum() *Verdict {
+	p := new(Verdict)
+	*p = x
+	return p
+}
+
+func (x Verdict) String() string {
+	name, valid := Verdict_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
 // Where a world is in its own sequence.
 //
 // Coarse deliberately. A caller wants to know whether to keep waiting, not to
@@ -151,7 +215,142 @@ func (x InputMode) String() string {
 	return strconv.Itoa(int(x))
 }
 
-// A stage of the bring-up.
+// A high-level step of the world's own life, and the thing STAGES belong to.
+//
+// # Why two levels rather than one longer list
+//
+// The bring-up was nine stages in one flat sequence, run by a single ~1000-line
+// function. Reading it, there was no way to answer the question that actually
+// comes up — "is this a new high-level step, or part of one that already
+// exists?" — because both looked identical: another entry in the same list.
+//
+// A phase is a step of the world's life that a person would name unprompted:
+// bring the board up, find out what is installed, open a session on one of them,
+// run it. Each owns a contiguous run of stages, and each is one call in the
+// world's entry point — so the entry point IS the outline, and a new phase is a
+// new line there rather than a stage appended to a list.
+//
+// # Why it is on the wire
+//
+// A phase is answerable when a stage is not. Stages come from a report that only
+// exists once the log is up; the phase is a single value published as the world
+// enters it, so a client can be told "hardware, stage 4" by a world that has not
+// finished booting — which is exactly the world you need to ask.
+type Phase int32
+
+const (
+	Phase_PHASE_UNSPECIFIED Phase = 0
+	// Clocks, the panel, PSRAM: everything that must be true before software runs.
+	Phase_PHASE_HARDWARE Phase = 1
+	// What is installed, and which of it can run.
+	Phase_PHASE_PAYLOADS Phase = 2
+	// A DLC INSTANCE COMING UP: choosing a payload, verifying it, instantiating
+	// it, and telling it what this world is.
+	//
+	// "INSTANCE" RATHER THAN "SESSION", which this was called and which named two
+	// different-sized things. A session opened partway through this phase and
+	// lived through every turn of the next one, so the phase shared a word with a
+	// lifetime that outlasted it — and "is a session running?" had no single
+	// answer. The instance is the thing with a lifetime; these phases are what is
+	// happening to it.
+	Phase_PHASE_INSTANCE_STARTING Phase = 3
+	// A DLC INSTANCE IN USE: turns of collect, execute, show. The phase a working
+	// badge lives in.
+	Phase_PHASE_INSTANCE_RUNNING Phase = 4
+	// A DLC INSTANCE GOING AWAY: dropping it and accounting for what it held.
+	//
+	// A PHASE BECAUSE THE TEARDOWN CAN BE THE PROBLEM. Dropping an instance
+	// releases 2.9 MB of an 8 MB heap, and a session that leaks even a few hundred
+	// KB hangs the badge two or three apps later — which looks like a hardware
+	// fault and is the worst thing here to debug. A badge stuck HERE is a
+	// different diagnosis from one stuck coming up, and the old edge from running
+	// straight back to starting could not express that the teardown happened at
+	// all.
+	Phase_PHASE_INSTANCE_STOPPING Phase = 8
+	// Alive, nothing running, waiting for something to run.
+	//
+	// NOT AN ENDING, and it used to be one. `rest()` never returned: a badge with
+	// an empty catalog, or one whose payload would not instantiate, halted with a
+	// colour on the panel and served its log forever. That conflated two different
+	// things — "cannot make progress on the app flow" and "stop executing" — and
+	// the second does not follow from the first. A badge with no usable heap can
+	// still answer questions, show a menu, take a payload over USB and be
+	// rebooted; halting removed all of that at exactly the moment somebody needed
+	// it, since the PSRAM failure is the one you most want to interrogate.
+	//
+	// So this waits rather than stops, and every way in has a way out.
+	Phase_PHASE_IDLE Phase = 5
+	// The world cannot say which phase it is in.
+	//
+	// Entered when its own bookkeeping contradicts itself — a transition that is
+	// not in the table, most obviously. The alternative was to count the fault and
+	// carry on into the requested phase, which leaves the world reporting a
+	// definite answer it has no grounds for. Saying "I do not know" is worth more
+	// than a confident wrong answer, and it is the one thing the old design could
+	// not express.
+	//
+	// KEPT APART FROM `PHASE_IDLE` although both are "alive, nothing running":
+	// the remedy differs. Idle means drag an app on. This means a firmware bug —
+	// capture the log. Collapsing them would make a bug look like an empty badge.
+	Phase_PHASE_FAULT Phase = 6
+	// Up and answering, but unable to host ANY session on this boot.
+	//
+	// The heap is the case: instantiation needs 2911 KB and a world whose PSRAM
+	// did not come up has 64 KB of SRAM, which is enough to report and not enough
+	// to run. No payload will change that, so this is not idleness.
+	//
+	// WHY A THIRD STATE AND NOT A REASON ON `PHASE_IDLE`. Because the next action
+	// differs, which is the whole test a state has to pass here: idle means supply
+	// content, this means look at the hardware. A badge whose heap never came up
+	// and which tells you to drag an app on is giving advice that cannot work.
+	//
+	// NOT A DEAD END EITHER. A client may still ask it to open a session — it will
+	// almost certainly fail again, and that is the operator's call to make rather
+	// than this firmware's to forbid.
+	Phase_PHASE_DEGRADED Phase = 7
+)
+
+// Enum value maps for Phase.
+var (
+	Phase_name = map[int32]string{
+		0: "PHASE_UNSPECIFIED",
+		1: "PHASE_HARDWARE",
+		2: "PHASE_PAYLOADS",
+		3: "PHASE_INSTANCE_STARTING",
+		4: "PHASE_INSTANCE_RUNNING",
+		8: "PHASE_INSTANCE_STOPPING",
+		5: "PHASE_IDLE",
+		6: "PHASE_FAULT",
+		7: "PHASE_DEGRADED",
+	}
+	Phase_value = map[string]int32{
+		"PHASE_UNSPECIFIED":       0,
+		"PHASE_HARDWARE":          1,
+		"PHASE_PAYLOADS":          2,
+		"PHASE_INSTANCE_STARTING": 3,
+		"PHASE_INSTANCE_RUNNING":  4,
+		"PHASE_INSTANCE_STOPPING": 8,
+		"PHASE_IDLE":              5,
+		"PHASE_FAULT":             6,
+		"PHASE_DEGRADED":          7,
+	}
+)
+
+func (x Phase) Enum() *Phase {
+	p := new(Phase)
+	*p = x
+	return p
+}
+
+func (x Phase) String() string {
+	name, valid := Phase_name[int32(x)]
+	if valid {
+		return name
+	}
+	return strconv.Itoa(int(x))
+}
+
+// A stage of the bring-up — one step WITHIN a `Phase`.
 //
 // AN ENUM, NOT THE ANNOUNCEMENT TEXT. `LogLine.stage` was a string carrying
 // `"instantiate countdown"` — which meant a test asserting on a stage was
@@ -654,8 +853,38 @@ type WorldState struct {
 	// unnecessary.
 	RequestsOffered uint32 `protobuf:"varint,14,opt,name=requests_offered,json=requestsOffered,proto3" json:"requestsOffered,omitempty"`
 	RequestsTaken   uint32 `protobuf:"varint,15,opt,name=requests_taken,json=requestsTaken,proto3" json:"requestsTaken,omitempty"`
-	// Whether an app is instantiated and could run one at all.
-	SessionOpen bool `protobuf:"varint,16,opt,name=session_open,json=sessionOpen,proto3" json:"sessionOpen,omitempty"`
+	// Whether a DLC instance is live and could run a request at all.
+	//
+	// THE NUMBER STAYS, THE NAME CHANGES — a field number is the wire identity and
+	// 16 has always meant this. It was `session_open`, which named the same thing
+	// as `PHASE_SESSION` while outliving it by a whole phase; "instance" is the
+	// thing with a lifetime.
+	InstanceOpen bool `protobuf:"varint,16,opt,name=instance_open,json=instanceOpen,proto3" json:"instanceOpen,omitempty"`
+	// WHERE THE WORLD IS IN ITS OWN LIFE, at two resolutions.
+	//
+	// `activity` above answers "what kind of thing is it doing" and is deliberately
+	// coarse. These answer "how far has it got", which is the question a badge that
+	// has not finished booting needs to be able to answer — and could not, because
+	// stages lived only in a log that a stalled bring-up never finished writing.
+	//
+	// Both are published as the world enters them, from values that need no heap,
+	// so they are readable in the window where boot hangs are actually found.
+	Phase Phase `protobuf:"varint,17,opt,name=phase,proto3" json:"phase,omitempty"`
+	// The stage within that phase, or `STAGE_UNSPECIFIED` between stages.
+	Stage Stage `protobuf:"varint,18,opt,name=stage,proto3" json:"stage,omitempty"`
+	// How many transitions the world took that its own table calls impossible.
+	//
+	// ZERO ON A HEALTHY WORLD, and a firmware bug otherwise: the phases form a
+	// state machine, and this counts the edges that are not in it. On the wire
+	// rather than only in the log because a fault nobody was watching for is
+	// exactly the one worth catching — a client seeing a non-zero count knows to
+	// go and find the line that explains it.
+	PhaseFaults uint32 `protobuf:"varint,19,opt,name=phase_faults,json=phaseFaults,proto3" json:"phaseFaults,omitempty"`
+	// HOW THE LAST THING WENT — the badge's own judgement, as a value.
+	//
+	// The same one the panel shows as a colour and the log prints as a word, which
+	// until now were its only outlets: a client had to read prose to learn it.
+	Verdict Verdict `protobuf:"varint,20,opt,name=verdict,proto3" json:"verdict,omitempty"`
 }
 
 func (x *WorldState) Reset() {
@@ -748,11 +977,39 @@ func (x *WorldState) GetRequestsTaken() uint32 {
 	return 0
 }
 
-func (x *WorldState) GetSessionOpen() bool {
+func (x *WorldState) GetInstanceOpen() bool {
 	if x != nil {
-		return x.SessionOpen
+		return x.InstanceOpen
 	}
 	return false
+}
+
+func (x *WorldState) GetPhase() Phase {
+	if x != nil {
+		return x.Phase
+	}
+	return Phase_PHASE_UNSPECIFIED
+}
+
+func (x *WorldState) GetStage() Stage {
+	if x != nil {
+		return x.Stage
+	}
+	return Stage_STAGE_UNSPECIFIED
+}
+
+func (x *WorldState) GetPhaseFaults() uint32 {
+	if x != nil {
+		return x.PhaseFaults
+	}
+	return 0
+}
+
+func (x *WorldState) GetVerdict() Verdict {
+	if x != nil {
+		return x.Verdict
+	}
+	return Verdict_VERDICT_UNSPECIFIED
 }
 
 type PressButtonRequest struct {
@@ -1363,7 +1620,11 @@ func (m *WorldState) CloneVT() *WorldState {
 	r.UptimeMs = m.UptimeMs
 	r.RequestsOffered = m.RequestsOffered
 	r.RequestsTaken = m.RequestsTaken
-	r.SessionOpen = m.SessionOpen
+	r.InstanceOpen = m.InstanceOpen
+	r.Phase = m.Phase
+	r.Stage = m.Stage
+	r.PhaseFaults = m.PhaseFaults
+	r.Verdict = m.Verdict
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = slices.Clone(m.unknownFields)
 	}
@@ -1615,7 +1876,19 @@ func (this *WorldState) EqualVT(that *WorldState) bool {
 	if this.RequestsTaken != that.RequestsTaken {
 		return false
 	}
-	if this.SessionOpen != that.SessionOpen {
+	if this.InstanceOpen != that.InstanceOpen {
+		return false
+	}
+	if this.Phase != that.Phase {
+		return false
+	}
+	if this.Stage != that.Stage {
+		return false
+	}
+	if this.PhaseFaults != that.PhaseFaults {
+		return false
+	}
+	if this.Verdict != that.Verdict {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -1907,6 +2180,46 @@ func (this *Subscription) EqualMessageVT(thatMsg any) bool {
 	return this.EqualVT(that)
 }
 
+// MarshalProtoJSON marshals the Verdict to JSON.
+func (x Verdict) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Verdict_name)
+}
+
+// MarshalText marshals the Verdict to text.
+func (x Verdict) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Verdict_name)), nil
+}
+
+// MarshalJSON marshals the Verdict to JSON.
+func (x Verdict) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Verdict from JSON.
+func (x *Verdict) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Verdict_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Verdict enum: %v", err)
+		return
+	}
+	*x = Verdict(v)
+}
+
+// UnmarshalText unmarshals the Verdict from text.
+func (x *Verdict) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Verdict_value)
+	if err != nil {
+		return err
+	}
+	*x = Verdict(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Verdict from JSON.
+func (x *Verdict) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
 // MarshalProtoJSON marshals the Activity to JSON.
 func (x Activity) MarshalProtoJSON(s *json.MarshalState) {
 	s.WriteEnum(int32(x), Activity_name)
@@ -2024,6 +2337,46 @@ func (x *InputMode) UnmarshalText(b []byte) error {
 
 // UnmarshalJSON unmarshals the InputMode from JSON.
 func (x *InputMode) UnmarshalJSON(b []byte) error {
+	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
+}
+
+// MarshalProtoJSON marshals the Phase to JSON.
+func (x Phase) MarshalProtoJSON(s *json.MarshalState) {
+	s.WriteEnum(int32(x), Phase_name)
+}
+
+// MarshalText marshals the Phase to text.
+func (x Phase) MarshalText() ([]byte, error) {
+	return []byte(json.GetEnumString(int32(x), Phase_name)), nil
+}
+
+// MarshalJSON marshals the Phase to JSON.
+func (x Phase) MarshalJSON() ([]byte, error) {
+	return json.DefaultMarshalerConfig.Marshal(x)
+}
+
+// UnmarshalProtoJSON unmarshals the Phase from JSON.
+func (x *Phase) UnmarshalProtoJSON(s *json.UnmarshalState) {
+	v := s.ReadEnum(Phase_value)
+	if err := s.Err(); err != nil {
+		s.SetErrorf("could not read Phase enum: %v", err)
+		return
+	}
+	*x = Phase(v)
+}
+
+// UnmarshalText unmarshals the Phase from text.
+func (x *Phase) UnmarshalText(b []byte) error {
+	i, err := json.ParseEnumString(string(b), Phase_value)
+	if err != nil {
+		return err
+	}
+	*x = Phase(i)
+	return nil
+}
+
+// UnmarshalJSON unmarshals the Phase from JSON.
+func (x *Phase) UnmarshalJSON(b []byte) error {
 	return json.DefaultUnmarshalerConfig.Unmarshal(b, x)
 }
 
@@ -2415,10 +2768,30 @@ func (x *WorldState) MarshalProtoJSON(s *json.MarshalState) {
 		s.WriteObjectField("requestsTaken")
 		s.WriteUint32(x.RequestsTaken)
 	}
-	if x.SessionOpen || s.HasField("sessionOpen") {
+	if x.InstanceOpen || s.HasField("instanceOpen") {
 		s.WriteMoreIf(&wroteField)
-		s.WriteObjectField("sessionOpen")
-		s.WriteBool(x.SessionOpen)
+		s.WriteObjectField("instanceOpen")
+		s.WriteBool(x.InstanceOpen)
+	}
+	if x.Phase != 0 || s.HasField("phase") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("phase")
+		x.Phase.MarshalProtoJSON(s)
+	}
+	if x.Stage != 0 || s.HasField("stage") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("stage")
+		x.Stage.MarshalProtoJSON(s)
+	}
+	if x.PhaseFaults != 0 || s.HasField("phaseFaults") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("phaseFaults")
+		s.WriteUint32(x.PhaseFaults)
+	}
+	if x.Verdict != 0 || s.HasField("verdict") {
+		s.WriteMoreIf(&wroteField)
+		s.WriteObjectField("verdict")
+		x.Verdict.MarshalProtoJSON(s)
 	}
 	s.WriteObjectEnd()
 }
@@ -2473,9 +2846,21 @@ func (x *WorldState) UnmarshalProtoJSON(s *json.UnmarshalState) {
 		case "requests_taken", "requestsTaken":
 			s.AddField("requests_taken")
 			x.RequestsTaken = s.ReadUint32()
-		case "session_open", "sessionOpen":
-			s.AddField("session_open")
-			x.SessionOpen = s.ReadBool()
+		case "instance_open", "instanceOpen":
+			s.AddField("instance_open")
+			x.InstanceOpen = s.ReadBool()
+		case "phase":
+			s.AddField("phase")
+			x.Phase.UnmarshalProtoJSON(s)
+		case "stage":
+			s.AddField("stage")
+			x.Stage.UnmarshalProtoJSON(s)
+		case "phase_faults", "phaseFaults":
+			s.AddField("phase_faults")
+			x.PhaseFaults = s.ReadUint32()
+		case "verdict":
+			s.AddField("verdict")
+			x.Verdict.UnmarshalProtoJSON(s)
 		}
 	})
 }
@@ -3199,8 +3584,36 @@ func (m *WorldState) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
-	if m.SessionOpen {
-		i = protobuf_go_lite.EncodeBool(dAtA, i, m.SessionOpen)
+	if m.Verdict != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Verdict))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xa0
+	}
+	if m.PhaseFaults != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.PhaseFaults))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x98
+	}
+	if m.Stage != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Stage))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x90
+	}
+	if m.Phase != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Phase))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x88
+	}
+	if m.InstanceOpen {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.InstanceOpen)
 		i--
 		dAtA[i] = 0x1
 		i--
@@ -3829,8 +4242,36 @@ func (m *WorldState) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i = protobuf_go_lite.EncodeRawBytes(dAtA, i, m.unknownFields)
 	}
-	if m.SessionOpen {
-		i = protobuf_go_lite.EncodeBool(dAtA, i, m.SessionOpen)
+	if m.Verdict != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Verdict))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xa0
+	}
+	if m.PhaseFaults != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.PhaseFaults))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x98
+	}
+	if m.Stage != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Stage))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x90
+	}
+	if m.Phase != 0 {
+		i = protobuf_go_lite.EncodeVarint(dAtA, i, uint64(m.Phase))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x88
+	}
+	if m.InstanceOpen {
+		i = protobuf_go_lite.EncodeBool(dAtA, i, m.InstanceOpen)
 		i--
 		dAtA[i] = 0x1
 		i--
@@ -4448,7 +4889,11 @@ func (m *WorldState) SizeVT() (n int) {
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.Text)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestsOffered)
 	n += protobuf_go_lite.SizeVarintNonZero(1, m.RequestsTaken)
-	n += protobuf_go_lite.SizeBoolNonZero(2, m.SessionOpen)
+	n += protobuf_go_lite.SizeBoolNonZero(2, m.InstanceOpen)
+	n += protobuf_go_lite.SizeVarintNonZero(2, m.Phase)
+	n += protobuf_go_lite.SizeVarintNonZero(2, m.Stage)
+	n += protobuf_go_lite.SizeVarintNonZero(2, m.PhaseFaults)
+	n += protobuf_go_lite.SizeVarintNonZero(2, m.Verdict)
 	n += len(m.unknownFields)
 	return n
 }
@@ -4600,6 +5045,9 @@ func (m *Subscription) SizeVT() (n int) {
 	return n
 }
 
+func (x Verdict) MarshalProtoText() string {
+	return x.String()
+}
 func (x Activity) MarshalProtoText() string {
 	return x.String()
 }
@@ -4607,6 +5055,9 @@ func (x ScreenLayout) MarshalProtoText() string {
 	return x.String()
 }
 func (x InputMode) MarshalProtoText() string {
+	return x.String()
+}
+func (x Phase) MarshalProtoText() string {
 	return x.String()
 }
 func (x Stage) MarshalProtoText() string {
@@ -4684,9 +5135,25 @@ func (x *WorldState) MarshalProtoText() string {
 		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "requests_taken")
 		protobuf_go_lite.TextWriteUint(&sb, x.RequestsTaken)
 	}
-	if x.SessionOpen != false {
-		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "session_open")
-		protobuf_go_lite.TextWriteBool(&sb, x.SessionOpen)
+	if x.InstanceOpen != false {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "instance_open")
+		protobuf_go_lite.TextWriteBool(&sb, x.InstanceOpen)
+	}
+	if x.Phase != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "phase")
+		protobuf_go_lite.TextWriteStringer(&sb, Phase(x.Phase))
+	}
+	if x.Stage != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "stage")
+		protobuf_go_lite.TextWriteStringer(&sb, Stage(x.Stage))
+	}
+	if x.PhaseFaults != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "phase_faults")
+		protobuf_go_lite.TextWriteUint(&sb, x.PhaseFaults)
+	}
+	if x.Verdict != 0 {
+		protobuf_go_lite.TextWriteFieldPrefix(&sb, initialLen, "verdict")
+		protobuf_go_lite.TextWriteStringer(&sb, Verdict(x.Verdict))
 	}
 	return protobuf_go_lite.TextFinishMessage(&sb)
 }
@@ -5090,14 +5557,56 @@ func (m *WorldState) UnmarshalVT(dAtA []byte) error {
 			}
 		case 16:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field SessionOpen", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceOpen", wireType)
 			}
 			var v bool
 			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
-			m.SessionOpen = bool(v)
+			m.InstanceOpen = bool(v)
+		case 17:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Phase", wireType)
+			}
+			m.Phase = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Phase = Phase(_v)
+			if err != nil {
+				return err
+			}
+		case 18:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Stage", wireType)
+			}
+			m.Stage = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Stage = Stage(_v)
+			if err != nil {
+				return err
+			}
+		case 19:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PhaseFaults", wireType)
+			}
+			m.PhaseFaults = 0
+			m.PhaseFaults, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 20:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Verdict", wireType)
+			}
+			m.Verdict = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Verdict = Verdict(_v)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])
@@ -6079,14 +6588,56 @@ func (m *WorldState) UnmarshalVTUnsafe(dAtA []byte) error {
 			}
 		case 16:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field SessionOpen", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceOpen", wireType)
 			}
 			var v bool
 			v, iNdEx, err = protobuf_go_lite.DecodeVarintBool(dAtA, iNdEx)
 			if err != nil {
 				return err
 			}
-			m.SessionOpen = bool(v)
+			m.InstanceOpen = bool(v)
+		case 17:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Phase", wireType)
+			}
+			m.Phase = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Phase = Phase(_v)
+			if err != nil {
+				return err
+			}
+		case 18:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Stage", wireType)
+			}
+			m.Stage = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Stage = Stage(_v)
+			if err != nil {
+				return err
+			}
+		case 19:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PhaseFaults", wireType)
+			}
+			m.PhaseFaults = 0
+			m.PhaseFaults, iNdEx, err = protobuf_go_lite.DecodeVarintUint32(dAtA, iNdEx)
+			if err != nil {
+				return err
+			}
+		case 20:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Verdict", wireType)
+			}
+			m.Verdict = 0
+			var _v uint64
+			_v, iNdEx, err = protobuf_go_lite.DecodeVarint(dAtA, iNdEx)
+			m.Verdict = Verdict(_v)
+			if err != nil {
+				return err
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := protobuf_go_lite.Skip(dAtA[iNdEx:])

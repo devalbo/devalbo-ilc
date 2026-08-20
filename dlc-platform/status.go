@@ -1,6 +1,7 @@
 package platform
 
 import (
+	dlcstdv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/dlc/std/v1"
 	ilcv1 "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/ilc/v1"
 )
 
@@ -61,6 +62,26 @@ const (
 	Status1 = 0
 	Status2 = 1
 	Status3 = 2
+)
+
+// WHAT SLOT 1 MEANS, as the enum that now declares it.
+//
+// Re-exported here rather than left for each app to reach into the generated
+// package, because this is the one slot with a settled meaning and an app should
+// not have to know which .proto file it came from to set a light.
+//
+// THE VALUES WERE A CONTRACT NOBODY WROTE DOWN. `hello` had its own `Colour`
+// enum and translated it into literals here; the badge hand-decoded the same
+// numbers at the other end. They agreed for three values and disagreed at both
+// ends — `COLOUR_OFF` was sent as 0, which the badge read as IDLE and rendered
+// blue. Naming them is what makes that kind of disagreement a compile error.
+const (
+	StatusLevelUnspecified = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_UNSPECIFIED)
+	StatusLevelIdle        = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_IDLE)
+	StatusLevelOK          = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_OK)
+	StatusLevelWarning     = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_WARNING)
+	StatusLevelError       = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_ERROR)
+	StatusLevelOff         = byte(dlcstdv1.StatusLevel_STATUS_LEVEL_OFF)
 )
 
 // SetStatus publishes the three status bytes.

@@ -51,6 +51,7 @@ mod siobus;
 mod usblog;
 mod payload;
 mod platform;
+mod progress;
 mod psram;
 mod report;
 mod shared;
@@ -255,86 +256,126 @@ fn show(backlight: &mut Backlight, screen: &mut Option<display::Display>, status
     };
 }
 
-/// Hold a status forever, blinking if that is how it is shown.
-///
-/// THE END OF EVERY PATH THROUGH THIS FIRMWARE, and the reason it is not just
-/// `wfi` in a loop: a board with nothing to run used to halt with the backlight
-/// off, which is exactly what a board that never booted looks like. Someone
-/// without a serial adapter — the common case, per BRINGUP.md — could not tell
-/// the two apart. A blink can only mean code is running.
-fn rest(
-    backlight: &mut Backlight,
-    screen: &mut Option<display::Display>,
-    status: Status,
-    sys_hz: u32,
-) -> ! {
-    use embedded_hal::digital::OutputPin;
-    // NOTHING WILL RUN AGAIN FROM HERE, so say so once, in the one place that
-    // cannot be missed.
-    //
-    // This was set on the session-LEAVE path, which is only one of the ways a
-    // badge reaches this function: a single-shot app finishes its bring-up and
-    // arrives via `report.finish`, never touching that path. A client then
-    // offered a request, the world accepted it into a slot nobody would ever
-    // empty, and every later request was told "a request is already running" —
-    // three wrong answers in a row, all traceable to a flag set on one branch of
-    // five.
-    #[cfg(badge_control)]
-    crate::passthrough::session_open(false);
-    let has_screen = screen.is_some();
-    show(backlight, screen, status);
-    // BLINK ONLY WITHOUT A SCREEN. A lit panel showing a status colour and a
-    // verdict already says "alive, and here is why"; blinking it would strobe
-    // the one thing worth reading. Blind, the blink is the only way to tell
-    // "waiting" from "never booted", so it stays.
-    if has_screen || !status.blinks() {
-        // SERVE THE LOG rather than sleeping. `wfi` here is what made four
-        // flash cycles necessary: the badge knew exactly what happened and had
-        // no way to say it.
-        serve_log()
-    }
-    // A short flash about once a second: unmistakably deliberate, and dim enough
-    // not to drain a LiPo sitting on a desk.
-    loop {
-        let _ = backlight.set_high();
-        cortex_m::asm::delay(sys_hz / 16);
-        let _ = backlight.set_low();
-        cortex_m::asm::delay(sys_hz);
-    }
-}
+/// How long the backlight stays lit, and dark, while blinking.
+const BLINK_ON_US: u64 = 60_000;
+const BLINK_OFF_US: u64 = 940_000;
 
-/// Idle forever, offering the bring-up log over USB CDC.
+/// PHASE IDLE / DEGRADED — alive, nothing running, waiting for something to run.
 ///
-/// WHY IT RUNS AT THE END rather than throughout: USB needs polling to
-/// enumerate, and the bring-up is a straight line that must not stall waiting
-/// for a host that may never attach. Buffering during the run and serving after
-/// means nothing blocks, and a host that connects late still gets the whole log
-/// — including the part written before it plugged in, which is the part that
-/// matters.
+/// # This used to be `rest()`, and it never returned
 ///
-/// Never returns. The badge has finished; this is its afterlife.
-fn serve_log() -> ! {
-    // THE DEVICE IS ALREADY UP, and already being driven by USBCTRL_IRQ — it was
-    // started before the bring-up report so that a stall would still be
-    // reportable. This function used to build the whole USB stack here, which is
-    // exactly what made a hang invisible: no device existed until the run
-    // finished, so a run that never finished had no way to say so.
-    //
-    // What is left is the afterlife: keep servicing, and periodically rewind so
-    // a terminal attached after the fact sees the whole run rather than an empty
-    // port.
-    //
-    // `pump()` as well as the interrupt, deliberately. If the interrupt were
-    // never unmasked — a future refactor, a build where `start` bailed — this
-    // loop still drains, so the worst case degrades to the old behaviour instead
-    // of to silence.
-    let mut idle = 0u32;
+/// A badge with an empty catalog, or one whose payload would not instantiate,
+/// halted here: a colour on the panel, the log served forever, and only a reset
+/// to get out. That conflated two different things — "cannot make progress on
+/// the app flow" and "stop executing" — and the second does not follow from the
+/// first.
+///
+/// What it cost is specific. A world with no usable heap can still answer the
+/// control channel, show a menu, take a reboot over USB and say WHY it cannot
+/// run anything; halting removed every one of those at exactly the moment
+/// somebody needed them, because the PSRAM failure is the one you most want to
+/// interrogate. The state machine had a terminal state and the code had a
+/// diverging function, and each was the other's justification.
+///
+/// # What it still does, unchanged
+///
+/// The jobs that were right about `rest` stay in the one place they were right
+/// about: clearing `instance_open` so nothing queues a request for a turn that
+/// will never come, and showing the status so a person across a room learns
+/// something. That was the fix for a flag set on one branch of five, and moving
+/// it out would re-open it.
+///
+/// # Returns
+///
+/// When something has asked for a session: a client's `-select`, or a button. A
+/// blink means "waiting", never "finished" — and a caller that ignores the
+/// return would be a caller that halts, which is the bug this is removing.
+fn phase_idle<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+    backlight: &mut Backlight,
+    buttons: &mut Buttons,
+    status: Status,
+    degraded: bool,
+) {
+    use embedded_hal::digital::{InputPin, OutputPin};
+
+    // WHICH KIND OF WAITING, because the remedy differs and the badge should say
+    // which one it is: idle means supply a payload, degraded means look at the
+    // hardware. See `Phase` in control.proto for why that earns a second state.
+    if degraded {
+        report.phase(control::PHASE_DEGRADED, format_args!("degraded"));
+    } else {
+        report.phase(control::PHASE_IDLE, format_args!("idle"));
+    }
+
+    // NOTHING CAN RUN A REQUEST NOW, said once in the one place that cannot be
+    // missed — see the note above.
+    #[cfg(badge_control)]
+    crate::passthrough::instance_open(false);
+    dlc_platform_embedded::activity::clear();
+
+    let has_screen = report.with_screen_and_log(|screen, _log| {
+        show(backlight, screen, status);
+        screen.is_some()
+    });
+
+    // BLINK ONLY WITHOUT A SCREEN. A lit panel showing a status colour and a
+    // verdict already says "alive, and here is why"; blinking it would strobe the
+    // one thing worth reading. Blind, the blink is the only way to tell "waiting"
+    // from "never booted", so it stays.
+    let blinks = !has_screen && status.blinks();
+    let mut lit = false;
+    // BY THE CLOCK, not by a loop counter. This loop's speed depends on what USB
+    // is doing, so counting iterations would make the blink rate a report on how
+    // busy the cable is. It also must not use a blocking delay: the whole reason
+    // for waiting rather than halting is that the world keeps answering, and
+    // `asm::delay` here would stall the control channel between flashes.
+    let mut toggled_us = now_us();
+
     loop {
+        // SERVICED HERE, not by an interrupt alone. The control channel has to
+        // keep answering while the world waits — that is the entire point of not
+        // halting — and `pump` also covers a build where the interrupt was never
+        // unmasked, so the worst case degrades to polling rather than to silence.
         usblog::pump();
-        idle = idle.saturating_add(1);
-        if idle > 2_000_000 {
-            usblog::rewind();
-            idle = 0;
+
+        // A CLIENT ASKED FOR ONE. `-select` is how a world is driven out of here
+        // over the cable, with nobody touching the badge.
+        if let Some(index) = installed::take_request() {
+            installed::selected(index);
+            report.note(format_args!("idle: a client chose payload {index}"));
+            break;
+        }
+
+        // OR SOMEBODY PRESSED SOMETHING. Any button leaves — the menu is what
+        // comes next, and it is the menu's job to interpret which one.
+        let pressed = buttons.up.is_low().unwrap_or(false)
+            || buttons.down.is_low().unwrap_or(false)
+            || buttons.a.is_low().unwrap_or(false)
+            || buttons.b.is_low().unwrap_or(false)
+            || buttons.c.is_low().unwrap_or(false);
+        if pressed {
+            report.note(format_args!("idle: a button was pressed"));
+            break;
+        }
+        // AND FROM THE CONTROL CHANNEL'S OWN BUTTON VERB, which is queued rather
+        // than read off a pin (D3) — so a press over the cable is picked up here
+        // exactly as a finger would be.
+        if crate::buttons::taken(control::BUTTON_A) {
+            report.note(format_args!("idle: a button arrived over the control channel"));
+            break;
+        }
+
+        if blinks {
+            // A short flash about once a second: unmistakably deliberate, and dim
+            // enough not to drain a LiPo sitting on a desk.
+            let now = now_us();
+            let due = if lit { BLINK_ON_US } else { BLINK_OFF_US };
+            if now.wrapping_sub(toggled_us) >= due {
+                toggled_us = now;
+                lit = !lit;
+                let _ = if lit { backlight.set_high() } else { backlight.set_low() };
+            }
         }
     }
 }
@@ -349,7 +390,7 @@ fn serve_log() -> ! {
 /// Reading high/low/high and retrying on a change is the documented way to get a
 /// consistent 64-bit value without latching. The retry is almost never taken: it
 /// costs a loop iteration once every 71 minutes, when the low word wraps.
-fn now_us() -> u64 {
+pub(crate) fn now_us() -> u64 {
     let timer = unsafe { &*hal::pac::TIMER0::ptr() };
     loop {
         let high = timer.timerawh().read().bits();
@@ -441,187 +482,55 @@ const XTAL_HZ: u32 = board::XTAL_HZ;
 const HEAP_BYTES: usize = 64 * 1024;
 static mut HEAP_MEM: [u8; HEAP_BYTES] = [0; HEAP_BYTES];
 
-#[hal::entry]
-fn main() -> ! {
-    // NO HEAP YET, and that is a change from milestone 1 — where it went first,
-    // because "anything below may allocate".
-    //
-    // The heap now goes on PSRAM, which cannot be probed until the clocks and the
-    // UART are up: the QMI divisor comes from the system clock, and a PSRAM
-    // failure is only useful if it can be *printed*. So the ordering inverts, and
-    // it is safe for a reason that must stay true — **nothing between here and
-    // `HEAP.init` below allocates.** `Peripherals::take`, `init_clocks_and_plls`,
-    // `Pins::new`, `UartPeripheral::new` and `writeln!` are all allocation-free,
-    // and `LlffHeap::init` may be called only once, which is why it cannot simply
-    // be done twice to be safe. Adding an allocating call above it is a hard
-    // fault with no message.
-    let mut pac = hal::pac::Peripherals::take().unwrap();
-    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
-    let clocks = hal::clocks::init_clocks_and_plls(
-        XTAL_HZ,
-        pac.XOSC,
-        pac.CLOCKS,
-        pac.PLL_SYS,
-        pac.PLL_USB,
-        &mut pac.RESETS,
-        &mut watchdog,
-    )
-    .unwrap();
+/// One of the badge's five buttons, with its GPIO number erased.
+type Button = hal::gpio::Pin<
+    hal::gpio::DynPinId,
+    hal::gpio::FunctionSio<hal::gpio::SioInput>,
+    hal::gpio::PullUp,
+>;
 
-    let sio = hal::Sio::new(pac.SIO);
-    let pins = hal::gpio::Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
+/// THE FIVE BUTTONS, OWNED ONCE.
+///
+/// The menu and the keyboard SHARE pins — both want `a` and `down` — and a pin
+/// can only be moved once. That was invisible while the menu ran exactly once
+/// per boot; the moment a session could return to the menu, ownership had to
+/// move somewhere both could borrow from.
+///
+/// So they live here, owned by the entry point, and every phase borrows. The
+/// per-widget structs (`menu::Buttons`, `keyboard::Keys`) stay separate on
+/// purpose — they are different buttons for different jobs, and one struct
+/// carrying all five would let a caller hand the menu's set to the keyboard and
+/// have it silently half-work.
+struct Buttons {
+    up: Button,
+    down: Button,
+    a: Button,
+    b: Button,
+    c: Button,
+}
 
-    // UART0 on GPIO0/1 — **CONFIRMED 2026-08-07, and for a better reason than it
-    // was chosen.** The Tufty declares no default UART at all, so there was no
-    // convention to be right about; GPIO0/1 are `CL0`/`CL1`, two of the four
-    // crocodile-clip pads, which is where a serial adapter can physically attach.
-    // See `board.rs`.
-    let uart_pins = (
-        pins.gpio0.into_function::<hal::gpio::FunctionUart>(),
-        pins.gpio1.into_function::<hal::gpio::FunctionUart>(),
-    );
-    let mut uart = hal::uart::UartPeripheral::new(pac.UART0, uart_pins, &mut pac.RESETS)
-        .enable(
-            UartConfig::new(115_200.Hz(), DataBits::Eight, None, StopBits::One),
-            clocks.peripheral_clock.freq(),
-        )
-        .unwrap();
+/// PHASE 1 — everything that must be true before software can run.
+///
+/// Returns whether PSRAM came up, which is the one fact from this phase that a
+/// later one needs: without it there is a 64 KB SRAM heap that can report but
+/// cannot instantiate, and saying so at the point instantiation fails is the
+/// difference between a diagnosis and a Wasmtime error.
+///
+/// # What is NOT here
+///
+/// The peripherals themselves. Clocks, pins, the UART, the panel and the USB
+/// device are all constructed by the entry point before this runs, because they
+/// have to outlive every phase and because the report writes to two of them.
+/// This phase CHECKS what the entry point built; it does not build it.
+fn phase_hardware<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+    sys_hz: u32,
+    screen_ok: bool,
+    screen_err: &str,
+) -> bool {
+    report.phase(control::PHASE_HARDWARE, format_args!("hardware"));
 
-    // THE STATUS CHANNEL, and it comes up early on purpose: it is the only output
-    // this badge has when nobody has a serial adapter clipped on (BRINGUP.md's
-    // first question). Both worlds have `Capability::Status`, so this is not
-    // gated — the minimal world is the one that has ONLY this.
-    let mut backlight = pins.gpio26.into_push_pull_output();
-
-    // THE SCREEN, brought up before PSRAM and before Wasmtime — deliberately.
-    // It is the badge's only output for someone with no serial adapter clipped
-    // on, so it has to exist before the stages most likely to fail. See
-    // display.rs: none of it has run on hardware.
-    // mipidsi needs a DelayNs for the panel's power-on timing; the HAL timer is
-    // one. Created here rather than inside the driver because it is a peripheral
-    // the rest of the firmware may want.
-    let mut timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
-
-    // A REAL CLOCK FOR THE GUEST. Until now `wasi:clocks/monotonic-clock` counted
-    // CALLS and `subscribe_duration` ignored its argument, so an app's
-    // `time.Sleep` returned immediately and nothing could unfold over time.
-    //
-    // TIMER0 counts microseconds in hardware, which is exactly what the guest
-    // needs and what the comment on that stub always promised.
-    dlc_platform_embedded::clock::install(now_us);
-
-    // GUEST OUTPUT, LIVE. `wasi:cli/stdout.write` is an IMPORT — host code
-    // running while the guest is suspended mid-call — so its bytes exist long
-    // before the command returns. They were buffered and read afterwards, which
-    // made every tier look like output only arrives at the end.
-    //
-    // Echoing into the boot log means a sleeping app's ticks appear as it prints
-    // them, over the USB cable, at the moment it prints them. That is the whole
-    // demonstration that an import is a callback.
-    dlc_platform_embedded::uart::set_echo(echo_to_log);
-
-    // AND WHILE A GUEST RUNS. `block_on` polls in a loop whenever the guest is
-    // suspended — inside a sleep, or waiting on a stream — and that loop is world
-    // code. Servicing USB there is what keeps the log flowing and the heartbeat
-    // beating during a command, which is exactly when somebody asks whether the
-    // badge is stuck.
-    dlc_platform_embedded::block_on::set_pump(usblog::pump);
-
-    // POWER THE PANEL. GPIO41 gates the display's rail — verified by toggling it
-    // under Pimoroni's firmware and watching the screen blank and return. Their
-    // header calls it "I2C power for talking to RTC", which is what kept it out
-    // of this firmware and cost a day of chasing an unpowered controller.
-    //
-    // FIRST, and before any display work: everything after this assumes there is
-    // something on the other end of the bus.
-    use embedded_hal::digital::OutputPin as _;
-    let mut power_en = pins.gpio41.into_push_pull_output();
-    let _ = power_en.set_high();
-    // Give the rail time to come up before the panel is addressed.
-    cortex_m::asm::delay(10_000_000);
-    // START THE LOG HERE — before the report, not after it.
-    //
-    // This used to hand the clock to a static and build the device only in the
-    // idle loop, which meant a run that never reached the idle loop produced no
-    // serial device at all. A stalled `execute` therefore showed one unresolved
-    // line on the panel and said nothing over USB, and the only move left was to
-    // reflash with a guess.
-    //
-    // Started here and driven by USBCTRL_IRQ, the log is live during the run and
-    // survives a stall: the interrupt keeps answering the host whatever main is
-    // doing. See usblog.rs.
-    //
-    // AFTER the last borrow of `clocks` — taking the field partially moves it,
-    // and the timer above still needs the whole thing.
-    usblog::start(pac.USB, pac.USB_DPRAM, clocks.usb_clock, &mut pac.RESETS);
-    let screen = display::Display::new(
-        pins.gpio27.into_push_pull_output().into_dyn_pin(),
-        pins.gpio28.into_push_pull_output().into_dyn_pin(),
-        pins.gpio30.into_push_pull_output().into_dyn_pin(),
-        pins.gpio31.into_push_pull_output().into_dyn_pin(),
-        [
-            pins.gpio32.into_push_pull_output().into_dyn_pin(),
-            pins.gpio33.into_push_pull_output().into_dyn_pin(),
-            pins.gpio34.into_push_pull_output().into_dyn_pin(),
-            pins.gpio35.into_push_pull_output().into_dyn_pin(),
-            pins.gpio36.into_push_pull_output().into_dyn_pin(),
-            pins.gpio37.into_push_pull_output().into_dyn_pin(),
-            pins.gpio38.into_push_pull_output().into_dyn_pin(),
-            pins.gpio39.into_push_pull_output().into_dyn_pin(),
-        ],
-        &mut timer,
-    );
-    // A screen that does not come up is NOT fatal: the badge still has a UART
-    // and a backlight, and saying so is more useful than halting.
-    // THE SCREEN LIVES IN A STATIC, and this is what Phase 4a needed.
-    //
-    // A guest's `stdout` write is an IMPORT — host code running mid-`execute`,
-    // reached through a `fn(&[u8])` hook with no arguments and no captured
-    // state. It can therefore only see statics. The panel used to be a local
-    // owned by `main` and borrowed by the report, which is why output could be
-    // collected during a command and not DRAWN during one.
-    //
-    // SAFETY, and it is a real argument rather than a shrug: this is a single
-    // core with no preemption between the report and a guest call. The report
-    // draws between commands; the echo draws inside one. They cannot interleave
-    // because `execute` does not return until the guest is done, and the report
-    // is not running while it is inside `execute`.
-    let (screen, screen_err) = match screen {
-        Ok(panel) => (Some(panel), ""),
-        // KEEP THE REASON. Discarding it is what made a configuration mistake
-        // look like dead hardware for a whole session: the badge blinked with a
-        // blank screen, which is indistinguishable from a panel that is not
-        // wired, while the actual answer was `InvalidDisplaySize`.
-        Err(display::DisplayError(why)) => (None, why),
-    };
-    unsafe { SCREEN = screen };
-    let screen: &mut Option<display::Display> = unsafe { &mut *core::ptr::addr_of_mut!(SCREEN) };
-    // Captured before the report borrows `screen`, so stage 2 can report on the
-    // very thing it is drawing to.
-    let screen_ok = screen.is_some();
-    show(&mut backlight, screen, Status::Broken);
-
-    let sys_hz = clocks.system_clock.freq().to_Hz();
-
-    // BRING-UP AS A WATCHABLE SEQUENCE (report.rs). Each stage announces itself
-    // before it runs, so a hang shows the name of what it hung in — and the ones
-    // QEMU cannot model are marked `*`, because those are the only checks that
-    // carry information `make qemu` has not already given us.
-    // SAFETY: single core, no interrupt touches LOG, and this is the only borrow
-    // taken for the report's lifetime.
-    let log: &mut usblog::LogBuffer = unsafe { &mut *core::ptr::addr_of_mut!(LOG) };
-    let mut sink = usblog::Tee(&mut uart, log);
-    // SAY WHAT THE WORLD IS DOING, at each transition. Without these a caller
-    // asking "are you stuck?" gets UNSPECIFIED, which is the question restated.
-    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_STARTING);
-    let mut report = report::Report::new(
-        &mut sink,
-        screen,
-        sys_hz,
-        format_args!("DLC {} [{}]", env!("CARGO_PKG_VERSION"), WORLD.name()),
-    );
-
-    // 1 — THE CRYSTAL, and it is hardware-only for a non-obvious reason: the UART
+    // THE CRYSTAL, and it is hardware-only for a non-obvious reason: the UART
     // divisor is derived from it, so if this number is wrong the evidence is
     // garbled text rather than a wrong figure. QEMU has no crystal at all.
     report
@@ -633,9 +542,6 @@ fn main() -> ! {
         env!("CARGO_PKG_VERSION")
     ));
 
-    // 2 — THE PANEL. An 8-bit parallel ST7789 on a bit-banged bus: QEMU models no
-    // RP2350 peripherals, so nothing about this has ever executed. If you are
-    // reading this stage ON the badge, it passed.
     // THE MEASUREMENT THAT SHOULD HAVE COME FIRST. Everything about the display
     // is downstream of whether writing GPIO32..39 changes the pads, and four
     // flash cycles went on init sequences and timing while that stayed untested.
@@ -649,6 +555,9 @@ fn main() -> ! {
         }
     }
 
+    // THE PANEL. An 8-bit parallel ST7789 on a bit-banged bus: QEMU models no
+    // RP2350 peripherals, so nothing about this has ever executed. If you are
+    // reading this stage ON the badge, it passed.
     let stage = report.stage(control::STAGE_DISPLAY, report::Scope::HardwareOnly, format_args!("display ST7789"));
     if screen_ok {
         stage.ok(format_args!("320x240 parallel"));
@@ -656,11 +565,11 @@ fn main() -> ! {
         stage.fail(format_args!("init failed: {screen_err}"));
     }
 
-    // 3 — PSRAM. The single most likely thing to fail: register-level code that
-    // has never run, executing with XIP DISABLED so a mistake cannot print. QEMU
-    // has no QSPI device to model.
+    // PSRAM. The single most likely thing to fail: register-level code that has
+    // never run, executing with XIP DISABLED so a mistake cannot print. QEMU has
+    // no QSPI device to model.
     let stage = report.stage(control::STAGE_PSRAM, report::Scope::HardwareOnly, format_args!("PSRAM 8 MiB"));
-    let psram_ok = match psram::init(board::PSRAM_CS, sys_hz) {
+    match psram::init(board::PSRAM_CS, sys_hz) {
         Ok(ps) => {
             // Re-init the allocator onto PSRAM. Sound only because nothing above
             // has allocated: `LlffHeap::init` may be called once, and the SRAM
@@ -693,12 +602,26 @@ fn main() -> ! {
             ));
             false
         }
-    };
+    }
+}
 
-    // 4 — THE PAYLOAD CATALOG, in real memory-mapped flash. QEMU's harness uses
-    // `include_bytes!` into its own image; nothing has ever read this region at
-    // an XIP address on a real part, and a payload UF2 dragged to the wrong
-    // offset looks exactly like an empty badge.
+/// PHASE 2 — what is installed, and which of it can actually run.
+///
+/// Returns everything found, INCLUDING the unusable entries. A corrupt payload
+/// is a fact worth reporting rather than a file to hide: the badge says which
+/// one and why, so "nothing happened" becomes "that file arrived damaged, drag
+/// it again".
+///
+/// An empty result is not a failure and this does not treat it as one — the
+/// entry point decides what to do about it, because stopping is its job.
+fn phase_payloads<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+) -> payload::Payloads {
+    // In real memory-mapped flash. QEMU's harness uses `include_bytes!` into its
+    // own image; nothing has ever read this region at an XIP address on a real
+    // part, and a payload UF2 dragged to the wrong offset looks exactly like an
+    // empty badge.
+    report.phase(control::PHASE_PAYLOADS, format_args!("payloads"));
     let stage = report.stage(control::STAGE_PAYLOAD_REGION, report::Scope::HardwareOnly, format_args!("payload region"));
     let available = payload::discover();
     // PUBLISH BEFORE ANYTHING CAN FAIL. A client asking what is installed is most
@@ -710,8 +633,7 @@ fn main() -> ! {
         stage.ok(format_args!("empty"));
         report.note(format_args!("{}", payload::MODE));
         report.note(format_args!("drag a payload UF2 onto the RP2350 drive"));
-        report.finish(Status::Idle);
-        rest(&mut backlight, screen, Status::Idle, sys_hz);
+        return available;
     }
     let runnable = available.iter().filter(|p| p.runnable()).count();
     if runnable == available.len() {
@@ -764,58 +686,54 @@ fn main() -> ! {
             found.integrity
         ));
     }
+    available
+}
 
-    // THE SELECTION. Shown only when there is more than one app — one payload is
-    // not a menu, it is a delay. It always times out and runs the highlighted
-    // entry, so a badge nobody is touching still boots.
-    // EVERY BUTTON, OWNED ONCE, HERE.
-    //
-    // The menu and the keyboard SHARE pins — both want `a` and `down` — and a
-    // pin can only be moved once. That was invisible while the menu ran exactly
-    // once per boot; the moment a session could return to the menu, ownership
-    // had to move out to where both can borrow it.
-    //
-    // PULL-UP, not pull-down: the buttons short to ground (measured against
-    // Pimoroni's own firmware on the board — see menu.rs).
-    let mut pin_up = pins.gpio11.into_pull_up_input();
-    let mut pin_down = pins.gpio6.into_pull_up_input();
-    let mut pin_a = pins.gpio7.into_pull_up_input();
-    let mut pin_b = pins.gpio9.into_pull_up_input();
-    let mut pin_c = pins.gpio10.into_pull_up_input();
-    // UP LEAVES THE SESSION.
-    //
-    // NOT `HOME`, which was the first choice and a mistake `board.rs` had
-    // already warned about: gpio22 is the BOOTSEL button — "the one held for
-    // BOOTSEL, so it is not freely usable as a sixth input". Pressing it while
-    // running is harmless, but overloading "leave" onto the button people hold
-    // to flash the badge invites holding it across a reset and landing in the
-    // bootloader instead.
-    //
-    // `UP` is the button that has been kept free for this. keyboard.rs says why:
-    // an unused button is recoverable and a wrongly assigned one is a habit.
-    // THE APP LOOP — the outer half of a session (Phase 1).
-    //
-    // `HOME` used to park the badge forever. Now it comes back here, so a
-    // DIFFERENT app can run without a power cycle — which is the visible payoff
-    // of a session and the thing "one command and stop" cost.
-    //
-    // The instance is created inside this loop and dropped at the end of each
-    // pass. That is deliberate and it is the risky part: instantiation takes
-    // 2.9 MB of an 8 MB heap, so a session that leaks even a few hundred KB
-    // hangs two or three apps in — which looks like a hardware fault and is the
-    // worst thing here to debug. The heap is measured on every pass below for
-    // exactly that reason.
-    let heap_at_start = HEAP.0.used();
-    loop {
+/// What the starting phase produced.
+enum Started {
+    /// A live instance, the payload it came from, and the heap it started at —
+    /// so the running phase can report what a turn cost against a real baseline.
+    Live {
+        host: MinimalHost,
+        selected: dlc_platform_embedded::catalog::Payload,
+        heap_before: usize,
+    },
+    /// Nothing came up, and this is the status to wait with.
+    Refused(Status),
+}
+
+/// PHASE — a DLC INSTANCE COMING UP: choose a payload, instantiate it, and tell
+/// it what this world is.
+///
+/// Returns the live instance, or the status the entry point should stop with.
+/// It does not stop by itself: `rest` needs the panel and the backlight, and the
+/// report holds the panel for as long as it lives — see the empty-catalog stop
+/// in the entry point for why that rule is worth keeping.
+///
+/// # Why the manifest is in this phase and not the next
+///
+/// Because a refused manifest means there is no usable session, not a bad turn.
+/// Every command afterwards would run against an engine that does not know what
+/// this world can show — formatting for a screen it cannot see, or staying
+/// silent on one it can — so it belongs with the other things that decide
+/// whether an app can run at all.
+fn phase_instance_starting<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+    available: &payload::Payloads,
+    panel_buttons: &mut Buttons,
+    sys_hz: u32,
+    psram_ok: bool,
+) -> Started {
+    report.phase(control::PHASE_INSTANCE_STARTING, format_args!("instance starting"));
     usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_CHOOSING);
     // BORROWED, not moved: the keyboard wants two of these back below.
     let mut buttons = menu::Buttons {
-        up: &mut pin_up,
-        down: &mut pin_down,
-        a: &mut pin_a,
+        up: &mut panel_buttons.up,
+        down: &mut panel_buttons.down,
+        a: &mut panel_buttons.a,
     };
     let choice = report.with_screen_and_log(|screen, log| {
-        menu::choose(&available, screen, &mut buttons, sys_hz, log)
+        menu::choose(available, screen, &mut buttons, sys_hz, log)
     });
     drop(buttons);
     installed::selected(choice);
@@ -844,11 +762,10 @@ fn main() -> ! {
             "{} is corrupt — re-drag the payload UF2",
             selected.name
         ));
-        report.finish(Status::Broken);
-        rest(&mut backlight, screen, Status::Broken, sys_hz);
+        return Started::Refused(Status::Broken);
     }
 
-    // 5 — INSTANTIATION. **This one QEMU already proved**, at this pointer width,
+    // INSTANTIATION. **This one QEMU already proved**, at this pointer width,
     // through this exact host: 81 KB to load, 2911 KB to instantiate. Running it
     // here asks a narrower question — does the BOARD agree with the emulator? — and
     // the interesting failure is a settings mismatch or PSRAM being too slow, not
@@ -898,17 +815,16 @@ fn main() -> ! {
     // A SESSION IS LIVE from here: there is an instance, and the turn loop below
     // will pick up anything a client offers.
     if host.is_some() {
-        passthrough::session_open(true);
+        passthrough::instance_open(true);
     }
     let Some(mut host) = host else {
         if !psram_ok {
             report.note(format_args!("PSRAM did not come up — 2911 KB will not fit SRAM"));
         }
-        report.finish(Status::Broken);
-        rest(&mut backlight, screen, Status::Broken, sys_hz);
+        return Started::Refused(Status::Broken);
     };
 
-    // 6 — RUN IT. Also proven in QEMU, and it is still the claim the whole tier
+    // TELL THE APP WHAT THIS WORLD IS. Also proven in QEMU, and it is still the claim the whole tier
     // rests on: the same engine, the same bytes, executing on this chip.
     // STATE THE FACTS, before the app runs.
     //
@@ -960,29 +876,70 @@ fn main() -> ! {
             // WHAT THIS WORLD CAN DO, and separately WHO IT IS — the two used
             // to go out together as `ILC_STATUS` and `ILC_WORLD` through the
             // wasi environment, which could say neither again.
-            status: world::status_code(WORLD) as u64,
-            world: WORLD.code() as u64,
+            status: world::status_code(WORLD),
+            world: WORLD.code(),
         });
         let stage = report.stage(control::STAGE_MANIFEST, report::Scope::Emulated, format_args!("manifest"));
         match host.execute(manifest::METHOD_SET_WORLD_MANIFEST, env.as_bytes()) {
             Ok(r) if r.success => stage.ok(format_args!("{cols}x{rows} {}", world::text_sink())),
             Ok(r) => {
                 stage.fail(format_args!("engine refused: {}", r.error.as_deref().unwrap_or("no reason")));
+                // AND IT IS FATAL, which the paragraph above has always said and
+                // the code did not do: it marked the stage failed and opened the
+                // session anyway. So a world whose app did not know what it could
+                // show ran regardless — formatting for a screen it could not see,
+                // or staying silent on one it could — which is the exact failure
+                // that paragraph exists to prevent.
+                //
+                // It survived because the comment read as if it were enforced and
+                // nothing distinguished "this stage failed" from "this session
+                // cannot open". Splitting the phases gave the difference a name.
+                return Started::Refused(Status::Broken);
             }
-            Err(_) => stage.fail(format_args!("not delivered")),
+            Err(_) => {
+                stage.fail(format_args!("not delivered"));
+                return Started::Refused(Status::Broken);
+            }
         }
     }
+    Started::Live { host, selected, heap_before: before }
+}
 
+/// PHASE — a DLC INSTANCE IN USE: turns of collect, execute, show, and wait for
+/// what to do next.
+///
+/// BORROWS the instance. It used to take it by value and drop it on the way out,
+/// which made the teardown invisible: the 2.9 MB went back somewhere inside this
+/// function, with no phase to be seen in and nothing to report if it did not.
+/// Dropping is now its own phase, so a badge stuck tearing down says so.
+///
+/// Returns how many turns ran.
+///
+/// # Why the turn loop is a phase and not the whole program
+///
+/// Because it is the phase a WORKING badge lives in, and the three before it are
+/// the ones that fail. Keeping them apart is what lets a stalled world say which
+/// of the four it is in — see `Phase` in control.proto.
+#[allow(clippy::too_many_arguments)]
+fn phase_instance_running<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+    host: &mut MinimalHost,
+    selected: dlc_platform_embedded::catalog::Payload,
+    panel_buttons: &mut Buttons,
+    backlight: &mut Backlight,
+    sys_hz: u32,
+    before: usize,
+) -> u32 {
     // THE KEYS OUTLIVE THE TURN. A session runs a command more than once, and
     // moving the pins out of the menu's struct can only happen once — the type
     // system says so, which is what forced this to be hoisted rather than
     // rediscovered on the second iteration.
     #[cfg(not(badge_input_off))]
     let mut keys = keyboard::Keys {
-        a: &mut pin_a,
-        b: &mut pin_b,
-        c: &mut pin_c,
-        down: &mut pin_down,
+        a: &mut panel_buttons.a,
+        b: &mut panel_buttons.b,
+        c: &mut panel_buttons.c,
+        down: &mut panel_buttons.down,
     };
     // THE SESSION LOOP (SESSION-AND-SURFACE-PLAN Phase 1).
     //
@@ -997,6 +954,7 @@ fn main() -> ! {
     //
     // The world drives; the app stays request/response (D2). An app cannot ask
     // for another turn and does not know it got one.
+    report.phase(control::PHASE_INSTANCE_RUNNING, format_args!("instance running"));
     let mut turn = 0u32;
     loop {
         turn += 1;
@@ -1384,9 +1342,9 @@ fn main() -> ! {
     // where that exists, because it holds the borrow — two mutable paths to one
     // pin is exactly what the borrow checker is for.
     #[cfg(not(badge_input_off))]
-    let next = wait_for_turn(&mut keys.b, &mut pin_up, sys_hz);
+    let next = wait_for_turn(&mut keys.b, &mut panel_buttons.up, sys_hz);
     #[cfg(badge_input_off)]
-    let next = wait_for_turn(&mut pin_b, &mut pin_up, sys_hz);
+    let next = wait_for_turn(&mut panel_buttons.b, &mut panel_buttons.up, sys_hz);
     match next {
         Turn::Again => {
             report.note(format_args!("session: turn {} finished, again", turn));
@@ -1398,22 +1356,327 @@ fn main() -> ! {
         }
     }
     }
+    turn
+}
 
-    // LEAVING THE SESSION — tear the instance down and go back to the menu.
-    //
-    // Dropping `host` releases the guest's linear memory and everything Wasmtime
-    // allocated for it. Measured rather than assumed: a leak here is invisible
-    // until the heap runs out, and by then the cause is several apps behind.
-    drop(host);
-    // NOTHING CAN RUN A REQUEST NOW, and saying so beats queueing one for a turn
-    // that will never come — `rest()` below never returns.
-    passthrough::session_open(false);
+/// PHASE — a DLC INSTANCE GOING AWAY: drop it, and account for what it held.
+///
+/// # Why a teardown is worth a phase of its own
+///
+/// Because it can be the problem. Dropping an instance releases 2.9 MB of an
+/// 8 MB heap, and one that leaves even a few hundred KB behind hangs the badge
+/// two or three apps later — which looks like a hardware fault and is the worst
+/// thing here to debug.
+///
+/// It was previously the last line of the running phase and three lines in the
+/// entry point, so a badge stuck or leaking here reported `instance running`,
+/// which is the one thing it was no longer doing.
+fn phase_instance_stopping<U: core::fmt::Write>(
+    report: &mut report::Report<'_, U>,
+    host: MinimalHost,
+    turns: u32,
+    heap_at_start: usize,
+) {
+    report.phase(control::PHASE_INSTANCE_STOPPING, format_args!("instance stopping"));
+
+    // NOTHING CAN RUN A REQUEST NOW, and saying so beats queueing one against an
+    // instance that is being dropped.
+    #[cfg(badge_control)]
+    passthrough::instance_open(false);
     dlc_platform_embedded::activity::clear();
+
+    // THE DROP, in the phase named for it. Releases the guest's linear memory and
+    // everything Wasmtime allocated for it.
+    drop(host);
+
+    // MEASURED RATHER THAN ASSUMED. This number is the only warning of a leak
+    // that will otherwise present as a badge that dies on its third app.
     let leaked = HEAP.0.used().saturating_sub(heap_at_start);
     report.note(format_args!(
-        "session: ended after {turn} turn(s), {} KB not reclaimed",
+        "instance: {turns} turn(s), {} KB not reclaimed",
         leaked / 1024
     ));
+}
+
+#[hal::entry]
+fn main() -> ! {
+    // NO HEAP YET, and that is a change from milestone 1 — where it went first,
+    // because "anything below may allocate".
+    //
+    // The heap now goes on PSRAM, which cannot be probed until the clocks and the
+    // UART are up: the QMI divisor comes from the system clock, and a PSRAM
+    // failure is only useful if it can be *printed*. So the ordering inverts, and
+    // it is safe for a reason that must stay true — **nothing between here and
+    // `HEAP.init` below allocates.** `Peripherals::take`, `init_clocks_and_plls`,
+    // `Pins::new`, `UartPeripheral::new` and `writeln!` are all allocation-free,
+    // and `LlffHeap::init` may be called only once, which is why it cannot simply
+    // be done twice to be safe. Adding an allocating call above it is a hard
+    // fault with no message.
+    let mut pac = hal::pac::Peripherals::take().unwrap();
+    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+    let clocks = hal::clocks::init_clocks_and_plls(
+        XTAL_HZ,
+        pac.XOSC,
+        pac.CLOCKS,
+        pac.PLL_SYS,
+        pac.PLL_USB,
+        &mut pac.RESETS,
+        &mut watchdog,
+    )
+    .unwrap();
+
+    let sio = hal::Sio::new(pac.SIO);
+    let pins = hal::gpio::Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
+
+    // UART0 on GPIO0/1 — **CONFIRMED 2026-08-07, and for a better reason than it
+    // was chosen.** The Tufty declares no default UART at all, so there was no
+    // convention to be right about; GPIO0/1 are `CL0`/`CL1`, two of the four
+    // crocodile-clip pads, which is where a serial adapter can physically attach.
+    // See `board.rs`.
+    let uart_pins = (
+        pins.gpio0.into_function::<hal::gpio::FunctionUart>(),
+        pins.gpio1.into_function::<hal::gpio::FunctionUart>(),
+    );
+    let mut uart = hal::uart::UartPeripheral::new(pac.UART0, uart_pins, &mut pac.RESETS)
+        .enable(
+            UartConfig::new(115_200.Hz(), DataBits::Eight, None, StopBits::One),
+            clocks.peripheral_clock.freq(),
+        )
+        .unwrap();
+
+    // THE STATUS CHANNEL, and it comes up early on purpose: it is the only output
+    // this badge has when nobody has a serial adapter clipped on (BRINGUP.md's
+    // first question). Both worlds have `Capability::Status`, so this is not
+    // gated — the minimal world is the one that has ONLY this.
+    let mut backlight = pins.gpio26.into_push_pull_output();
+
+    // THE SCREEN, brought up before PSRAM and before Wasmtime — deliberately.
+    // It is the badge's only output for someone with no serial adapter clipped
+    // on, so it has to exist before the stages most likely to fail. See
+    // display.rs: none of it has run on hardware.
+    // mipidsi needs a DelayNs for the panel's power-on timing; the HAL timer is
+    // one. Created here rather than inside the driver because it is a peripheral
+    // the rest of the firmware may want.
+    let mut timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
+
+    // A REAL CLOCK FOR THE GUEST. Until now `wasi:clocks/monotonic-clock` counted
+    // CALLS and `subscribe_duration` ignored its argument, so an app's
+    // `time.Sleep` returned immediately and nothing could unfold over time.
+    //
+    // TIMER0 counts microseconds in hardware, which is exactly what the guest
+    // needs and what the comment on that stub always promised.
+    dlc_platform_embedded::clock::install(now_us);
+
+    // GUEST OUTPUT, LIVE. `wasi:cli/stdout.write` is an IMPORT — host code
+    // running while the guest is suspended mid-call — so its bytes exist long
+    // before the command returns. They were buffered and read afterwards, which
+    // made every tier look like output only arrives at the end.
+    //
+    // Echoing into the boot log means a sleeping app's ticks appear as it prints
+    // them, over the USB cable, at the moment it prints them. That is the whole
+    // demonstration that an import is a callback.
+    dlc_platform_embedded::uart::set_echo(echo_to_log);
+
+    // AND WHILE A GUEST RUNS. `block_on` polls in a loop whenever the guest is
+    // suspended — inside a sleep, or waiting on a stream — and that loop is world
+    // code. Servicing USB there is what keeps the log flowing and the heartbeat
+    // beating during a command, which is exactly when somebody asks whether the
+    // badge is stuck.
+    dlc_platform_embedded::block_on::set_pump(usblog::pump);
+
+    // POWER THE PANEL. GPIO41 gates the display's rail — verified by toggling it
+    // under Pimoroni's firmware and watching the screen blank and return. Their
+    // header calls it "I2C power for talking to RTC", which is what kept it out
+    // of this firmware and cost a day of chasing an unpowered controller.
+    //
+    // FIRST, and before any display work: everything after this assumes there is
+    // something on the other end of the bus.
+    use embedded_hal::digital::OutputPin as _;
+    let mut power_en = pins.gpio41.into_push_pull_output();
+    let _ = power_en.set_high();
+    // Give the rail time to come up before the panel is addressed.
+    cortex_m::asm::delay(10_000_000);
+    // START THE LOG HERE — before the report, not after it.
+    //
+    // This used to hand the clock to a static and build the device only in the
+    // idle loop, which meant a run that never reached the idle loop produced no
+    // serial device at all. A stalled `execute` therefore showed one unresolved
+    // line on the panel and said nothing over USB, and the only move left was to
+    // reflash with a guess.
+    //
+    // Started here and driven by USBCTRL_IRQ, the log is live during the run and
+    // survives a stall: the interrupt keeps answering the host whatever main is
+    // doing. See usblog.rs.
+    //
+    // AFTER the last borrow of `clocks` — taking the field partially moves it,
+    // and the timer above still needs the whole thing.
+    usblog::start(pac.USB, pac.USB_DPRAM, clocks.usb_clock, &mut pac.RESETS);
+    let screen = display::Display::new(
+        pins.gpio27.into_push_pull_output().into_dyn_pin(),
+        pins.gpio28.into_push_pull_output().into_dyn_pin(),
+        pins.gpio30.into_push_pull_output().into_dyn_pin(),
+        pins.gpio31.into_push_pull_output().into_dyn_pin(),
+        [
+            pins.gpio32.into_push_pull_output().into_dyn_pin(),
+            pins.gpio33.into_push_pull_output().into_dyn_pin(),
+            pins.gpio34.into_push_pull_output().into_dyn_pin(),
+            pins.gpio35.into_push_pull_output().into_dyn_pin(),
+            pins.gpio36.into_push_pull_output().into_dyn_pin(),
+            pins.gpio37.into_push_pull_output().into_dyn_pin(),
+            pins.gpio38.into_push_pull_output().into_dyn_pin(),
+            pins.gpio39.into_push_pull_output().into_dyn_pin(),
+        ],
+        &mut timer,
+    );
+    // A screen that does not come up is NOT fatal: the badge still has a UART
+    // and a backlight, and saying so is more useful than halting.
+    // THE SCREEN LIVES IN A STATIC, and this is what Phase 4a needed.
+    //
+    // A guest's `stdout` write is an IMPORT — host code running mid-`execute`,
+    // reached through a `fn(&[u8])` hook with no arguments and no captured
+    // state. It can therefore only see statics. The panel used to be a local
+    // owned by `main` and borrowed by the report, which is why output could be
+    // collected during a command and not DRAWN during one.
+    //
+    // SAFETY, and it is a real argument rather than a shrug: this is a single
+    // core with no preemption between the report and a guest call. The report
+    // draws between commands; the echo draws inside one. They cannot interleave
+    // because `execute` does not return until the guest is done, and the report
+    // is not running while it is inside `execute`.
+    let (screen, screen_err) = match screen {
+        Ok(panel) => (Some(panel), ""),
+        // KEEP THE REASON. Discarding it is what made a configuration mistake
+        // look like dead hardware for a whole session: the badge blinked with a
+        // blank screen, which is indistinguishable from a panel that is not
+        // wired, while the actual answer was `InvalidDisplaySize`.
+        Err(display::DisplayError(why)) => (None, why),
+    };
+    unsafe { SCREEN = screen };
+    let screen: &mut Option<display::Display> = unsafe { &mut *core::ptr::addr_of_mut!(SCREEN) };
+    // Captured before the report borrows `screen`, so stage 2 can report on the
+    // very thing it is drawing to.
+    let screen_ok = screen.is_some();
+    show(&mut backlight, screen, Status::Broken);
+
+    let sys_hz = clocks.system_clock.freq().to_Hz();
+
+    // BRING-UP AS A WATCHABLE SEQUENCE (report.rs). Each stage announces itself
+    // before it runs, so a hang shows the name of what it hung in — and the ones
+    // QEMU cannot model are marked `*`, because those are the only checks that
+    // carry information `make qemu` has not already given us.
+    // SAFETY: single core, no interrupt touches LOG, and this is the only borrow
+    // taken for the report's lifetime.
+    let log: &mut usblog::LogBuffer = unsafe { &mut *core::ptr::addr_of_mut!(LOG) };
+    let mut sink = usblog::Tee(&mut uart, log);
+    // SAY WHAT THE WORLD IS DOING, at each transition. Without these a caller
+    // asking "are you stuck?" gets UNSPECIFIED, which is the question restated.
+    usblog::set_activity(dlc_platform_embedded::control::ACTIVITY_STARTING);
+    let mut report = report::Report::new(
+        &mut sink,
+        screen,
+        sys_hz,
+        format_args!("DLC {} [{}]", env!("CARGO_PKG_VERSION"), WORLD.name()),
+    );
+
+    let psram_ok = phase_hardware(&mut report, sys_hz, screen_ok, screen_err);
+
+    let available = phase_payloads(&mut report);
+    // THE SELECTION. Shown only when there is more than one app — one payload is
+    // not a menu, it is a delay. It always times out and runs the highlighted
+    // entry, so a badge nobody is touching still boots.
+    // EVERY BUTTON, OWNED ONCE, HERE.
+    //
+    // The menu and the keyboard SHARE pins — both want `a` and `down` — and a
+    // pin can only be moved once. That was invisible while the menu ran exactly
+    // once per boot; the moment a session could return to the menu, ownership
+    // had to move out to where both can borrow it.
+    //
+    // PULL-UP, not pull-down: the buttons short to ground (measured against
+    // Pimoroni's own firmware on the board — see menu.rs).
+    //
+    // TYPE-ERASED with `into_dyn_pin`, the same move `display.rs` already makes
+    // for its eight data lines. Each GPIO is its own TYPE, so five of them make
+    // five type parameters — and a phase taking the buttons would carry all five
+    // through its signature, plus every caller. The pins are indistinguishable to
+    // everything above this line, so the types are noise there.
+    let mut panel_buttons = Buttons {
+        up: pins.gpio11.into_pull_up_input().into_dyn_pin(),
+        down: pins.gpio6.into_pull_up_input().into_dyn_pin(),
+        a: pins.gpio7.into_pull_up_input().into_dyn_pin(),
+        b: pins.gpio9.into_pull_up_input().into_dyn_pin(),
+        c: pins.gpio10.into_pull_up_input().into_dyn_pin(),
+    };
+    // UP LEAVES THE SESSION.
+    //
+    // NOT `HOME`, which was the first choice and a mistake `board.rs` had
+    // already warned about: gpio22 is the BOOTSEL button — "the one held for
+    // BOOTSEL, so it is not freely usable as a sixth input". Pressing it while
+    // running is harmless, but overloading "leave" onto the button people hold
+    // to flash the badge invites holding it across a reset and landing in the
+    // bootloader instead.
+    //
+    // `UP` is the button that has been kept free for this. keyboard.rs says why:
+    // an unused button is recoverable and a wrongly assigned one is a habit.
+    // THE APP LOOP — the outer half of a session (Phase 1).
+    //
+    // `HOME` used to park the badge forever. Now it comes back here, so a
+    // DIFFERENT app can run without a power cycle — which is the visible payoff
+    // of a session and the thing "one command and stop" cost.
+    //
+    // The instance is created inside this loop and dropped at the end of each
+    // pass. That is deliberate and it is the risky part: instantiation takes
+    // 2.9 MB of an 8 MB heap, so a session that leaks even a few hundred KB
+    // hangs two or three apps in — which looks like a hardware fault and is the
+    // worst thing here to debug. The heap is measured on every pass below for
+    // exactly that reason.
+    let heap_at_start = HEAP.0.used();
+    loop {
+    // AN EMPTY BADGE IS NOT A BROKEN ONE — it is what a loader is FOR, and saying
+    // so plainly is the difference between "waiting" and "failed". It waits here
+    // rather than stopping, so it still answers, still shows a colour, and can
+    // still be rebooted over the cable.
+    if available.is_empty() {
+        report.finish(Status::Idle);
+        phase_idle(&mut report, &mut backlight, &mut panel_buttons, Status::Idle, false);
+        continue;
+    }
+
+    let starting = phase_instance_starting(&mut report, &available, &mut panel_buttons, sys_hz, psram_ok);
+    let (mut host, selected, before) = match starting {
+        Started::Live { host, selected, heap_before } => (host, selected, heap_before),
+        // THIS PAYLOAD CANNOT RUN — which is not the same as the world being
+        // over, and used to be treated as if it were.
+        //
+        // WAITING IS DECIDED HERE, not inside the phase: the wait needs the panel
+        // and the backlight, and the report holds the panel for as long as it
+        // lives. A phase that waited would have to be handed both and would take
+        // over the world's control flow from inside a step — the arrangement that
+        // let the old stop be reached by five paths with only one of them
+        // clearing `instance_open`.
+        //
+        // DEGRADED WHEN NO PAYLOAD COULD FIX IT. Without a heap nothing will ever
+        // instantiate, so "drag another app on" is advice that cannot work — and
+        // telling the difference is the whole reason there are two waits.
+        Started::Refused(status) => {
+            report.finish(status);
+            phase_idle(&mut report, &mut backlight, &mut panel_buttons, status, !psram_ok);
+            continue;
+        }
+    };
+
+
+    let turn = phase_instance_running(
+        &mut report,
+        &mut host,
+        selected,
+        &mut panel_buttons,
+        &mut backlight,
+        sys_hz,
+        before,
+    );
+
+
+    phase_instance_stopping(&mut report, host, turn, heap_at_start);
     }
 }
 

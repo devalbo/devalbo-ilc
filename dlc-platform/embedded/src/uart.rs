@@ -92,6 +92,30 @@ impl SharedBuffer {
     pub fn take(&self) -> Vec<u8> {
         self.with(core::mem::take)
     }
+
+    /// A copy of the contents, leaving them in place.
+    ///
+    /// FOR STORAGE RATHER THAN OUTPUT. `take` is right for stdout, where the
+    /// host drains what the guest produced; a file has to still be there after
+    /// somebody reads it.
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.with(|buffer| buffer.clone())
+    }
+
+    /// Append bytes WITHOUT firing the stdout echo.
+    ///
+    /// `ByteSink::write` echoes, which is what makes a guest's output appear on
+    /// the panel as it happens. A file write must not: it would paint the
+    /// contents of every file the app stores onto the screen and into the boot
+    /// log. Same buffer, different door.
+    pub fn append(&self, bytes: &[u8]) {
+        self.with(|buffer| buffer.extend_from_slice(bytes));
+    }
+
+    /// Empty the buffer, keeping the sharing. What `O_TRUNC` means.
+    pub fn truncate(&self) {
+        self.with(|buffer| buffer.clear());
+    }
 }
 
 /// Called on every guest write, as it happens.

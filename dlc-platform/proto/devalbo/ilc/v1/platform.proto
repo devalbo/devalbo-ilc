@@ -156,6 +156,14 @@ enum SpecSource {
 // Mirrors `clispec.Kind`. A host that meets a kind it cannot render skips the
 // field and the app takes its default, which is a no-op rather than an error
 // (Decision 33).
+// `StatusLevel` MOVED to devalbo/dlc/v1/status.proto.
+//
+// It was declared here, which put an APP-FACING vocabulary in the host-facing
+// package: an app cannot import `devalbo.ilc.v1` — it vendors only what the
+// scaffold gives it — so the one enum apps most needed was the one they could
+// not reach, and `hello` declared its own instead. That is what this file being
+// the wrong home actually cost.
+
 enum SpecKind {
   SPEC_KIND_UNSPECIFIED = 0;
   SPEC_KIND_STRING = 1;

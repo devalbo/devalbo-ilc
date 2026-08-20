@@ -4,6 +4,13 @@
 // message types without pulling a decoder into a worker that only needs
 // numbers.
 
+// Verdict
+export const VERDICT_UNSPECIFIED = 0;
+export const VERDICT_OK = 1;
+export const VERDICT_FAILED = 2;
+export const VERDICT_IDLE = 3;
+export const VERDICT_BROKEN = 4;
+
 // Activity
 export const ACTIVITY_UNSPECIFIED = 0;
 export const ACTIVITY_STARTING = 1;
@@ -22,6 +29,17 @@ export const SCREEN_LAYOUT_NONE = 3;
 export const INPUT_MODE_UNSPECIFIED = 0;
 export const INPUT_MODE_OFF = 1;
 export const INPUT_MODE_KEYBOARD = 2;
+
+// Phase
+export const PHASE_UNSPECIFIED = 0;
+export const PHASE_HARDWARE = 1;
+export const PHASE_PAYLOADS = 2;
+export const PHASE_INSTANCE_STARTING = 3;
+export const PHASE_INSTANCE_RUNNING = 4;
+export const PHASE_INSTANCE_STOPPING = 8;
+export const PHASE_IDLE = 5;
+export const PHASE_FAULT = 6;
+export const PHASE_DEGRADED = 7;
 
 // Stage
 export const STAGE_UNSPECIFIED = 0;

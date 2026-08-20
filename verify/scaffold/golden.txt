@@ -34,6 +34,7 @@ hosts/web/tsconfig.json                               349  4e3a1a73137f089b
 hosts/web/vite.config.ts                             1232  718e2942281fdbec
 proto/buf.gen.yaml                                   1316  92fd327e7f64efbf
 proto/buf.yaml                                        363  1c9951bd88411837
-proto/devalbo/options/v1/README.md                    760  b3b9831cae334777
-proto/devalbo/options/v1/options.proto               6895  68a16ba87c2786ce
+proto/devalbo/dlc/std/v1/status.proto                5655  58526a891f396667
+proto/devalbo/options/v1/README.md                   1027  5648fb3456992968
+proto/devalbo/options/v1/options.proto               8145  69f80888602b1a6c
 proto/golden_app/v1/commands.proto                    964  3a7685fd539969ca

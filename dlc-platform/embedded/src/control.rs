@@ -51,6 +51,7 @@ pub use crate::limits::MAGIC;
 // layouts, input modes, outlets and a tier — and one of them was wrong for a
 // day. See `proto_enums`.
 pub use crate::proto_enums::*;
+pub use crate::proto_enums::{dlc_std, platform};
 pub use crate::proto_enums::manifest::{
     STATUS_OUTLET_COLOR, STATUS_OUTLET_NONE, TEXT_OUTLET_DISPLAY, TEXT_OUTLET_NONE,
     TEXT_OUTLET_TERMINAL, TEXT_OUTLET_UART,
@@ -85,6 +86,197 @@ pub const STATUS_TOPIC: &str = "ilc.status";
 /// proto waiting forever for a notice nobody here can send.
 pub const NOTICES_SUPPORTED: u32 = (1 << NOTICE_LOG) | (1 << NOTICE_HEARTBEAT);
 
+
+/// THE ORDER A WORLD'S LIFE ACTUALLY TAKES — the legal `Phase` transitions.
+///
+/// # Why this is a table and not a comment
+///
+/// Because the phase was being SET, not ENTERED: whatever a caller passed became
+/// the current phase, so any order at all was representable and the real sequence
+/// held only because four calls happened to sit in the right places. That is an
+/// invariant enforced by nothing, and this project has already paid for one of
+/// those — `instance_open(false)` living on one branch of the five paths that
+/// reach the stop, which cost three wrong answers in a row.
+///
+/// # NOTHING HERE TERMINATES, and that is the point
+///
+/// There used to be a `RESTING` phase that nothing followed, reached by a
+/// function that never returned. It conflated two different things: "cannot make
+/// progress on the app flow" and "stop executing". The second does not follow
+/// from the first — a badge with no usable heap can still answer questions, show
+/// a menu, take a payload over USB and be rebooted, and the heap failure is the
+/// one you most want to interrogate. Halting removed every way of doing that at
+/// exactly the wrong moment.
+///
+/// So every state has an exit. The three that are not part of the forward march
+/// are still states rather than endings:
+///
+/// | | what is true | what to do about it |
+/// | --- | --- | --- |
+/// | `IDLE` | nothing to run | supply a payload |
+/// | `DEGRADED` | cannot host any session | look at the hardware |
+/// | `FAULT` | its own bookkeeping disagrees | firmware bug; capture the log |
+///
+/// They are kept apart by ONE test, which is the test any future state has to
+/// pass: the right next action differs. Collapsing them would make a firmware
+/// bug look like an empty badge.
+///
+/// # Why it is HERE rather than in the badge firmware
+///
+/// It names no peripheral (D6a). "Bring the hardware up, see what is installed,
+/// open a session, run it" is the shape of a WORLD's life, not of a board — a
+/// browser world has the same phases over a different transport. It is also the
+/// only arrangement where the table is TESTED: CI cross-compiles the firmware and
+/// cannot execute it, so a rule written beside the badge is a rule nothing
+/// exercises.
+pub fn phase_may_follow(from: u32, to: u32) -> bool {
+    // A PHASE NEVER FOLLOWS ITSELF. Re-entering one means a step ran twice, and
+    // the loops that do repeat — turns within `RUN` — happen INSIDE a phase
+    // rather than by transitioning back into it.
+    if from == to {
+        return false;
+    }
+    // ANYTHING MAY DISCOVER IT IS LOST. A world that cannot trust its own state
+    // has to be able to say so from wherever it was when it found out.
+    if to == PHASE_FAULT {
+        return true;
+    }
+    matches!(
+        (from, to),
+        (PHASE_UNSPECIFIED, PHASE_HARDWARE)
+            | (PHASE_HARDWARE, PHASE_PAYLOADS)
+            // The heap did not come up; nothing will instantiate.
+            | (PHASE_HARDWARE, PHASE_DEGRADED)
+            | (PHASE_PAYLOADS, PHASE_INSTANCE_STARTING)
+            // Nothing installed. Not a failure — it is what a loader is for.
+            | (PHASE_PAYLOADS, PHASE_IDLE)
+            // A payload arrived over USB, or a client chose one.
+            | (PHASE_IDLE, PHASE_INSTANCE_STARTING)
+            | (PHASE_INSTANCE_STARTING, PHASE_INSTANCE_RUNNING)
+            // This payload cannot run: corrupt, wrong engine, refused manifest.
+            // Back to waiting rather than stopping — the remedy is another
+            // payload, and the menu that offers one is still there.
+            //
+            // STRAIGHT TO IDLE, NOT THROUGH STOPPING, because there is nothing to
+            // stop: the instance never came up, so there is no memory to account
+            // for and nothing to tear down.
+            | (PHASE_INSTANCE_STARTING, PHASE_IDLE)
+            // Instantiation failed for a reason no payload can fix.
+            | (PHASE_INSTANCE_STARTING, PHASE_DEGRADED)
+            // A person left the session, or the app loop ended.
+            | (PHASE_INSTANCE_RUNNING, PHASE_INSTANCE_STOPPING)
+            // AND THE WAY BACK RUNS THROUGH THE TEARDOWN. This used to be a
+            // single edge from running to starting, which said an instance was
+            // replaced without saying the old one went — so a leak had no phase
+            // to be visible in.
+            | (PHASE_INSTANCE_STOPPING, PHASE_INSTANCE_STARTING)
+            | (PHASE_INSTANCE_STOPPING, PHASE_IDLE)
+            // Almost certainly fails again, and that is the operator's call.
+            | (PHASE_DEGRADED, PHASE_INSTANCE_STARTING)
+            // RECOVERING FROM CONFUSION GOES TO THE STATE IT CAN VOUCH FOR:
+            // nothing instantiated, nothing running, waiting. Straight back into
+            // the march would be the world asserting a position it just admitted
+            // it had lost.
+            | (PHASE_FAULT, PHASE_IDLE)
+    )
+}
+
+/// Whether this world can serve `verb` while it is in `phase`, and if not, why.
+///
+/// # Why an EXTERNAL request is refused where an internal one is not
+///
+/// `phase_may_follow` records a bad transition and lets it happen, because the
+/// caller there is this firmware and stranding it in the phase it was leaving
+/// turns a wrong label into a hang. Nothing outside gets that latitude: a client
+/// asking for something the world cannot currently do is a question with a
+/// correct answer, and the answer is "no, because —".
+///
+/// **Accepting it instead is not a smaller failure, it is a worse one.** That is
+/// not hypothetical: a request arrived at a world with no session, was taken into
+/// a slot nobody would ever empty, and every later request was told "a request is
+/// already running". Three wrong answers, all downstream of one accept that
+/// should have been a refusal.
+///
+/// # What is never gated
+///
+/// The reads. `GET_WORLD_STATE` above all: it is the question you ask when the
+/// world is in a state you do not understand, so gating it on the state would
+/// make it useless exactly when it is needed. `REBOOT` is the other one — it is
+/// the escape hatch, and an escape hatch that only works when things are fine is
+/// not one.
+pub fn verb_allowed(verb: u32, phase: u32) -> Result<(), &'static str> {
+    match verb {
+        // ALWAYS. Asking what is going on, seeing the panel, listing what is
+        // installed, subscribing to notices, and leaving. None of these depend on
+        // how far the world has got, and every one of them is most useful when
+        // the answer to that is "not far".
+        VERB_GET_WORLD_STATE | VERB_GET_SCREEN | VERB_LIST_PAYLOADS | VERB_SUBSCRIBE
+        | VERB_REBOOT => Ok(()),
+
+        // RUNNING AN APP NEEDS AN APP. A session exists only in `RUN`; before it
+        // there is no instance, and after `RESTING` there never will be again.
+        // THE PHASE IS THE COARSE GUARD, NOT THE PRECISE ONE. An instance exists
+        // from partway through `SESSION` — instantiation happens there, and the
+        // manifest is sent to it before `RUN` is entered — so a phase check that
+        // demanded `RUN` would refuse a request the world could serve, naming a
+        // reason ("no app is instantiated yet") that was not even true.
+        //
+        // So this rules out the phases where an instance CANNOT exist, and
+        // `instance_is_open` stays the authority on whether one does. Two guards,
+        // neither redundant: this one knows about time, that one knows about the
+        // instance.
+        // THE PHASE IS THE COARSE GUARD, NOT THE PRECISE ONE. An instance exists
+        // from partway through `SESSION` — instantiation happens there, and the
+        // manifest is sent to it before `RUN` is entered — so a phase check that
+        // demanded `RUN` would refuse a request the world could serve, naming a
+        // reason ("no app is instantiated yet") that was not even true.
+        //
+        // So this rules out the phases where an instance CANNOT exist, and
+        // `instance_is_open` stays the authority on whether one does. Two guards,
+        // neither redundant: this one knows about time, that one knows about the
+        // instance.
+        VERB_EXECUTE => match phase {
+            PHASE_INSTANCE_STARTING | PHASE_INSTANCE_RUNNING => Ok(()),
+            // THE INSTANCE IS ON ITS WAY OUT. Accepting here would queue a
+            // request against something that is being dropped.
+            PHASE_INSTANCE_STOPPING => Err("the app is shutting down; wait for the next one"),
+            // NOT "the world has stopped", which is what these used to say and
+            // is no longer true of any of them: the world is up and waiting. The
+            // reason names what is missing and what would supply it.
+            PHASE_IDLE => Err("nothing is instantiated; choose a payload first"),
+            PHASE_DEGRADED => Err("this world cannot host an instance; check the heap"),
+            PHASE_FAULT => Err("the world cannot say what state it is in; reset it"),
+            _ => Err("the world is still starting; no app is instantiated yet"),
+        },
+
+        // A BUTTON NEEDS SOMETHING READING IT. The menu lives in `SESSION`, the
+        // widgets in `RUN` — and `IDLE` reads them too, which is how a person
+        // LEAVES idle. Refusing there would make the state unescapable from the
+        // outside, which is the whole fault this rework exists to remove.
+        VERB_PRESS_BUTTON => match phase {
+            PHASE_INSTANCE_STARTING | PHASE_INSTANCE_RUNNING | PHASE_INSTANCE_STOPPING
+            | PHASE_IDLE | PHASE_DEGRADED => Ok(()),
+            PHASE_FAULT => Err("the world cannot say what state it is in; reset it"),
+            _ => Err("the world is still starting; nothing is reading its buttons yet"),
+        },
+
+        // CHOOSING IS HOW A WORLD LEAVES `IDLE`, so it is allowed there above
+        // all. During a run it takes effect at the next menu. It is not legal
+        // before the catalog has been read, because there is nothing yet to
+        // choose between.
+        VERB_SELECT_PAYLOAD => match phase {
+            PHASE_INSTANCE_STARTING | PHASE_INSTANCE_RUNNING | PHASE_INSTANCE_STOPPING
+            | PHASE_IDLE | PHASE_DEGRADED => Ok(()),
+            PHASE_FAULT => Err("the world cannot say what state it is in; reset it"),
+            _ => Err("the payload catalog has not been read yet"),
+        },
+
+        // AN UNKNOWN VERB IS NOT A PHASE PROBLEM. It is answered as one further
+        // in, where the refusal can name the verb — saying "wrong phase" here
+        // would send a caller looking in the wrong place entirely.
+        _ => Ok(()),
+    }
+}
 
 /// A decoded request: a verb and its opaque argument.
 #[derive(Debug, PartialEq, Eq)]
@@ -272,17 +464,18 @@ pub fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
 /// a terminal would have shown, which is why `text` is carried verbatim rather
 /// than being reconstructed from the structured fields.
 pub fn log_line(uptime_ms: u64, stage: &str, level: u32, text: &str) -> Vec<u8> {
+    use crate::proto_enums::fields as f;
     let mut out = Vec::new();
     if uptime_ms != 0 {
-        tag(&mut out, 1, 0);
+        tag(&mut out, f::F_LOG_LINE_UPTIME_MS, 0);
         put_varint(&mut out, uptime_ms);
     }
-    put_string(&mut out, 2, stage);
+    put_string(&mut out, f::F_LOG_LINE_STAGE, stage);
     if level != 0 {
-        tag(&mut out, 3, 0);
+        tag(&mut out, f::F_LOG_LINE_LEVEL, 0);
         put_varint(&mut out, level as u64);
     }
-    put_string(&mut out, 4, text);
+    put_string(&mut out, f::F_LOG_LINE_TEXT, text);
     out
 }
 
@@ -368,15 +561,16 @@ pub struct ExecuteResponse<'a> {
 
 impl ExecuteResponse<'_> {
     pub fn encode(&self) -> Vec<u8> {
+        use crate::proto_enums::fields as f;
         let mut out = Vec::new();
-        put_varint_field(&mut out, 4, self.method as u64);
-        put_varint_field(&mut out, 1, self.success as u64);
+        put_varint_field(&mut out, f::F_EXECUTE_RESPONSE_METHOD_ID, self.method as u64);
+        put_varint_field(&mut out, f::F_EXECUTE_RESPONSE_SUCCESS, self.success as u64);
         if !self.output.is_empty() {
-            tag(&mut out, 2, 2);
+            tag(&mut out, f::F_EXECUTE_RESPONSE_OUTPUT, 2);
             put_varint(&mut out, self.output.len() as u64);
             out.extend_from_slice(self.output);
         }
-        put_string(&mut out, 3, self.error);
+        put_string(&mut out, f::F_EXECUTE_RESPONSE_ERROR, self.error);
         out
     }
 }
@@ -466,6 +660,7 @@ pub struct Subscription {
 
 impl Subscription {
     pub fn encode(&self) -> Vec<u8> {
+        use crate::proto_enums::fields as f;
         let mut values = Vec::new();
         for notice in 0..32u32 {
             if self.notices & (1 << notice) != 0 {
@@ -477,12 +672,12 @@ impl Subscription {
         // like any other and a generated client decodes it without a special
         // case.
         if !values.is_empty() {
-            tag(&mut out, 1, 2);
+            tag(&mut out, f::F_SUBSCRIPTION_NOTICES, 2);
             put_varint(&mut out, values.len() as u64);
             out.extend_from_slice(&values);
         }
         // THE GRANTED RATE, which may not be the one asked for.
-        put_varint_field(&mut out, 2, self.heartbeat_ms as u64);
+        put_varint_field(&mut out, f::F_SUBSCRIPTION_HEARTBEAT_MS, self.heartbeat_ms as u64);
         out
     }
 }
@@ -791,7 +986,15 @@ pub struct WorldState<'a> {
     /// Pass-through bookkeeping — see `WorldState` in control.proto.
     pub requests_offered: u32,
     pub requests_taken: u32,
-    pub session_open: bool,
+    pub instance_open: bool,
+    /// How far the world has got — see `Phase` in control.proto.
+    pub phase: u32,
+    /// The stage within that phase, or `STAGE_UNSPECIFIED` between stages.
+    pub stage: u32,
+    /// Impossible phase transitions taken. Zero on a healthy world.
+    pub phase_faults: u32,
+    /// How the last thing went — see `Verdict` in control.proto.
+    pub verdict: u32,
 }
 
 impl WorldState<'_> {
@@ -801,19 +1004,24 @@ impl WorldState<'_> {
         // Field numbers 1, 2 and 4 are RESERVED — they carried the string world,
         // the string tier and the config map. Reusing them would make an older
         // client decode a number as the text it used to be.
-        put_varint_field(&mut out, 9, self.world as u64);
-        put_varint_field(&mut out, 10, self.tier as u64);
-        put_string(&mut out, 3, self.version);
-        put_varint_field(&mut out, 11, self.screen as u64);
-        put_varint_field(&mut out, 12, self.input as u64);
-        put_varint_field(&mut out, 13, self.text as u64);
-        put_varint_field(&mut out, 5, self.activity as u64);
-        put_string(&mut out, 6, self.app);
-        put_string(&mut out, 8, self.app_activity);
-        put_varint_field(&mut out, 7, self.uptime_ms);
-        put_varint_field(&mut out, 14, self.requests_offered as u64);
-        put_varint_field(&mut out, 15, self.requests_taken as u64);
-        put_varint_field(&mut out, 16, self.session_open as u64);
+        use crate::proto_enums::fields as f;
+        put_varint_field(&mut out, f::F_WORLD_STATE_WORLD, self.world as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_TIER, self.tier as u64);
+        put_string(&mut out, f::F_WORLD_STATE_VERSION, self.version);
+        put_varint_field(&mut out, f::F_WORLD_STATE_SCREEN, self.screen as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_INPUT, self.input as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_TEXT, self.text as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_ACTIVITY, self.activity as u64);
+        put_string(&mut out, f::F_WORLD_STATE_APP, self.app);
+        put_string(&mut out, f::F_WORLD_STATE_APP_ACTIVITY, self.app_activity);
+        put_varint_field(&mut out, f::F_WORLD_STATE_UPTIME_MS, self.uptime_ms);
+        put_varint_field(&mut out, f::F_WORLD_STATE_REQUESTS_OFFERED, self.requests_offered as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_REQUESTS_TAKEN, self.requests_taken as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_INSTANCE_OPEN, self.instance_open as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_PHASE, self.phase as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_STAGE, self.stage as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_PHASE_FAULTS, self.phase_faults as u64);
+        put_varint_field(&mut out, f::F_WORLD_STATE_VERDICT, self.verdict as u64);
         out
     }
 }
@@ -844,18 +1052,19 @@ pub struct Response<'a> {
 
 impl Response<'_> {
     pub fn encode(&self) -> Vec<u8> {
+        use crate::proto_enums::fields as f;
         let mut out = Vec::new();
         if self.ok {
-            tag(&mut out, 1, 0);
+            tag(&mut out, f::F_CONTROL_RESPONSE_OK, 0);
             put_varint(&mut out, 1);
         }
-        put_string(&mut out, 2, self.error);
+        put_string(&mut out, f::F_CONTROL_RESPONSE_ERROR, self.error);
         if !self.payload.is_empty() {
-            tag(&mut out, 3, 2);
+            tag(&mut out, f::F_CONTROL_RESPONSE_PAYLOAD, 2);
             put_varint(&mut out, self.payload.len() as u64);
             out.extend_from_slice(self.payload);
         }
-        put_varint_field(&mut out, 4, self.id);
+        put_varint_field(&mut out, f::F_CONTROL_RESPONSE_REQUEST_ID, self.id);
         out
     }
 
@@ -1001,7 +1210,262 @@ mod tests {
         }
     }
 
-    /// The answer round-trips through the frame it will be sent in.
+
+
+    /// The reads answer in every phase, including the ones nobody planned for.
+    /// THE POINT OF THE WHOLE CHANNEL: a world in a state you do not understand
+    /// is exactly the world you need to be able to question.
+    #[test]
+    fn asking_what_is_going_on_is_never_refused() {
+        for phase in [
+            PHASE_UNSPECIFIED,
+            PHASE_HARDWARE,
+            PHASE_PAYLOADS,
+            PHASE_INSTANCE_STARTING,
+            PHASE_INSTANCE_RUNNING,
+            PHASE_IDLE,
+            PHASE_DEGRADED,
+            PHASE_FAULT,
+        ] {
+            for verb in [
+                VERB_GET_WORLD_STATE,
+                VERB_GET_SCREEN,
+                VERB_LIST_PAYLOADS,
+                VERB_SUBSCRIBE,
+                VERB_REBOOT,
+            ] {
+                assert!(
+                    verb_allowed(verb, phase).is_ok(),
+                    "verb {verb} should be answerable in phase {phase}"
+                );
+            }
+        }
+    }
+
+    /// Running an app before there is one is refused, and the refusal says which
+    /// of the two reasons it is — still starting, or stopped for good.
+    #[test]
+    fn executing_without_a_session_is_refused_with_a_reason() {
+        assert!(verb_allowed(VERB_EXECUTE, PHASE_INSTANCE_RUNNING).is_ok());
+
+        let early = verb_allowed(VERB_EXECUTE, PHASE_HARDWARE).unwrap_err();
+        assert!(early.contains("starting"), "{early}");
+
+        // NOT "stopped" — the world is up and waiting, and the reason says what
+        // is missing rather than declaring the badge over.
+        let idle = verb_allowed(VERB_EXECUTE, PHASE_IDLE).unwrap_err();
+        assert!(idle.contains("choose a payload"), "{idle}");
+    }
+
+    /// AN INSTANCE EXISTS BEFORE `RUN` DOES, so the phase gate must not claim
+    /// otherwise.
+    ///
+    /// Instantiation happens inside `SESSION` and the manifest is sent to the
+    /// guest before `RUN` is entered. A gate demanding `RUN` would refuse a
+    /// request this world could serve, with a reason ("no app is instantiated
+    /// yet") that was false at the moment it was given — the worst kind, because
+    /// it sends someone to look at the wrong thing entirely.
+    #[test]
+    fn a_session_being_opened_may_already_run_a_request() {
+        assert!(verb_allowed(VERB_EXECUTE, PHASE_INSTANCE_STARTING).is_ok());
+    }
+
+    /// A press needs something reading the buttons.
+    #[test]
+    fn a_press_needs_a_reader() {
+        assert!(verb_allowed(VERB_PRESS_BUTTON, PHASE_INSTANCE_STARTING).is_ok());
+        assert!(verb_allowed(VERB_PRESS_BUTTON, PHASE_INSTANCE_RUNNING).is_ok());
+        assert!(verb_allowed(VERB_PRESS_BUTTON, PHASE_HARDWARE).is_err());
+        // IDLE READS ITS BUTTONS, because that is how a person leaves it.
+        // Refusing here would make the state unescapable from the outside.
+        assert!(verb_allowed(VERB_PRESS_BUTTON, PHASE_IDLE).is_ok());
+    }
+
+    /// Choosing during a run is LEGAL — it takes effect at the next menu, which
+    /// is the whole reason a session can end and another begin.
+    #[test]
+    fn choosing_during_a_run_is_allowed() {
+        assert!(verb_allowed(VERB_SELECT_PAYLOAD, PHASE_INSTANCE_RUNNING).is_ok());
+        assert!(verb_allowed(VERB_SELECT_PAYLOAD, PHASE_INSTANCE_STARTING).is_ok());
+        // But not before there is anything to choose between.
+        assert!(verb_allowed(VERB_SELECT_PAYLOAD, PHASE_PAYLOADS).is_err());
+        // AND CHOOSING IS THE WAY OUT OF IDLE, so it must be allowed there.
+        assert!(verb_allowed(VERB_SELECT_PAYLOAD, PHASE_IDLE).is_ok());
+    }
+
+    /// Every refusal carries a sentence, and it fits the stack-built frame that
+    /// has to carry it before the heap exists.
+    #[test]
+    fn every_refusal_explains_itself_and_fits() {
+        for phase in [PHASE_UNSPECIFIED, PHASE_HARDWARE, PHASE_PAYLOADS, PHASE_IDLE, PHASE_DEGRADED, PHASE_FAULT] {
+            for verb in [VERB_EXECUTE, VERB_PRESS_BUTTON, VERB_SELECT_PAYLOAD] {
+                if let Err(why) = verb_allowed(verb, phase) {
+                    assert!(!why.is_empty(), "verb {verb} in phase {phase} refused with no reason");
+                    assert!(
+                        why.len() <= crate::limits::MAX_REFUSAL_TEXT,
+                        "reason for verb {verb} in phase {phase} is {} bytes, over MAX_REFUSAL_TEXT",
+                        why.len()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The happy path, end to end, as a world actually walks it.
+    #[test]
+    fn a_world_walks_its_own_sequence() {
+        let life = [
+            PHASE_UNSPECIFIED,
+            PHASE_HARDWARE,
+            PHASE_PAYLOADS,
+            PHASE_INSTANCE_STARTING,
+            PHASE_INSTANCE_RUNNING,
+        ];
+        for pair in life.windows(2) {
+            assert!(
+                phase_may_follow(pair[0], pair[1]),
+                "{} -> {} should be legal",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// One instance ends and another begins — the badge going back to the menu
+    /// for a different app, without a power cycle.
+    ///
+    /// THE EDGE THAT LOOKS WRONG AND IS NOT, so it is asserted rather than left
+    /// to be rediscovered and "fixed". It runs THROUGH the teardown: a direct
+    /// running-to-starting edge would say an instance was replaced without
+    /// saying the old one went, which is where 2.9 MB goes missing.
+    #[test]
+    fn an_instance_is_replaced_by_way_of_the_teardown() {
+        assert!(phase_may_follow(PHASE_INSTANCE_RUNNING, PHASE_INSTANCE_STOPPING));
+        assert!(phase_may_follow(PHASE_INSTANCE_STOPPING, PHASE_INSTANCE_STARTING));
+        // NOT DIRECTLY. Skipping the teardown is the thing being prevented.
+        assert!(!phase_may_follow(PHASE_INSTANCE_RUNNING, PHASE_INSTANCE_STARTING));
+    }
+
+    /// An instance that never came up has nothing to tear down, so it goes
+    /// straight to waiting — there is no memory to account for.
+    #[test]
+    fn a_failed_start_does_not_go_through_the_teardown() {
+        assert!(phase_may_follow(PHASE_INSTANCE_STARTING, PHASE_IDLE));
+        assert!(!phase_may_follow(PHASE_INSTANCE_STARTING, PHASE_INSTANCE_STOPPING));
+    }
+
+    /// The skips a mis-ordered refactor would produce.
+    #[test]
+    fn a_phase_may_not_be_skipped() {
+        assert!(!phase_may_follow(PHASE_HARDWARE, PHASE_INSTANCE_STARTING));
+        assert!(!phase_may_follow(PHASE_HARDWARE, PHASE_INSTANCE_RUNNING));
+        assert!(!phase_may_follow(PHASE_PAYLOADS, PHASE_INSTANCE_RUNNING));
+        // And going backwards, which is what re-running a phase would look like.
+        assert!(!phase_may_follow(PHASE_INSTANCE_STARTING, PHASE_PAYLOADS));
+        assert!(!phase_may_follow(PHASE_PAYLOADS, PHASE_HARDWARE));
+    }
+
+    /// A PHASE NEVER FOLLOWS ITSELF: entering one twice means a step ran twice.
+    ///
+    /// The loops that genuinely repeat — turns inside `RUN`, and the wait inside
+    /// `IDLE` — happen WITHIN a phase rather than by transitioning back into it,
+    /// which is what keeps "the world moved" and "the world went round again"
+    /// distinguishable.
+    #[test]
+    fn a_phase_does_not_follow_itself() {
+        for phase in [
+            PHASE_HARDWARE,
+            PHASE_PAYLOADS,
+            PHASE_INSTANCE_STARTING,
+            PHASE_INSTANCE_RUNNING,
+            PHASE_INSTANCE_STOPPING,
+            PHASE_IDLE,
+            PHASE_DEGRADED,
+            PHASE_FAULT,
+        ] {
+            assert!(!phase_may_follow(phase, phase), "{phase} -> itself should be refused");
+        }
+    }
+
+    /// EVERY STATE HAS A WAY OUT. The property the old design broke.
+    ///
+    /// `rest()` never returned, so a badge with an empty catalog or a payload
+    /// that would not instantiate stopped executing — and stopped answering,
+    /// which removed the control channel at exactly the moment it was wanted.
+    /// This asserts that no phase is a dead end, rather than trusting the table
+    /// to be read carefully.
+    #[test]
+    fn no_phase_is_a_dead_end() {
+        let all = [
+            PHASE_HARDWARE,
+            PHASE_PAYLOADS,
+            PHASE_INSTANCE_STARTING,
+            PHASE_INSTANCE_RUNNING,
+            PHASE_INSTANCE_STOPPING,
+            PHASE_IDLE,
+            PHASE_DEGRADED,
+            PHASE_FAULT,
+        ];
+        for from in all {
+            assert!(
+                all.iter().any(|to| phase_may_follow(from, *to)),
+                "phase {from} has no legal exit"
+            );
+        }
+    }
+
+    /// Getting lost is possible from anywhere: a world that cannot trust its own
+    /// state has to be able to say so wherever it was when it found out.
+    #[test]
+    fn any_phase_may_discover_it_is_lost() {
+        for from in [
+            PHASE_UNSPECIFIED,
+            PHASE_HARDWARE,
+            PHASE_PAYLOADS,
+            PHASE_INSTANCE_STARTING,
+            PHASE_INSTANCE_RUNNING,
+            PHASE_INSTANCE_STOPPING,
+            PHASE_IDLE,
+            PHASE_DEGRADED,
+        ] {
+            assert!(phase_may_follow(from, PHASE_FAULT), "{from} should be able to fault");
+        }
+    }
+
+    /// Recovery goes to the state the world can vouch for, not back into the
+    /// march. Re-entering `SESSION` straight from `FAULT` would be the world
+    /// asserting a position it has just admitted it lost.
+    #[test]
+    fn recovery_goes_somewhere_it_can_vouch_for() {
+        assert!(phase_may_follow(PHASE_FAULT, PHASE_IDLE));
+        assert!(!phase_may_follow(PHASE_FAULT, PHASE_INSTANCE_STARTING));
+        assert!(!phase_may_follow(PHASE_FAULT, PHASE_INSTANCE_RUNNING));
+        assert!(!phase_may_follow(PHASE_FAULT, PHASE_HARDWARE));
+    }
+
+    /// Waiting is not failing, and both can be left.
+    #[test]
+    fn idle_is_a_wait_and_not_an_ending() {
+        // Reached when there is nothing installed, and when the chosen payload
+        // turned out not to run.
+        assert!(phase_may_follow(PHASE_PAYLOADS, PHASE_IDLE));
+        assert!(phase_may_follow(PHASE_INSTANCE_STARTING, PHASE_IDLE));
+        // From a running instance the way back is through the teardown.
+        assert!(phase_may_follow(PHASE_INSTANCE_STOPPING, PHASE_IDLE));
+        // And left the moment something can run.
+        assert!(phase_may_follow(PHASE_IDLE, PHASE_INSTANCE_STARTING));
+    }
+
+    /// A world that cannot host a session is still a world: it answers, and it
+    /// may be told to try anyway.
+    #[test]
+    fn degraded_may_still_be_asked_to_try() {
+        assert!(phase_may_follow(PHASE_HARDWARE, PHASE_DEGRADED));
+        assert!(phase_may_follow(PHASE_INSTANCE_STARTING, PHASE_DEGRADED));
+        assert!(phase_may_follow(PHASE_DEGRADED, PHASE_INSTANCE_STARTING));
+    }
+
+    /// The answer round-trips through the frame it will be sent in.    /// The answer round-trips through the frame it will be sent in.
     #[test]
     fn a_world_state_encodes_and_frames() {
         let state = WorldState {
@@ -1017,7 +1481,11 @@ mod tests {
             uptime_ms: 1234,
             requests_offered: 0,
             requests_taken: 0,
-            session_open: false,
+            instance_open: false,
+            phase: PHASE_INSTANCE_RUNNING,
+            stage: STAGE_EXECUTE,
+            phase_faults: 0,
+            verdict: VERDICT_OK,
         };
         let payload = Response { id: 0, ok: true, error: "", payload: &state.encode() }.encode();
         let framed = frame(KIND_RESPONSE, &payload);

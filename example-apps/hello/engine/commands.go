@@ -286,16 +286,27 @@ func handleLight(req *hellov1.LightRequest) (*hellov1.LightResponse, error) {
 	// SLOT 1 IS THE LONG-LIVED VALUE — "how is it going" — as opposed to slot 2,
 	// which apps twiddle to show motion. A colour somebody set deliberately
 	// belongs in the one that persists.
+	// NAMED, NOT NUMBERED — and one of these numbers was wrong.
+	//
+	// This was a literal per case, transcribed from what the badge happened to
+	// decode. `COLOUR_OFF` was sent as 0, which the badge reads as IDLE and
+	// renders BLUE: asking for the light to go out turned it blue instead.
+	// Nothing caught it, because 0 is a legal status and the command still
+	// reported success.
+	//
+	// The app keeps its own `Colour` because that is its CLI vocabulary —
+	// `light green` reads better than `light ok` — but the mapping onto the
+	// platform's meaning now goes through names that cannot drift.
 	var status byte
 	switch req.Colour {
 	case hellov1.Colour_COLOUR_AMBER:
-		status = 2
+		status = platform.StatusLevelWarning
 	case hellov1.Colour_COLOUR_RED:
-		status = 3
+		status = platform.StatusLevelError
 	case hellov1.Colour_COLOUR_OFF:
-		status = 0
+		status = platform.StatusLevelOff
 	default:
-		status = 1
+		status = platform.StatusLevelOK
 	}
 	platform.SetStatus(status, 0, 0)
 

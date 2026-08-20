@@ -11,5 +11,9 @@ options the platform does not actually understand.
 It travels with the scaffold only because the platform is not published to a schema registry
 yet. When it is, delete this directory and add the registry dependency to `proto/buf.yaml`.
 
-Upstream keeps the copy honest: `make sync-template-proto` refreshes it, and a Go test fails
-if the two ever differ.
+Upstream keeps the copy honest: `make sync-std-proto` refreshes it, `make verify-std-proto`
+fails when a copy has drifted, and a Go test asserts the same thing.
+
+`options.proto` is one of the **DLC standard** protos — the set every app may import. The
+others live beside it under `proto/devalbo/`, and each carries its own provenance header
+naming its source and how to refresh it.

@@ -69,31 +69,47 @@ pub struct Flag {
 }
 
 /// Field numbers in `SpecFlag`. See `platform.proto`.
-const FLAG_NAME: u32 = 1;
-const FLAG_FIELD: u32 = 2;
-const FLAG_KIND: u32 = 3;
-const FLAG_SOURCE: u32 = 4;
-const FLAG_HELP: u32 = 5;
-const FLAG_DEFAULT: u32 = 7;
-const FLAG_POSITIONAL: u32 = 9;
-const FLAG_ENUM_VALUES: u32 = 10;
-const FLAG_ENUM_NUMBERS: u32 = 12;
+/// FIELD NUMBERS, GENERATED — not transcribed.
+///
+/// These were eleven hand-written numbers, and they are the riskiest set in this
+/// crate: this decoder reads a spec produced by an APP's .proto, in another
+/// language, from another build. A wrong enum value mislabels something; a wrong
+/// field NUMBER makes the world read one field as another — `help` as `name`,
+/// `positional` as `default` — and then collect the wrong input and hand the app
+/// a request it will happily accept.
+///
+/// Nothing downstream can catch that. The frame checksums, the varints decode,
+/// and the app takes a proto default for whatever went missing and reports
+/// success.
+use crate::proto_enums::platform::fields::{
+    F_GET_COMMAND_SPEC_RESPONSE_COMMANDS as RESPONSE_COMMANDS,
+    F_SPEC_COMMAND_FLAGS as COMMAND_FLAGS, F_SPEC_FLAG_DEFAULT_VALUE as FLAG_DEFAULT,
+    F_SPEC_FLAG_ENUM_NUMBERS as FLAG_ENUM_NUMBERS, F_SPEC_FLAG_ENUM_VALUES as FLAG_ENUM_VALUES,
+    F_SPEC_FLAG_FIELD as FLAG_FIELD, F_SPEC_FLAG_HELP as FLAG_HELP, F_SPEC_FLAG_KIND as FLAG_KIND,
+    F_SPEC_FLAG_NAME as FLAG_NAME, F_SPEC_FLAG_POSITIONAL as FLAG_POSITIONAL,
+    F_SPEC_FLAG_SOURCE as FLAG_SOURCE,
+};
 
-/// Field numbers in `SpecCommand` and the response.
-const COMMAND_FLAGS: u32 = 4;
-const RESPONSE_COMMANDS: u32 = 1;
-
-/// `SpecKind` values the world knows how to collect. See `platform.proto`.
-pub const KIND_STRING: u32 = 1;
-pub const KIND_BOOL: u32 = 2;
-pub const KIND_INT32: u32 = 3;
-pub const KIND_INT64: u32 = 4;
-pub const KIND_UINT32: u32 = 5;
-pub const KIND_UINT64: u32 = 6;
-/// A closed set of choices the APP declared — the one kind whose options come
-/// from the app rather than from the world's idea of a value.
-pub const KIND_ENUM: u32 = 7;
-pub const KIND_BYTES: u32 = 8;
+/// `SpecKind` — RE-EXPORTED, not retyped.
+///
+/// These were eight hand-written numbers with a comment pointing at
+/// platform.proto, which is the arrangement that already cost a day here:
+/// `TextOutlet` was transcribed in alphabetical rather than declared order, so a
+/// badge writing to its own screen told every client it was writing to a serial
+/// port. Nothing caught it — both values are legal, the frame checksummed, and
+/// the enum name printed cleanly at the far end.
+///
+/// THIS ONE CROSSES THREE BOUNDARIES, which is why it matters more than most:
+/// the number is chosen by an APP's .proto, encoded by the ENGINE into a command
+/// spec, and read by a WORLD deciding which widget to show. A world that
+/// disagreed about `7` would collect a string where a menu was meant, and the
+/// app would take a proto default and report success.
+pub use crate::proto_enums::platform::{
+    SPEC_KIND_BOOL as KIND_BOOL, SPEC_KIND_BYTES as KIND_BYTES, SPEC_KIND_ENUM as KIND_ENUM,
+    SPEC_KIND_INT32 as KIND_INT32, SPEC_KIND_INT64 as KIND_INT64,
+    SPEC_KIND_STRING as KIND_STRING, SPEC_KIND_UINT32 as KIND_UINT32,
+    SPEC_KIND_UINT64 as KIND_UINT64,
+};
 
 /// Whether this kind is a whole number, and so wants the spinner.
 pub fn is_integer(kind: u32) -> bool {

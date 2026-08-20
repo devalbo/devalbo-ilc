@@ -274,18 +274,46 @@ func run(port string, wait time.Duration) error {
 	fmt.Printf("input     %s\n", state.GetInput())
 	fmt.Printf("text      %s\n", state.GetText())
 	fmt.Printf("activity  %s\n", state.GetActivity())
+	// HOW FAR IT HAS GOT, at both resolutions. Printed next to `activity`
+	// because they answer neighbouring questions: activity is what KIND of thing
+	// the world is doing, phase/stage is how far along it is.
+	//
+	// This is the pair worth having when a badge comes back from a reboot and
+	// says nothing useful — "hardware / psram" is a diagnosis, where silence and
+	// a coarse `STARTING` are the same non-answer the control channel exists to
+	// replace.
+	fmt.Printf("phase     %s", state.GetPhase())
+	if stage := state.GetStage(); stage != ilcv1.Stage_STAGE_UNSPECIFIED {
+		fmt.Printf(" / %s", stage)
+	}
+	// A TRANSITION THE WORLD SAYS IT CANNOT MAKE. Printed on the same line
+	// because it qualifies the phase above rather than standing alone — a phase
+	// reported by a world that has already taken an impossible edge is a phase
+	// worth doubting.
+	//
+	// Shown only when non-zero: a healthy world should not have to say so.
+	if faults := state.GetPhaseFaults(); faults > 0 {
+		fmt.Printf("  !! %d invalid transition(s)", faults)
+	}
+	fmt.Println()
 	// WHAT THE APP IS DOING, which the world's own activity cannot say: `RUNNING`
 	// covers a countdown on tick 3 and an import on file 400 alike.
 	if app := state.GetAppActivity(); app != "" {
 		fmt.Printf("app       %s\n", app)
 	}
+	// THE VERDICT, as a value. It has always existed as a colour on the panel and
+	// a word at the end of the log; both reach a person, and a client had to
+	// scrape prose to learn it.
+	if v := state.GetVerdict(); v != ilcv1.Verdict_VERDICT_UNSPECIFIED {
+		fmt.Printf("verdict   %s\n", v)
+	}
 	fmt.Printf("uptime    %d ms\n", state.GetUptimeMs())
 	// PASS-THROUGH BOOKKEEPING. Printed always, because the moment you want it
 	// is the moment a request went unanswered — and asking again with a flag is
 	// one round trip too late to see the state that caused it.
-	fmt.Printf("requests  %d offered, %d taken, session %s\n",
+	fmt.Printf("requests  %d offered, %d taken, instance %s\n",
 		state.GetRequestsOffered(), state.GetRequestsTaken(),
-		map[bool]string{true: "open", false: "closed"}[state.GetSessionOpen()])
+		map[bool]string{true: "open", false: "closed"}[state.GetInstanceOpen()])
 	return nil
 }
 
@@ -576,6 +604,17 @@ func subscribe(file *os.File, beatMs uint32, notices ...ilcv1.Notice) error {
 // are not `ControlResponse` at all. Reading one varint field is cheap and cannot
 // fail in a way that matters — an unreadable frame simply has no id, and is
 // treated as uncorrelated rather than rejected.
+// replyIDField is `ControlResponse.request_id`, GENERATED rather than transcribed.
+//
+// It was the literal `4`. Asking a descriptor at runtime would be better still,
+// but `protoc-gen-go-lite` omits reflection — deliberately, since the badge's
+// tooling and the wasm tiers cannot afford a reflection-based codec — so this
+// tool has the same problem the badge has and takes the same fix.
+//
+// A wrong number here makes every reply look uncorrelated, which reads as a
+// badge that is not answering at all.
+const replyIDField = ilcv1.F_CONTROL_RESPONSE_REQUEST_ID
+
 func replyID(payload []byte) uint64 {
 	for len(payload) > 0 {
 		tag, n := binary.Uvarint(payload)
@@ -591,7 +630,7 @@ func replyID(payload []byte) uint64 {
 				return 0
 			}
 			payload = payload[n:]
-			if field == 4 {
+			if field == replyIDField {
 				return value
 			}
 		case 2:

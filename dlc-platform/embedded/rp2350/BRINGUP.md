@@ -9,7 +9,7 @@ links, an engine is created, a component instantiates and executes through this 
 asks, in order: does the board boot, does PSRAM come up, does the firmware find a payload, and does Wasmtime
 run it here as it does there.
 
-## One vocabulary, and it is three words
+## One vocabulary, and it is four words
 
 Bring-up talk is full of numbers, and this document had three competing ones — which meant "step 2 failed"
 could name the paragraph you were reading, the check the badge was running, or a summary line. So:
@@ -17,10 +17,21 @@ could name the paragraph you were reading, the check the badge was running, or a
 | word | numbered | what it names |
 | --- | --- | --- |
 | **Step** | 0–5, the headings below | what **you** do: factory flash, build both files, flash both, watch, attach serial, bisect |
-| **stage** | 1–6, on the screen and in the log | what the **firmware** checks, in order — the numbering `report.rs` prints |
+| **phase** | not numbered — named | which part of its life the **world** is in: `hardware`, `payloads`, the three `instance` phases, `idle`, `degraded`, `fault` |
+| **stage** | 1–9, on the screen and in the log | what the **firmware** checks, in order — the numbering `report.rs` prints |
 | **verdict** | not numbered | the firmware's one-line summary: `OK`, `FAILED`, `IDLE` or `BROKEN` |
 
-"Stage 3 failed" therefore always means PSRAM, never "I am on the flashing paragraph".
+"Stage 3 failed" therefore always means the display, never "I am on the flashing paragraph".
+
+**A phase is a group of stages, so the two are not competing numbers.** Stages run 1–9 *continuously* across
+the phases rather than restarting inside each, precisely so a stage number keeps meaning one thing in the one
+place people say it out loud. The phases exist because "is this a new high-level step, or part of one that
+already exists?" had no answer while the bring-up was one flat list — and because a phase is reportable when a
+stage is not: it is published as the world enters it, so a badge that has not finished booting can still say
+`hardware, stage 4`.
+
+The sequence, what each phase can fail with, and what the badge says when it does:
+[`docs/WORLD-STARTUP.md`](../../../docs/WORLD-STARTUP.md).
 
 **There is no `step N: PASS` line, and there never was one on this firmware.** Earlier revisions of this
 document showed one — with two different numbers in two places, and a word the badge has never printed. The
@@ -158,7 +169,7 @@ OK  *4/4
 
 **Then the panel is replaced** — the app's own output over a band of the verdict colour (`console.rs`), so the
 badge answers "did it work" across a room and "what did it say" up close. What the app printed is not one of
-the stages; it arrives after all six.
+the stages; it arrives after all nine.
 
 **`*` means QEMU cannot model it**, and that is the whole point of the marking. Stages 5 and 6 are already
 green under `make qemu` at this pointer width through this same host — running them here asks the narrower
@@ -254,9 +265,11 @@ is the log's spelling of the screen's `*`.
 verdict: OK — hardware-only checks 4/4 (the rest are QEMU regressions)
 ```
 
-**One line per stage, and indented lines below it belong to the stage above.** `ILC_*` is what the guest will
-see through `wasi:cli/environment`, printed after stage 5 resolves — it appears on the failure path too, where
-it is evidence about what this world offered.
+**One line per stage, and indented lines below it belong to the stage above.** The `tier=…` line is what this
+world offers the guest, printed after the instantiate stage resolves — it appears on the failure path too,
+where it is evidence about what was on offer. (It used to name the `ILC_*` pairs handed over through
+`wasi:cli/environment`; those are gone, and what a world is now travels in the `WorldManifest` — see
+[`docs/WORLD-STARTUP.md`](../../../docs/WORLD-STARTUP.md).)
 
 **Stage 4 reporting `empty` after step 2 means the payload did not land.** The firmware is running and found
 no app: re-drag `build/badge-payload.uf2`, and if it still reads empty the payload went to the wrong address.
@@ -309,7 +322,7 @@ everything downstream still works, just with less heap than the board has.
 
 PSRAM came up and the allocator is on it, but Wasmtime refused. The stage prints the error, and the two
 expected ones read differently: *"compilation settings are not compatible"* means the payload came from a
-different compiler, while an allocation failure means the heap — and the stage says so explicitly if stage 3
+different compiler, while an allocation failure means the heap — and the stage says so explicitly if stage 4
 did not pass. This is otherwise the least expected failure, since QEMU does exactly this successfully.
 
 ---
@@ -344,7 +357,7 @@ backtrace instead of a silence.
 
 ## Step 5 — bisect a silent hang
 
-If the run stops inside stage 3, `psram::init` is the suspect, and it runs with **XIP disabled** — so a
+If the run stops inside stage 4, `psram::init` is the suspect, and it runs with **XIP disabled** — so a
 mistake there cannot print anything, by construction.
 
 **One flash separates the two explanations.** Comment out the `psram::init` match block in `src/main.rs`,
@@ -361,7 +374,7 @@ restore the SRAM fallback heap unconditionally, rebuild and reflash:
 Whatever happens, capture these — they are what makes a second opinion possible:
 
 - The **exact** serial output, including partial lines — and **the stage number** the last line belongs to.
-- The `kgd` / `eid` bytes if stage 3 failed.
+- The `kgd` / `eid` bytes if stage 4 failed.
 - The clock figure from stage 1.
 - Whether step 0's factory firmware ran correctly.
 
@@ -369,8 +382,8 @@ Whatever happens, capture these — they are what makes a second opinion possibl
 
 ## What "done" looks like
 
-**`verdict: OK — hardware-only checks 4/4`**, with stage 3 having reported `8 MiB`. The count is the part
-worth quoting: it says all four checks nothing but this board could answer did in fact pass.
+**`verdict: OK — hardware-only checks 6/6`**, with stage 4 having reported `8 MiB`. The count is the part
+worth quoting: it says all six checks nothing but this board could answer did in fact pass.
 
 That closes EMBEDDED-PLAN's definition-of-done item 1 except for the RAM headroom figure, and unblocks
 milestone 3 — tictactoe's 2.21 MB artifact and the filesystem it wants. The handover note at the foot of

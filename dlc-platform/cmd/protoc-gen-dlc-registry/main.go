@@ -179,6 +179,33 @@ func run() error {
 			}
 		}
 
+		// FIELD NUMBERS, for the same readers and a worse failure. A transcribed
+		// enum value mislabels a field; a transcribed field NUMBER puts the bytes
+		// somewhere else entirely. See `renderFieldsRust`.
+		if generate[file.GetName()] && lang == "go" && len(file.MessageType) > 0 {
+			if pkg, err := goPackageName(file); err == nil {
+				base := strings.TrimSuffix(file.GetName(), ".proto")
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".fields.pb.go"),
+					Content: proto.String(renderFieldsGo(file, pkg)),
+				})
+			}
+		}
+		if generate[file.GetName()] && (lang == "rust" || lang == "ts") && len(file.MessageType) > 0 {
+			base := strings.TrimSuffix(file.GetName(), ".proto")
+			if lang == "rust" {
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".fields.rs"),
+					Content: proto.String(renderFieldsRust(file)),
+				})
+			} else {
+				resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+					Name:    proto.String(base + ".fields.ts"),
+					Content: proto.String(renderFieldsTS(file)),
+				})
+			}
+		}
+
 		if enumsOnly {
 			continue
 		}

@@ -42,5 +42,11 @@ bindgen!({
         "wasi:io/streams.input-stream": wasmtime_wasi_io::streams::DynInputStream,
         "wasi:io/streams.output-stream": wasmtime_wasi_io::streams::DynOutputStream,
         "wasi:io/error.error": wasmtime_wasi_io::streams::Error,
+        // THE FILESYSTEM RESOURCES ARE OURS (D5). Left unmapped, bindgen invents
+        // its own opaque types and the host cannot store anything useful behind
+        // a descriptor — which is why the previous version could only refuse.
+        // Naming our types here is what lets `open_at` hand back a real handle.
+        "wasi:filesystem/types.descriptor": crate::ramfs::Node,
+        "wasi:filesystem/types.directory-entry-stream": crate::ramfs::DirStream,
     },
 });

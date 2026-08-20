@@ -16,6 +16,71 @@ import type { PartialFieldInfo } from "@aptre/protobuf-es-lite/field";
 export const protobufPackage = "devalbo.ilc.v1";
 
 /**
+ * THE WORLD'S OWN JUDGEMENT of how the last thing it did went.
+ *
+ * # Why this is on the wire at all
+ *
+ * It was not, and it is the oldest thing the badge says: a colour on the panel
+ * and a word at the end of the log. Both reach a PERSON. A client had to scrape
+ * `verdict: OK` out of log prose to learn it — which is exactly the "parse the
+ * text to find out what happened" that this whole channel exists to replace, and
+ * it is fragile in the usual way: the word is produced by `Status::name`, so
+ * renaming a state silently breaks every reader.
+ *
+ * # Why it is separate from `Activity` and `Phase`
+ *
+ * They answer *where* and *what is it doing*; this answers *how did it go*. A
+ * world can be `INSTANCE_RUNNING`, `ACTIVITY_RESTING` and `VERDICT_FAILED` all
+ * at once, and each of the three is the only one that can say its own thing.
+ *
+ * @generated from enum devalbo.ilc.v1.Verdict
+ */
+export enum Verdict {
+  /**
+   * @generated from enum value: VERDICT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Ran, and the command reported success.
+   *
+   * @generated from enum value: VERDICT_OK = 1;
+   */
+  OK = 1,
+
+  /**
+   * Ran, and the command reported failure. NOT a crash — an app-level error.
+   *
+   * @generated from enum value: VERDICT_FAILED = 2;
+   */
+  FAILED = 2,
+
+  /**
+   * Alive, with nothing to run. A badge waiting for a payload has done
+   * everything asked of it, which is why this is a verdict and not a failure.
+   *
+   * @generated from enum value: VERDICT_IDLE = 3;
+   */
+  IDLE = 3,
+
+  /**
+   * Could not get far enough to have an opinion: instantiation failed, or the
+   * board did not come up.
+   *
+   * @generated from enum value: VERDICT_BROKEN = 4;
+   */
+  BROKEN = 4,
+}
+
+export const Verdict_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Verdict", [
+  [0, "VERDICT_UNSPECIFIED"],
+  [1, "VERDICT_OK"],
+  [2, "VERDICT_FAILED"],
+  [3, "VERDICT_IDLE"],
+  [4, "VERDICT_BROKEN"],
+]);
+
+/**
  * Where a world is in its own sequence.
  *
  * Coarse deliberately. A caller wants to know whether to keep waiting, not to
@@ -149,7 +214,159 @@ export const InputMode_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Inp
 ]);
 
 /**
- * A stage of the bring-up.
+ * A high-level step of the world's own life, and the thing STAGES belong to.
+ *
+ * # Why two levels rather than one longer list
+ *
+ * The bring-up was nine stages in one flat sequence, run by a single ~1000-line
+ * function. Reading it, there was no way to answer the question that actually
+ * comes up — "is this a new high-level step, or part of one that already
+ * exists?" — because both looked identical: another entry in the same list.
+ *
+ * A phase is a step of the world's life that a person would name unprompted:
+ * bring the board up, find out what is installed, open a session on one of them,
+ * run it. Each owns a contiguous run of stages, and each is one call in the
+ * world's entry point — so the entry point IS the outline, and a new phase is a
+ * new line there rather than a stage appended to a list.
+ *
+ * # Why it is on the wire
+ *
+ * A phase is answerable when a stage is not. Stages come from a report that only
+ * exists once the log is up; the phase is a single value published as the world
+ * enters it, so a client can be told "hardware, stage 4" by a world that has not
+ * finished booting — which is exactly the world you need to ask.
+ *
+ * @generated from enum devalbo.ilc.v1.Phase
+ */
+export enum Phase {
+  /**
+   * @generated from enum value: PHASE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Clocks, the panel, PSRAM: everything that must be true before software runs.
+   *
+   * @generated from enum value: PHASE_HARDWARE = 1;
+   */
+  HARDWARE = 1,
+
+  /**
+   * What is installed, and which of it can run.
+   *
+   * @generated from enum value: PHASE_PAYLOADS = 2;
+   */
+  PAYLOADS = 2,
+
+  /**
+   * A DLC INSTANCE COMING UP: choosing a payload, verifying it, instantiating
+   * it, and telling it what this world is.
+   *
+   * "INSTANCE" RATHER THAN "SESSION", which this was called and which named two
+   * different-sized things. A session opened partway through this phase and
+   * lived through every turn of the next one, so the phase shared a word with a
+   * lifetime that outlasted it — and "is a session running?" had no single
+   * answer. The instance is the thing with a lifetime; these phases are what is
+   * happening to it.
+   *
+   * @generated from enum value: PHASE_INSTANCE_STARTING = 3;
+   */
+  INSTANCE_STARTING = 3,
+
+  /**
+   * A DLC INSTANCE IN USE: turns of collect, execute, show. The phase a working
+   * badge lives in.
+   *
+   * @generated from enum value: PHASE_INSTANCE_RUNNING = 4;
+   */
+  INSTANCE_RUNNING = 4,
+
+  /**
+   * A DLC INSTANCE GOING AWAY: dropping it and accounting for what it held.
+   *
+   * A PHASE BECAUSE THE TEARDOWN CAN BE THE PROBLEM. Dropping an instance
+   * releases 2.9 MB of an 8 MB heap, and a session that leaks even a few hundred
+   * KB hangs the badge two or three apps later — which looks like a hardware
+   * fault and is the worst thing here to debug. A badge stuck HERE is a
+   * different diagnosis from one stuck coming up, and the old edge from running
+   * straight back to starting could not express that the teardown happened at
+   * all.
+   *
+   * @generated from enum value: PHASE_INSTANCE_STOPPING = 8;
+   */
+  INSTANCE_STOPPING = 8,
+
+  /**
+   * Alive, nothing running, waiting for something to run.
+   *
+   * NOT AN ENDING, and it used to be one. `rest()` never returned: a badge with
+   * an empty catalog, or one whose payload would not instantiate, halted with a
+   * colour on the panel and served its log forever. That conflated two different
+   * things — "cannot make progress on the app flow" and "stop executing" — and
+   * the second does not follow from the first. A badge with no usable heap can
+   * still answer questions, show a menu, take a payload over USB and be
+   * rebooted; halting removed all of that at exactly the moment somebody needed
+   * it, since the PSRAM failure is the one you most want to interrogate.
+   *
+   * So this waits rather than stops, and every way in has a way out.
+   *
+   * @generated from enum value: PHASE_IDLE = 5;
+   */
+  IDLE = 5,
+
+  /**
+   * The world cannot say which phase it is in.
+   *
+   * Entered when its own bookkeeping contradicts itself — a transition that is
+   * not in the table, most obviously. The alternative was to count the fault and
+   * carry on into the requested phase, which leaves the world reporting a
+   * definite answer it has no grounds for. Saying "I do not know" is worth more
+   * than a confident wrong answer, and it is the one thing the old design could
+   * not express.
+   *
+   * KEPT APART FROM `PHASE_IDLE` although both are "alive, nothing running":
+   * the remedy differs. Idle means drag an app on. This means a firmware bug —
+   * capture the log. Collapsing them would make a bug look like an empty badge.
+   *
+   * @generated from enum value: PHASE_FAULT = 6;
+   */
+  FAULT = 6,
+
+  /**
+   * Up and answering, but unable to host ANY session on this boot.
+   *
+   * The heap is the case: instantiation needs 2911 KB and a world whose PSRAM
+   * did not come up has 64 KB of SRAM, which is enough to report and not enough
+   * to run. No payload will change that, so this is not idleness.
+   *
+   * WHY A THIRD STATE AND NOT A REASON ON `PHASE_IDLE`. Because the next action
+   * differs, which is the whole test a state has to pass here: idle means supply
+   * content, this means look at the hardware. A badge whose heap never came up
+   * and which tells you to drag an app on is giving advice that cannot work.
+   *
+   * NOT A DEAD END EITHER. A client may still ask it to open a session — it will
+   * almost certainly fail again, and that is the operator's call to make rather
+   * than this firmware's to forbid.
+   *
+   * @generated from enum value: PHASE_DEGRADED = 7;
+   */
+  DEGRADED = 7,
+}
+
+export const Phase_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Phase", [
+  [0, "PHASE_UNSPECIFIED"],
+  [1, "PHASE_HARDWARE"],
+  [2, "PHASE_PAYLOADS"],
+  [3, "PHASE_INSTANCE_STARTING"],
+  [4, "PHASE_INSTANCE_RUNNING"],
+  [8, "PHASE_INSTANCE_STOPPING"],
+  [5, "PHASE_IDLE"],
+  [6, "PHASE_FAULT"],
+  [7, "PHASE_DEGRADED"],
+]);
+
+/**
+ * A stage of the bring-up — one step WITHIN a `Phase`.
  *
  * AN ENUM, NOT THE ANNOUNCEMENT TEXT. `LogLine.stage` was a string carrying
  * `"instantiate countdown"` — which meant a test asserting on a stage was
@@ -710,11 +927,57 @@ export interface WorldState {
    */
   requestsTaken?: number;
   /**
-   * Whether an app is instantiated and could run one at all.
+   * Whether a DLC instance is live and could run a request at all.
    *
-   * @generated from field: bool session_open = 16;
+   * THE NUMBER STAYS, THE NAME CHANGES — a field number is the wire identity and
+   * 16 has always meant this. It was `session_open`, which named the same thing
+   * as `PHASE_SESSION` while outliving it by a whole phase; "instance" is the
+   * thing with a lifetime.
+   *
+   * @generated from field: bool instance_open = 16;
    */
-  sessionOpen?: boolean;
+  instanceOpen?: boolean;
+  /**
+   * WHERE THE WORLD IS IN ITS OWN LIFE, at two resolutions.
+   *
+   * `activity` above answers "what kind of thing is it doing" and is deliberately
+   * coarse. These answer "how far has it got", which is the question a badge that
+   * has not finished booting needs to be able to answer — and could not, because
+   * stages lived only in a log that a stalled bring-up never finished writing.
+   *
+   * Both are published as the world enters them, from values that need no heap,
+   * so they are readable in the window where boot hangs are actually found.
+   *
+   * @generated from field: devalbo.ilc.v1.Phase phase = 17;
+   */
+  phase?: Phase;
+  /**
+   * The stage within that phase, or `STAGE_UNSPECIFIED` between stages.
+   *
+   * @generated from field: devalbo.ilc.v1.Stage stage = 18;
+   */
+  stage?: Stage;
+  /**
+   * How many transitions the world took that its own table calls impossible.
+   *
+   * ZERO ON A HEALTHY WORLD, and a firmware bug otherwise: the phases form a
+   * state machine, and this counts the edges that are not in it. On the wire
+   * rather than only in the log because a fault nobody was watching for is
+   * exactly the one worth catching — a client seeing a non-zero count knows to
+   * go and find the line that explains it.
+   *
+   * @generated from field: uint32 phase_faults = 19;
+   */
+  phaseFaults?: number;
+  /**
+   * HOW THE LAST THING WENT — the badge's own judgement, as a value.
+   *
+   * The same one the panel shows as a colour and the log prints as a word, which
+   * until now were its only outlets: a client had to read prose to learn it.
+   *
+   * @generated from field: devalbo.ilc.v1.Verdict verdict = 20;
+   */
+  verdict?: Verdict;
 
 };
 
@@ -733,7 +996,11 @@ export const WorldState: MessageType<WorldState> = /* @__PURE__ */ createMessage
         { no: 7, name: "uptime_ms", kind: "scalar", T: ScalarType.UINT64 },
         { no: 14, name: "requests_offered", kind: "scalar", T: ScalarType.UINT32 },
         { no: 15, name: "requests_taken", kind: "scalar", T: ScalarType.UINT32 },
-        { no: 16, name: "session_open", kind: "scalar", T: ScalarType.BOOL },
+        { no: 16, name: "instance_open", kind: "scalar", T: ScalarType.BOOL },
+        { no: 17, name: "phase", kind: "enum", T: Phase_Enum },
+        { no: 18, name: "stage", kind: "enum", T: Stage_Enum },
+        { no: 19, name: "phase_faults", kind: "scalar", T: ScalarType.UINT32 },
+        { no: 20, name: "verdict", kind: "enum", T: Verdict_Enum },
     ] satisfies readonly PartialFieldInfo[],
     packedByDefault: true,
 });

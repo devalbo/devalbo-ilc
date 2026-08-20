@@ -78,6 +78,12 @@ func at(s *tictactoev1.GameState, n uint32) (*tictactoev1.GameState, error) {
 		return nil, errors.New("state: the game is only " + itoa(len(s.History)) + " move(s) long")
 	}
 	replay := fresh()
+	// THE SETUP SURVIVES THE REPLAY. `fresh` starts a default game — two humans,
+	// player one is X — so reconstructing an earlier board without carrying these
+	// would report a computer game as a human one, and the mark player one took
+	// as X whatever they chose.
+	replay.Opponent = s.Opponent
+	replay.PlayerOne = s.PlayerOne
 	for _, m := range s.History[:n] {
 		replay.Board[m.GetSquare()-1] = m.GetMark()
 		replay.History = append(replay.History, m)
@@ -112,6 +118,12 @@ func handlePlay(req *tictactoev1.PlayRequest) (*tictactoev1.PlayResponse, error)
 	state.Board[i] = state.Turn
 	decide(state)
 
+	// AND THE COMPUTER ANSWERS, in the same command. A person plays and gets a
+	// board back that it is their turn on again — there is no moment between
+	// where the game is waiting on the engine, because an app cannot ask for a
+	// turn it was not given (D2). See `autoplay`.
+	autoplay(state)
+
 	if err := save(state); err != nil {
 		return nil, err
 	}
@@ -120,13 +132,188 @@ func handlePlay(req *tictactoev1.PlayRequest) (*tictactoev1.PlayResponse, error)
 	return &tictactoev1.PlayResponse{State: state}, nil
 }
 
-func handleNewGame(*tictactoev1.NewGameRequest) (*tictactoev1.NewGameResponse, error) {
+func handleNewGame(req *tictactoev1.NewGameRequest) (*tictactoev1.NewGameResponse, error) {
 	state := fresh()
+
+	// The zero values ARE the defaults, so an empty request is the old
+	// behaviour: two humans, player one is X. Nothing has to special-case
+	// "unset" because unset already means what we want.
+	state.Opponent = req.GetOpponent()
+	if state.Opponent == tictactoev1.Opponent_OPPONENT_UNSPECIFIED {
+		state.Opponent = tictactoev1.Opponent_OPPONENT_HUMAN
+	}
+	state.PlayerOne = req.GetPlayerOne()
+	if state.PlayerOne == tictactoev1.Mark_MARK_UNSPECIFIED {
+		state.PlayerOne = tictactoev1.Mark_MARK_X
+	}
+
+	// THE OPPONENT MAY OPEN. Player one chose O, X still moves first, so the
+	// computer's move belongs to this command — see `autoplay` for why it cannot
+	// wait for the next one.
+	autoplay(state)
+
 	if err := save(state); err != nil {
 		return nil, err
 	}
 	emitStateChanged(state)
 	return &tictactoev1.NewGameResponse{State: state}, nil
+}
+
+// opponentMark is the mark the computer plays, or MARK_UNSPECIFIED in a game
+// between two people.
+func opponentMark(s *tictactoev1.GameState) tictactoev1.Mark {
+	if s.Opponent != tictactoev1.Opponent_OPPONENT_COMPUTER {
+		return tictactoev1.Mark_MARK_UNSPECIFIED
+	}
+	if s.PlayerOne == tictactoev1.Mark_MARK_O {
+		return tictactoev1.Mark_MARK_X
+	}
+	return tictactoev1.Mark_MARK_O
+}
+
+// autoplay lets the computer take its turn, if it is the computer's turn.
+//
+// IT HAPPENS INSIDE THE COMMAND THAT CAUSED IT, and that is D2 rather than
+// convenience: an app is request/response and cannot ask for another turn, so
+// there is no later moment for the engine to move in. A state saved with the
+// computer to play would sit there until a client happened to send something,
+// and "the board is waiting on the computer" would be a state every host had to
+// recognise and poll out of — a rule leaking into the slots.
+//
+// So a command returns a board it is the PERSON's turn to play, always.
+func autoplay(s *tictactoev1.GameState) {
+	mark := opponentMark(s)
+	if mark == tictactoev1.Mark_MARK_UNSPECIFIED {
+		return
+	}
+	// A loop, though it can only ever run once: the computer moves, and then it
+	// is the person's turn or the game is over. Written as a condition rather
+	// than a single call so it stays correct if a variant ever gives someone two
+	// moves in a row.
+	for s.Outcome == tictactoev1.Outcome_OUTCOME_IN_PROGRESS && s.Turn == mark {
+		square := computerMove(s, mark)
+		s.History = append(s.History, &tictactoev1.Move{Square: uint32(square + 1), Mark: mark})
+		s.Board[square] = mark
+		decide(s)
+	}
+}
+
+// computerMove picks the square the engine will play. **Perfect, and the same
+// every time.**
+//
+// # Determinism is a PARITY REQUIREMENT, not a preference
+//
+// The same engine bytes run natively, in a browser, and on the badge, and the
+// parity harness compares command results across all three. An opponent that
+// consulted `wasi:random` would answer differently on each — not a bug in any
+// one of them, and impossible to tell apart from one. So there is no randomness
+// here at all, and ties break toward the LOWEST square index: an arbitrary rule,
+// but one every tier applies identically.
+//
+// The cost is that it plays the same game against the same moves forever. That
+// is the correct trade for an app whose job is to demonstrate that three tiers
+// agree; a variety-seeking opponent would need a seed supplied BY the app's own
+// state, which is a different feature.
+//
+// # Why minimax rather than a rule list
+//
+// Perfect play on 3×3 is a short search, and the rules that encode it by hand
+// (win, block, fork, block-fork, centre, opposite corner…) are famously easy to
+// get subtly wrong — the fork cases especially. A search has no heuristics to
+// mis-state: it is right by construction or it is broken loudly.
+//
+// # Why it is fast enough on a badge
+//
+// Alpha-beta cuts the empty-board search from ~550k nodes to a few tens of
+// thousands, which the Pulley interpreter handles in well under a second. The
+// worst case only arises when the computer plays X and opens; every later move
+// is far smaller.
+func computerMove(s *tictactoev1.GameState, mark tictactoev1.Mark) int {
+	var board [9]tictactoev1.Mark
+	copy(board[:], s.Board)
+
+	best, bestScore := -1, -1000
+	for i := 0; i < 9; i++ {
+		if board[i] != tictactoev1.Mark_MARK_UNSPECIFIED {
+			continue
+		}
+		board[i] = mark
+		// NEGATED, because the score comes back from the OPPONENT's point of
+		// view: what is good for them is bad for us, and one sign flip is the
+		// whole difference between minimax and a bot that plays to lose.
+		score := -search(&board, other(mark), -1000, 1000, 1)
+		board[i] = tictactoev1.Mark_MARK_UNSPECIFIED
+		// STRICTLY GREATER, which is what makes the lowest index win a tie.
+		if score > bestScore {
+			bestScore, best = score, i
+		}
+	}
+	return best
+}
+
+// search scores the position for whoever is to move, with alpha-beta pruning.
+//
+// `depth` is how many plies deep we are, and it is in the score on purpose: a
+// win in two moves beats a win in four, and a loss in four beats a loss in two.
+// Without it the engine sees every win as equal and can dawdle while a human
+// escapes — perfect play that looks like a mistake.
+func search(board *[9]tictactoev1.Mark, turn tictactoev1.Mark, alpha, beta, depth int) int {
+	if winner := winnerOn(board); winner != tictactoev1.Mark_MARK_UNSPECIFIED {
+		// The player to move has already lost: the win belongs to whoever moved
+		// last.
+		return depth - 10
+	}
+	moved := false
+	for i := 0; i < 9; i++ {
+		if board[i] != tictactoev1.Mark_MARK_UNSPECIFIED {
+			continue
+		}
+		moved = true
+		board[i] = turn
+		score := -search(board, other(turn), -beta, -alpha, depth+1)
+		board[i] = tictactoev1.Mark_MARK_UNSPECIFIED
+		if score > alpha {
+			alpha = score
+		}
+		if alpha >= beta {
+			// NOTHING BELOW THIS CAN MATTER: the opponent already has a better
+			// option higher up and will never let the game reach here.
+			break
+		}
+	}
+	if !moved {
+		// A full board with no winner.
+		return 0
+	}
+	return alpha
+}
+
+// winnerOn reports the mark holding a line, or MARK_UNSPECIFIED.
+//
+// SEPARATE FROM `decide`, which works on a whole `GameState` and also sets the
+// turn, the outcome and the winning line. The search runs this thousands of
+// times on a bare array; going through `decide` would allocate a state per node.
+func winnerOn(board *[9]tictactoev1.Mark) tictactoev1.Mark {
+	for _, line := range lines {
+		a := board[line[0]]
+		if a != tictactoev1.Mark_MARK_UNSPECIFIED && a == board[line[1]] && a == board[line[2]] {
+			return a
+		}
+	}
+	return tictactoev1.Mark_MARK_UNSPECIFIED
+}
+
+// other is the mark that is not this one. MARK_UNSPECIFIED has no opposite and
+// returns itself, which cannot arise in a search that only ever recurses on a
+// real player.
+func other(mark tictactoev1.Mark) tictactoev1.Mark {
+	switch mark {
+	case tictactoev1.Mark_MARK_X:
+		return tictactoev1.Mark_MARK_O
+	case tictactoev1.Mark_MARK_O:
+		return tictactoev1.Mark_MARK_X
+	}
+	return mark
 }
 
 // lines are the eight ways to win, as board indexes.

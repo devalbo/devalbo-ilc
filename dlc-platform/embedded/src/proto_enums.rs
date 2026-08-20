@@ -21,10 +21,42 @@
 // the crate rather than inside it — buf writes it, cargo does not.
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../gen/rust/devalbo/ilc/v1/control.enums.rs"));
 
+/// FIELD NUMBERS, generated from the same .proto as the values above.
+///
+/// The enums removed transcribed VALUES. These remove transcribed IDENTITIES,
+/// and the failure is worse: a wrong value mislabels a field, a wrong number
+/// puts the bytes somewhere else entirely — skipped as unknown, or decoded as a
+/// different field of compatible wire type, silently.
+pub mod fields {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gen/rust/devalbo/ilc/v1/control.fields.rs"
+    ));
+}
+
 pub mod manifest {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../gen/rust/devalbo/ilc/v1/world_manifest.enums.rs"
+    ));
+
+    pub mod fields {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../gen/rust/devalbo/ilc/v1/world_manifest.fields.rs"
+        ));
+    }
+}
+
+/// THE DLC STANDARD VOCABULARY — what apps and worlds share.
+///
+/// Its own module because it is its own package: `devalbo.dlc.std.v1`, vendored
+/// into every app, as opposed to `devalbo.ilc.v1` which is host-facing and which
+/// an app never sees.
+pub mod dlc_std {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gen/rust/devalbo/dlc/std/v1/status.enums.rs"
     ));
 }
 
@@ -33,4 +65,11 @@ pub mod platform {
         env!("CARGO_MANIFEST_DIR"),
         "/../gen/rust/devalbo/ilc/v1/platform.enums.rs"
     ));
+
+    pub mod fields {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../gen/rust/devalbo/ilc/v1/platform.fields.rs"
+        ));
+    }
 }

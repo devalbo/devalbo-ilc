@@ -14,7 +14,7 @@
 //! `std`-free in shape so Phase 2 is a copy rather than a redesign — the only
 //! `std` left is `Vec`/`String` from `alloc`, which bare metal has.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use wasmtime::component::{Component, HasSelf, Linker, Resource, ResourceTable};
@@ -64,6 +64,9 @@ pub struct MinimalState {
     /// hosts — TIMER0 on the badge, SysTick under QEMU, the OS on a laptop. It
     /// is the smallest thing all three can provide.
     pub clock: Option<crate::clock::Clock>,
+    /// THE FILESYSTEM, in RAM (D5). Empty at every boot: nothing here survives
+    /// the power, which is Phase 4's problem and not this struct's.
+    pub fs: crate::ramfs::RamFs,
     /// A deterministic PRNG standing in for the hardware RNG.
     ///
     /// NOT for anything that needs real entropy. It exists because TinyGo calls
@@ -205,15 +208,21 @@ impl crate::cli_bindings::wasi::clocks::wall_clock::Host for MinimalState {
     }
 }
 
-/// No preopens, so the engine is granted no filesystem at all.
+/// ONE PREOPEN: the root of a RAM filesystem (D5).
 ///
-/// A REAL ANSWER, not a placeholder. "This tier has no filesystem" is a state
-/// the architecture already expects (§6.4a): the engine degrades rather than
-/// failing, and an app that needs storage says so. The badge gets a RAM-backed
-/// filesystem in D5 and littlefs after that; until then, empty is honest.
+/// It used to be empty, with the note that "this tier has no filesystem" was an
+/// honest answer the architecture expects. It was — and it also meant any app
+/// that stores something could not run here. tictactoe keeps its whole game in
+/// `game.json`, so on hardware it answered `state` from a fresh board and failed
+/// every `play` with `mkdir /: errno 2`: the engine, the rules and the wire
+/// format all correct, with nowhere to put a file.
 impl crate::cli_bindings::wasi::filesystem::preopens::Host for MinimalState {
     fn get_directories(&mut self) -> Vec<(Resource<FsDescriptor>, String)> {
-        Vec::new()
+        let root = self
+            .table
+            .push(crate::ramfs::Node::root())
+            .expect("the resource table is ours and unbounded");
+        alloc::vec![(root, "/".to_string())]
     }
 }
 
@@ -227,60 +236,379 @@ impl crate::cli_bindings::wasi::filesystem::types::Host for MinimalState {
     }
 }
 
-/// Every descriptor method, and every one of them refuses.
-///
-/// UNREACHABLE BY CONSTRUCTION rather than by hope: `get_directories` hands out
-/// nothing, so the guest never holds a descriptor to call these on. They exist
-/// because the trait requires them — the interface is imported whole or not at
-/// all — and they return `ACCESS` so that if one ever IS reached, the failure
-/// names a permission problem rather than a panic.
-///
-/// This is what D5 replaces. A RAM-backed filesystem changes only this block;
-/// the engine, the app, and every other interface stay exactly as they are.
-impl crate::cli_bindings::wasi::filesystem::types::HostDescriptor for MinimalState {
-    fn read_via_stream(&mut self, _: Resource<FsDescriptor>, _: u64) -> Result<Resource<DynInputStream>, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn write_via_stream(&mut self, _: Resource<FsDescriptor>, _: u64) -> Result<Resource<DynOutputStream>, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn append_via_stream(&mut self, _: Resource<FsDescriptor>) -> Result<Resource<DynOutputStream>, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn advise(&mut self, _: Resource<FsDescriptor>, _: u64, _: u64, _: FsAdvice) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn sync_data(&mut self, _: Resource<FsDescriptor>) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn get_flags(&mut self, _: Resource<FsDescriptor>) -> Result<FsDescriptorFlags, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn get_type(&mut self, _: Resource<FsDescriptor>) -> Result<FsDescriptorType, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn set_size(&mut self, _: Resource<FsDescriptor>, _: u64) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn set_times(&mut self, _: Resource<FsDescriptor>, _: FsNewTimestamp, _: FsNewTimestamp) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn read(&mut self, _: Resource<FsDescriptor>, _: u64, _: u64) -> Result<(Vec<u8>, bool), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn write(&mut self, _: Resource<FsDescriptor>, _: Vec<u8>, _: u64) -> Result<u64, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn read_directory(&mut self, _: Resource<FsDescriptor>) -> Result<Resource<FsDirEntryStream>, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn sync(&mut self, _: Resource<FsDescriptor>) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn create_directory_at(&mut self, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn stat(&mut self, _: Resource<FsDescriptor>) -> Result<FsDescriptorStat, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn stat_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String) -> Result<FsDescriptorStat, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn set_times_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String, _: FsNewTimestamp, _: FsNewTimestamp) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn link_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn open_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String, _: FsOpenFlags, _: FsDescriptorFlags) -> Result<Resource<FsDescriptor>, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn readlink_at(&mut self, _: Resource<FsDescriptor>, _: String) -> Result<String, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn remove_directory_at(&mut self, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn rename_at(&mut self, _: Resource<FsDescriptor>, _: String, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn symlink_at(&mut self, _: Resource<FsDescriptor>, _: String, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn unlink_file_at(&mut self, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Access) }
-    fn is_same_object(&mut self, _: Resource<FsDescriptor>, _: Resource<FsDescriptor>) -> bool { false }
-    fn metadata_hash(&mut self, _: Resource<FsDescriptor>) -> Result<FsMetadataHashValue, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn metadata_hash_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String) -> Result<FsMetadataHashValue, FsErrorCode> { Err(FsErrorCode::Access) }
-    fn drop(&mut self, _: Resource<FsDescriptor>) -> wasmtime::Result<()> { Ok(()) }
+/// The path a descriptor names, or `NoEntry` if the handle is stale.
+fn path_of(
+    table: &ResourceTable,
+    handle: &Resource<FsDescriptor>,
+) -> Result<String, FsErrorCode> {
+    table
+        .get(handle)
+        .map(|node: &crate::ramfs::Node| node.path.clone())
+        .map_err(|_| FsErrorCode::BadDescriptor)
 }
 
-/// The other resource in `wasi:filesystem/types`. Same reasoning as the
-/// descriptor: nothing hands one out, so nothing can call these.
-impl crate::cli_bindings::wasi::filesystem::types::HostDirectoryEntryStream for MinimalState {
-    fn read_directory_entry(
-        &mut self,
-        _: Resource<FsDirEntryStream>,
-    ) -> Result<Option<crate::cli_bindings::wasi::filesystem::types::DirectoryEntry>, FsErrorCode> {
-        Err(FsErrorCode::Access)
+/// A stat that says only what this filesystem actually knows.
+///
+/// TIMESTAMPS ARE ZERO AND STAY ZERO. There is no wall clock on the badge worth
+/// the name — `wall_clock::now` already answers zero — and inventing monotonic
+/// fake times would let an app believe in an ordering nothing maintains.
+fn stat_of(kind: FsDescriptorType, size: u64) -> FsDescriptorStat {
+    FsDescriptorStat {
+        type_: kind,
+        link_count: 1,
+        size,
+        data_access_timestamp: None,
+        data_modification_timestamp: None,
+        status_change_timestamp: None,
     }
-    fn drop(&mut self, _: Resource<FsDirEntryStream>) -> wasmtime::Result<()> {
+}
+
+/// Every descriptor method, over a filesystem that lives in RAM.
+///
+/// # What is implemented, and what refuses
+///
+/// The ones an app reaches through `os.ReadFile`, `os.WriteFile`, `os.MkdirAll`
+/// and `os.ReadDir` — open, read, write, stat, mkdir, list, unlink. The rest
+/// refuse, and they refuse SPECIFICALLY: `Unsupported` for things this
+/// filesystem does not have (links, symlinks) rather than `Access`, because
+/// "you may not" and "there is no such concept here" send an app author to
+/// different places.
+///
+/// # What this deliberately does not do
+///
+/// Persist. Everything here dies with the power — Phase 4's problem, per D11 —
+/// and an app cannot tell from the inside, which is exactly why the world has to
+/// be the thing that says so.
+impl crate::cli_bindings::wasi::filesystem::types::HostDescriptor for MinimalState {
+    fn read_via_stream(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        offset: u64,
+    ) -> Result<Resource<DynInputStream>, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        let buffer = self.fs.file(&path).ok_or(FsErrorCode::IsDirectory)?;
+        let stream = crate::ramfs::boxed_file_source(&buffer, offset);
+        self.table.push(stream).map_err(|_| FsErrorCode::Access)
+    }
+
+    fn write_via_stream(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        _offset: u64,
+    ) -> Result<Resource<DynOutputStream>, FsErrorCode> {
+        // THE OFFSET IS IGNORED, and that is a real limitation rather than an
+        // oversight. Writes here APPEND to the file's buffer; the only caller
+        // that matters opens with TRUNCATE and writes the whole file, which is
+        // what `os.WriteFile` does. Seeking into the middle of a file would need
+        // a buffer that can be written at a position, and nothing asks.
+        let path = path_of(&self.table, &handle)?;
+        let buffer = self.fs.file(&path).ok_or(FsErrorCode::IsDirectory)?;
+        let stream = crate::ramfs::boxed_file_sink(buffer);
+        self.table.push(stream).map_err(|_| FsErrorCode::Access)
+    }
+
+    fn append_via_stream(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+    ) -> Result<Resource<DynOutputStream>, FsErrorCode> {
+        self.write_via_stream(handle, 0)
+    }
+
+    fn read(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        len: u64,
+        offset: u64,
+    ) -> Result<(Vec<u8>, bool), FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        let buffer = self.fs.file(&path).ok_or(FsErrorCode::IsDirectory)?;
+        let bytes = buffer.snapshot();
+        let from = (offset as usize).min(bytes.len());
+        let to = from.saturating_add(len as usize).min(bytes.len());
+        // THE BOOL IS END-OF-FILE, which a caller uses to stop asking.
+        Ok((bytes[from..to].to_vec(), to >= bytes.len()))
+    }
+
+    fn write(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        bytes: Vec<u8>,
+        _offset: u64,
+    ) -> Result<u64, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        let buffer = self.fs.file(&path).ok_or(FsErrorCode::IsDirectory)?;
+        let written = bytes.len() as u64;
+        buffer.append(&bytes);
+        Ok(written)
+    }
+
+    fn open_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        _: FsPathFlags,
+        path: String,
+        flags: FsOpenFlags,
+        _: FsDescriptorFlags,
+    ) -> Result<Resource<FsDescriptor>, FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+
+        if flags.contains(FsOpenFlags::DIRECTORY) {
+            if !self.fs.is_dir(&full) {
+                return Err(FsErrorCode::NoEntry);
+            }
+            return self
+                .table
+                .push(crate::ramfs::Node { path: full, dir: true })
+                .map_err(|_| FsErrorCode::Access);
+        }
+
+        if self.fs.is_dir(&full) {
+            return self
+                .table
+                .push(crate::ramfs::Node { path: full, dir: true })
+                .map_err(|_| FsErrorCode::Access);
+        }
+
+        let exists = self.fs.exists(&full);
+        if !exists && !flags.contains(FsOpenFlags::CREATE) {
+            // NoEntry, not Access. "It is not there" and "you may not" are
+            // different facts, and an app that gets the wrong one looks in the
+            // wrong place — which is how `mkdir /: errno 2` was read as a
+            // permissions problem for longer than it should have been.
+            return Err(FsErrorCode::NoEntry);
+        }
+        let buffer = self.fs.make_file(&full).ok_or(FsErrorCode::IsDirectory)?;
+        if flags.contains(FsOpenFlags::TRUNCATE) {
+            buffer.truncate();
+        }
+        self.table
+            .push(crate::ramfs::Node { path: full, dir: false })
+            .map_err(|_| FsErrorCode::Access)
+    }
+
+    fn create_directory_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        path: String,
+    ) -> Result<(), FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+        match self.fs.make_dir(&full) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(FsErrorCode::Exist),
+        }
+    }
+
+    fn stat(&mut self, handle: Resource<FsDescriptor>) -> Result<FsDescriptorStat, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        if self.fs.is_dir(&path) {
+            return Ok(stat_of(FsDescriptorType::Directory, 0));
+        }
+        let buffer = self.fs.file(&path).ok_or(FsErrorCode::NoEntry)?;
+        Ok(stat_of(FsDescriptorType::RegularFile, buffer.snapshot().len() as u64))
+    }
+
+    fn stat_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        _: FsPathFlags,
+        path: String,
+    ) -> Result<FsDescriptorStat, FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+        if self.fs.is_dir(&full) {
+            return Ok(stat_of(FsDescriptorType::Directory, 0));
+        }
+        let buffer = self.fs.file(&full).ok_or(FsErrorCode::NoEntry)?;
+        Ok(stat_of(FsDescriptorType::RegularFile, buffer.snapshot().len() as u64))
+    }
+
+    fn get_type(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+    ) -> Result<FsDescriptorType, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        if self.fs.is_dir(&path) {
+            Ok(FsDescriptorType::Directory)
+        } else if self.fs.exists(&path) {
+            Ok(FsDescriptorType::RegularFile)
+        } else {
+            Err(FsErrorCode::NoEntry)
+        }
+    }
+
+    fn get_flags(
+        &mut self,
+        _: Resource<FsDescriptor>,
+    ) -> Result<FsDescriptorFlags, FsErrorCode> {
+        Ok(FsDescriptorFlags::READ | FsDescriptorFlags::WRITE | FsDescriptorFlags::MUTATE_DIRECTORY)
+    }
+
+    fn read_directory(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+    ) -> Result<Resource<FsDirEntryStream>, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        if !self.fs.is_dir(&path) {
+            return Err(FsErrorCode::NotDirectory);
+        }
+        let mut remaining = self.fs.children(&path);
+        // REVERSED so the stream can `pop` and still hand them back in order.
+        remaining.reverse();
+        self.table
+            .push(crate::ramfs::DirStream { remaining })
+            .map_err(|_| FsErrorCode::Access)
+    }
+
+    fn unlink_file_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        path: String,
+    ) -> Result<(), FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+        if self.fs.is_dir(&full) {
+            return Err(FsErrorCode::IsDirectory);
+        }
+        if self.fs.remove(&full) {
+            Ok(())
+        } else {
+            Err(FsErrorCode::NoEntry)
+        }
+    }
+
+    fn remove_directory_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        path: String,
+    ) -> Result<(), FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+        if !self.fs.is_dir(&full) {
+            return Err(FsErrorCode::NotDirectory);
+        }
+        if !self.fs.children(&full).is_empty() {
+            return Err(FsErrorCode::NotEmpty);
+        }
+        self.fs.remove(&full);
+        Ok(())
+    }
+
+    fn rename_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        from: String,
+        to_dir: Resource<FsDescriptor>,
+        to: String,
+    ) -> Result<(), FsErrorCode> {
+        // ATOMIC-ENOUGH: copy the bytes to the new path and drop the old one.
+        // Real atomicity is a property of a filesystem that can fail partway,
+        // and this one cannot — there is no medium to be interrupted.
+        let from_base = path_of(&self.table, &handle)?;
+        let to_base = path_of(&self.table, &to_dir)?;
+        let src = crate::ramfs::Node { path: from_base, dir: true }.resolve(&from);
+        let dst = crate::ramfs::Node { path: to_base, dir: true }.resolve(&to);
+        let bytes = self.fs.file(&src).ok_or(FsErrorCode::NoEntry)?.snapshot();
+        let target = self.fs.make_file(&dst).ok_or(FsErrorCode::IsDirectory)?;
+        target.truncate();
+        target.append(&bytes);
+        self.fs.remove(&src);
+        Ok(())
+    }
+
+    fn is_same_object(
+        &mut self,
+        a: Resource<FsDescriptor>,
+        b: Resource<FsDescriptor>,
+    ) -> bool {
+        match (path_of(&self.table, &a), path_of(&self.table, &b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        }
+    }
+
+    fn metadata_hash(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+    ) -> Result<FsMetadataHashValue, FsErrorCode> {
+        let path = path_of(&self.table, &handle)?;
+        // THE PATH IS THE IDENTITY here, since there are no inodes. Same
+        // function the catalog and the control channel use, so "two hashes
+        // differ" means the same thing everywhere in this firmware.
+        let hash = crate::catalog::checksum(path.as_bytes()) as u64;
+        Ok(FsMetadataHashValue { lower: hash, upper: 0 })
+    }
+
+    fn metadata_hash_at(
+        &mut self,
+        handle: Resource<FsDescriptor>,
+        _: FsPathFlags,
+        path: String,
+    ) -> Result<FsMetadataHashValue, FsErrorCode> {
+        let base = path_of(&self.table, &handle)?;
+        let full = crate::ramfs::Node { path: base, dir: true }.resolve(&path);
+        let hash = crate::catalog::checksum(full.as_bytes()) as u64;
+        Ok(FsMetadataHashValue { lower: hash, upper: 0 })
+    }
+
+    /// NOTHING TO FLUSH. There is no medium under this, so a sync that claimed
+    /// to have done something would be the only lie in the file.
+    fn sync(&mut self, _: Resource<FsDescriptor>) -> Result<(), FsErrorCode> { Ok(()) }
+    fn sync_data(&mut self, _: Resource<FsDescriptor>) -> Result<(), FsErrorCode> { Ok(()) }
+    /// Advice about access patterns, to a filesystem that is already in memory.
+    fn advise(&mut self, _: Resource<FsDescriptor>, _: u64, _: u64, _: FsAdvice) -> Result<(), FsErrorCode> { Ok(()) }
+
+    // UNSUPPORTED, NOT FORBIDDEN — the distinction is the point. `Access` says
+    // "you may not", which sends an author looking for a permission to grant;
+    // these are concepts this filesystem does not have at all.
+    fn set_size(&mut self, _: Resource<FsDescriptor>, _: u64) -> Result<(), FsErrorCode> { Err(FsErrorCode::Unsupported) }
+    fn set_times(&mut self, _: Resource<FsDescriptor>, _: FsNewTimestamp, _: FsNewTimestamp) -> Result<(), FsErrorCode> { Err(FsErrorCode::Unsupported) }
+    fn set_times_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String, _: FsNewTimestamp, _: FsNewTimestamp) -> Result<(), FsErrorCode> { Err(FsErrorCode::Unsupported) }
+    fn link_at(&mut self, _: Resource<FsDescriptor>, _: FsPathFlags, _: String, _: Resource<FsDescriptor>, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Unsupported) }
+    fn symlink_at(&mut self, _: Resource<FsDescriptor>, _: String, _: String) -> Result<(), FsErrorCode> { Err(FsErrorCode::Unsupported) }
+    fn readlink_at(&mut self, _: Resource<FsDescriptor>, _: String) -> Result<String, FsErrorCode> { Err(FsErrorCode::Unsupported) }
+
+    fn drop(&mut self, handle: Resource<FsDescriptor>) -> wasmtime::Result<()> {
+        // THE HANDLE GOES, THE FILE STAYS. Closing a descriptor is not deleting
+        // what it pointed at — the bytes live in `fs`, and another handle may be
+        // open on them.
+        let _ = self.table.delete(handle);
         Ok(())
     }
 }
+
+/// The other resource in `wasi:filesystem/types`: a directory being listed.
+impl crate::cli_bindings::wasi::filesystem::types::HostDirectoryEntryStream for MinimalState {
+    fn read_directory_entry(
+        &mut self,
+        stream: Resource<FsDirEntryStream>,
+    ) -> Result<Option<crate::cli_bindings::wasi::filesystem::types::DirectoryEntry>, FsErrorCode>
+    {
+        let stream: &mut crate::ramfs::DirStream = self
+            .table
+            .get_mut(&stream)
+            .map_err(|_| FsErrorCode::BadDescriptor)?;
+        // NONE MEANS THE END, and it is the only way a caller learns to stop.
+        Ok(stream.remaining.pop().map(|(name, dir)| {
+            crate::cli_bindings::wasi::filesystem::types::DirectoryEntry {
+                type_: if dir {
+                    FsDescriptorType::Directory
+                } else {
+                    FsDescriptorType::RegularFile
+                },
+                name,
+            }
+        }))
+    }
+
+    fn drop(&mut self, stream: Resource<FsDirEntryStream>) -> wasmtime::Result<()> {
+        let _ = self.table.delete(stream);
+        Ok(())
+    }
+}
+
+
 
 impl IoView for MinimalState {
     fn table(&mut self) -> &mut ResourceTable {

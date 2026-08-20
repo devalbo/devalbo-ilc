@@ -324,6 +324,20 @@ pub enum Status {
 }
 
 impl Status {
+    /// `Verdict` — the enum control.proto declares for this question.
+    ///
+    /// WRITTEN OUT, not cast, and NAMED, not numbered: this enum's discriminants
+    /// are a local detail and the proto numbers are a wire contract. Same shape
+    /// as `screen_code` and its neighbours, for the same reason.
+    pub const fn code(self) -> u32 {
+        match self {
+            Status::Ok => dlc_platform_embedded::control::VERDICT_OK,
+            Status::Failed => dlc_platform_embedded::control::VERDICT_FAILED,
+            Status::Idle => dlc_platform_embedded::control::VERDICT_IDLE,
+            Status::Broken => dlc_platform_embedded::control::VERDICT_BROKEN,
+        }
+    }
+
     /// The colour, as RGB565 — the TFT's native format, so Phase 3's fill is a
     /// write rather than a conversion.
     ///
@@ -395,11 +409,23 @@ impl Status {
 /// the result-derived status alone, rather than picking a colour by accident —
 /// a wrong colour is worse than no colour, because it is read as a fact.
 pub fn status_from_slot1(value: u8) -> Option<Status> {
-    match value {
-        0 => Some(Status::Idle),
-        1 => Some(Status::Ok),
-        2 => Some(Status::Broken), // amber — a warning, not a failure
-        3 => Some(Status::Failed),
+    use dlc_platform_embedded::control::dlc_std as p;
+    // NAMED, NOT NUMBERED. These were the literals 0..3, which is the app-world
+    // contract for status transcribed into one world — and `hello` had
+    // transcribed its own copy the other way round. They agreed for three values
+    // and disagreed at both ends, which is the shape that passes testing.
+    match value as u32 {
+        p::STATUS_LEVEL_IDLE => Some(Status::Idle),
+        p::STATUS_LEVEL_OK => Some(Status::Ok),
+        // AMBER: a warning is not a failure. An app that handled a
+        // divide-by-zero is telling you to look, not that it broke.
+        p::STATUS_LEVEL_WARNING => Some(Status::Broken),
+        p::STATUS_LEVEL_ERROR => Some(Status::Failed),
+        // OFF is a DECISION and UNSPECIFIED is silence, so they land in the same
+        // place here for opposite reasons: neither should override what the
+        // command result already said. Kept apart because a richer world can act
+        // on "go dark" and cannot act on "nobody mentioned it".
+        p::STATUS_LEVEL_OFF | p::STATUS_LEVEL_UNSPECIFIED => None,
         _ => None,
     }
 }

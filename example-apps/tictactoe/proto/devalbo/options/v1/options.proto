@@ -6,6 +6,29 @@ option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/
 
 import "google/protobuf/descriptor.proto";
 
+// ===========================================================================
+// DLC STANDARD — vendored. Do not edit this copy.
+//
+//   source:  dlc-platform/proto/devalbo/options/v1/options.proto
+//   refresh: make sync-std-proto
+//   verify:  make verify-std-proto   (CI fails when a copy has drifted)
+//
+// WHY THE PROVENANCE IS IN THE FILE rather than beside it: this is copied
+// byte-for-byte into every app and into the scaffold template, so anything
+// written here travels with it and anything written next to it does not. A
+// reader who opens a vendored copy is exactly the reader who needs to be told
+// it is one.
+//
+// NO VERSION STAMP, DELIBERATELY. The `v1` in the package IS the version, and a
+// second number for the same thing is the mistake this vocabulary exists to
+// prevent — an app built against a newer standard sends a value an older host
+// does not know, and the host skips it, which degrades better than any version
+// check because it reacts to the specific thing it cannot read.
+//
+// It travels with the scaffold only because the platform is not published to a
+// schema registry yet. When it is, delete the copy and add the dep.
+// ===========================================================================
+
 // Registry metadata (Decision 29). Host-side tooling (protoreflect / FileDescriptorSet)
 // reads these; the TinyGo engine never looks at them at runtime.
 //

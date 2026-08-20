@@ -72,6 +72,21 @@ enum Outcome {
   OUTCOME_DRAW = 4;
 }
 
+// Who plays the second mark.
+//
+// A GAME SETTING, not a client one, which is why it is recorded in `GameState`
+// rather than remembered by whoever started the game. The badge, the browser and
+// the CLI can all be looking at the same `game.json`; a mode held client-side
+// would mean the computer answers on one tier and not another, with the file
+// identical. It is also what makes the mode survive a power cut.
+enum Opponent {
+  OPPONENT_UNSPECIFIED = 0;
+  // Two people taking turns on one board.
+  OPPONENT_HUMAN = 1;
+  // The engine plays the other mark, and plays perfectly (see `computerMove`).
+  OPPONENT_COMPUTER = 2;
+}
+
 // One move, in order.
 //
 // Carries the MARK as well as the square, so nothing has to derive it from
@@ -110,6 +125,21 @@ message GameState {
   // working out which line it was. This is the whole difference between "a host
   // may draw what the engine named" and "a host may find one itself".
   repeated uint32 winning_line = 4;
+  // HOW THIS GAME WAS SET UP, carried in the state because it is part of what
+  // the game IS.
+  //
+  // A host needs both to render honestly — "your turn" is wrong when the
+  // computer is thinking, and "X" is not necessarily the person holding the
+  // badge. Neither is derivable from the board: a game where the computer plays
+  // O is indistinguishable from two humans by looking at the squares.
+  Opponent opponent = 6;
+  // Which mark player one took. The other mark is the opponent's.
+  //
+  // X still moves first — that is a rule, and rules live here — so choosing O
+  // means the opponent opens. When the opponent is the computer, that is why
+  // `new-game` can come back with a move already played.
+  Mark player_one = 7;
+
   // Every move, in order — the raw record, and the only thing here that is not
   // a judgement.
   //
@@ -169,7 +199,23 @@ message PlayResponse {
   GameState state = 1;
 }
 
-message NewGameRequest {}
+message NewGameRequest {
+  // Who plays the second mark. Default (unset) is two humans, so `new-game`
+  // with no arguments still means what it always did.
+  Opponent opponent = 1 [
+    (devalbo.options.v1.help) = "who plays the other mark: human or computer",
+    (devalbo.options.v1.cli_positional) = 1
+  ];
+  // Which mark player one takes. Default (unset) is X, who moves first.
+  //
+  // Offered because "do I go first?" is the only other thing a person wants to
+  // choose at the start, and against a perfect opponent it is the choice that
+  // changes the game — moving second means the best available result is a draw.
+  Mark player_one = 2 [
+    (devalbo.options.v1.help) = "the mark player one takes: x or o (x moves first)",
+    (devalbo.options.v1.cli_positional) = 2
+  ];
+}
 message NewGameResponse {
   GameState state = 1;
 }

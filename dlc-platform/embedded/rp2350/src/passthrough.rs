@@ -81,16 +81,16 @@ static SLOT: Shared<Slot> = Shared::new(Slot {
 ///
 /// REFUSING IS THE ANSWER, not queueing hopefully. A world that cannot do a
 /// thing should say so while somebody is still listening.
-static SESSION: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static INSTANCE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Called when an app is instantiated, and again when the session ends.
-pub fn session_open(open: bool) {
-    SESSION.store(open, core::sync::atomic::Ordering::Release);
+pub fn instance_open(open: bool) {
+    INSTANCE.store(open, core::sync::atomic::Ordering::Release);
 }
 
-/// Whether a request could be run at all right now.
-pub fn session_is_open() -> bool {
-    SESSION.load(core::sync::atomic::Ordering::Acquire)
+/// Whether a DLC instance is live and could run a request at all right now.
+pub fn instance_is_open() -> bool {
+    INSTANCE.load(core::sync::atomic::Ordering::Acquire)
 }
 
 /// How many requests have been offered, accepted or not.
@@ -108,7 +108,7 @@ pub fn offer(method: u32, id: u64, request: &[u8]) -> bool {
     if request.len() > REQUEST_MAX {
         return false;
     }
-    if !session_is_open() {
+    if !instance_is_open() {
         return false;
     }
     SLOT.with(|slot| {

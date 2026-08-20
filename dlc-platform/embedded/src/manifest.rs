@@ -50,13 +50,25 @@
 /// `SetWorldManifest` — the core-lifecycle block, id 2. See platform.proto.
 pub const METHOD_SET_WORLD_MANIFEST: u32 = 2;
 
-/// devalbo.ilc.v1.Availability
-const AVAILABILITY_ABSENT: u64 = 1;
-
-/// devalbo.ilc.v1.TextOutlet
-pub const TEXT_OUTLET_NONE: u64 = 1;
-pub const TEXT_OUTLET_UART: u64 = 2;
-pub const TEXT_OUTLET_DISPLAY: u64 = 3;
+/// `Availability` and `TextOutlet` — RE-EXPORTED, not retyped.
+///
+/// These were six hand-written numbers under comments naming the proto messages
+/// they came from, which is the exact arrangement that already cost a day: a
+/// `TextOutlet` transcribed in alphabetical rather than declared order made a
+/// badge writing to its own screen tell every client it was writing to a serial
+/// port. Both values legal, frame checksummed, enum name printed cleanly.
+///
+/// THE BOUNDARY IS THE POINT. This message is the world telling an APP what it
+/// can do — a different language, a different build, often a different machine.
+/// Nothing downstream can check the number against the name, so it has to be
+/// right where it is written, and the only way to guarantee that is not to write
+/// it.
+///
+/// `as u64` at the use sites: these are varints on the wire and the generator
+/// emits `u32`, which is the enum's actual range.
+pub use crate::proto_enums::manifest::{
+    AVAILABILITY_ABSENT, TEXT_OUTLET_DISPLAY, TEXT_OUTLET_NONE, TEXT_OUTLET_UART,
+};
 
 const WIRE_VARINT: u8 = 0;
 const WIRE_BYTES: u8 = 2;
@@ -149,18 +161,23 @@ impl Manifest {
 pub struct WorldManifest {
     pub revision: u64,
     /// `TextOutlet`.
-    pub outlet: u64,
+    ///
+    /// `u32`, WHICH IS THE ENUM'S RANGE. These were `u64` — the varint's type,
+    /// not the value's — so an enum constant had to be cast at every use, and a
+    /// cast is where a wrong number stops being visible. The counts below stay
+    /// `u64` because they really are quantities.
+    pub outlet: u32,
     /// Zero means UNMEASURED, never "no room".
     pub cols: u64,
     pub rows: u64,
     /// `StatusOutlet` — what `ILC_STATUS` used to say. A CAPABILITY.
-    pub status: u64,
+    pub status: u32,
     /// `World` — what `ILC_WORLD` used to say. IDENTITY, and it travels in its
     /// own nested message so the difference is visible in the bytes.
     ///
     /// No tier: an app was BUILT for its tier and does not need telling, and
     /// `badge-normal` says rp2350 anyway.
-    pub world: u64,
+    pub world: u32,
 }
 
 pub fn encode(env_in: WorldManifest) -> Manifest {
@@ -176,7 +193,7 @@ pub fn encode(env_in: WorldManifest) -> Manifest {
     // which is exactly what makes it safe to START sending one.
     let mut fs = Buf::new();
     fs.tag(1, WIRE_VARINT); // Filesystem.availability
-    fs.varint(AVAILABILITY_ABSENT);
+    fs.varint(AVAILABILITY_ABSENT as u64);
 
     // --- TextOut ------------------------------------------------------------
     let mut text = Buf::new();
@@ -184,7 +201,7 @@ pub fn encode(env_in: WorldManifest) -> Manifest {
     // said, said no, and a live outlet — and a second encoding of one fact is
     // what this message exists to remove. Field 1 is reserved in the proto.
     text.tag(2, WIRE_VARINT); // TextOut.outlet
-    text.varint(outlet);
+    text.varint(outlet as u64);
     // Zero is the proto default and encodes to nothing. That is the correct
     // spelling of "unmeasured": absent and zero must not be two distinct states,
     // or a reader would have to decide which one meant what.
@@ -217,7 +234,7 @@ pub fn encode(env_in: WorldManifest) -> Manifest {
     // was not told, rather than being handed a plausible wrong answer.
     if status != 0 {
         env.tag(5, WIRE_VARINT); // Environment.status
-        env.varint(status);
+        env.varint(status as u64);
     }
 
     // --- Identity -----------------------------------------------------------
@@ -228,7 +245,7 @@ pub fn encode(env_in: WorldManifest) -> Manifest {
     if world != 0 {
         let mut who = Buf::new();
         who.tag(1, WIRE_VARINT); // Identity.world
-        who.varint(world);
+        who.varint(world as u64);
         env.tag(6, WIRE_BYTES); // Environment.identity
         env.varint(who.len as u64);
         env.extend(who.as_slice());

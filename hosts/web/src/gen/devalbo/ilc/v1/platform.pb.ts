@@ -58,12 +58,6 @@ export const SpecSource_Enum = /* @__PURE__ */ createEnumType("devalbo.ilc.v1.Sp
 ]);
 
 /**
- * A flag's wire type — what a host needs to parse a value and encode the field.
- *
- * Mirrors `clispec.Kind`. A host that meets a kind it cannot render skips the
- * field and the app takes its default, which is a no-op rather than an error
- * (Decision 33).
- *
  * @generated from enum devalbo.ilc.v1.SpecKind
  */
 export enum SpecKind {

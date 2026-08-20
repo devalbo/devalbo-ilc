@@ -191,7 +191,7 @@ use dlc_platform_embedded::minimal::MinimalHost;
         // NO STATUS INDICATOR: this is an emulated core with a serial console and
         // nothing to light up. Saying so explicitly is what lets an app skip work
         // it knows is invisible (Decision 33).
-        status: dlc_platform_embedded::control::STATUS_OUTLET_NONE as u64,
+        status: dlc_platform_embedded::control::STATUS_OUTLET_NONE,
         // AND NO WORLD DECLARED. This harness is not a host slot anybody ships;
         // `undefined` is the honest answer and the common one.
         world: 0,

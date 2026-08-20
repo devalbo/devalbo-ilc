@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package devalbo.dlc.std.v1;
+
+option go_package = "github.com/devalbo/devalbo-ilc/dlc-platform/gen/go/devalbo/dlc/std/v1;dlcstdv1";
+
+// ===========================================================================
+// DLC STANDARD — vendored. Do not edit this copy.
+//
+//   source:  dlc-platform/proto/devalbo/dlc/std/v1/status.proto
+//   refresh: make sync-std-proto
+//   verify:  make verify-std-proto   (CI fails when a copy has drifted)
+//
+// WHY THE PROVENANCE IS IN THE FILE rather than beside it: this is copied
+// byte-for-byte into every app and into the scaffold template, so anything
+// written here travels with it and anything written next to it does not. A
+// reader who opens a vendored copy is exactly the reader who needs to be told
+// it is one.
+//
+// NO VERSION STAMP, DELIBERATELY. The `v1` in the package IS the version, and a
+// second number for the same thing is the mistake this vocabulary exists to
+// prevent — an app built against a newer standard sends a value an older host
+// does not know, and the host skips it, which degrades better than any version
+// check because it reacts to the specific thing it cannot read.
+//
+// It travels with the scaffold only because the platform is not published to a
+// schema registry yet. When it is, delete the copy and add the dep.
+// ===========================================================================
+
+// THE DLC STANDARD VOCABULARY — definitions every app may import.
+//
+// # Why `devalbo.dlc.std.v1` and not `devalbo.dlc.std.v1`
+//
+// Because that name is taken, by the `dlc` CLI's own `commands.proto` and
+// `toolchain.proto` — a DIFFERENT Go package under the same proto package name.
+// Two Go packages claiming one proto package compiles happily while they live in
+// separate buf workspaces, and panics on duplicate registration the first time
+// anything imports both. `.std.` is the app-facing subset; the bare package is
+// the tool's own.
+//
+// # What belongs in `devalbo.dlc.std.v1`, and what does not
+//
+// This package is small on purpose. A definition earns a place here only if it
+// means THE SAME THING IN EVERY APP. Three tests, and all three have to pass:
+//
+//   1. **More than one app would declare it.** Not "might one day" — would, and
+//      the first two already have.
+//   2. **A world reads it.** A vocabulary only apps use is a library, not a
+//      standard; what makes this a contract is that something at the other end
+//      acts on the value.
+//   3. **Disagreeing about it is silent.** If a mismatch produces a compile
+//      error or a visible failure, leave it in the app. What belongs here are the
+//      numbers that cross a language boundary and fail quietly.
+//
+// What that rules out is most things. An app's own domain — a tic-tac-toe
+// `Mark`, a `Style` for a greeting, an `Operator` for a calculator — stays in
+// the app, because nothing else can mean anything by it. Host-facing messages
+// (`WorldState`, `ControlRequest`) stay in `devalbo.ilc.v1`, because an app
+// neither sends nor receives them.
+//
+// # How this reaches an app
+//
+// COPIED, not imported. `make sync-std-proto` vendors this directory into every
+// example app and into the scaffold template, and CI fails when a copy drifts.
+// That is the same arrangement `devalbo/options/v1/options.proto` has always
+// had, and it exists for the same reason: an app is a separate module with its
+// own `buf` workspace, and there is no registry to depend on yet. When there is,
+// the vendoring becomes a dep and the copies are deleted.
+
+// HOW AN APP SAYS "how is it going" — slot 1 of the reserved `ilc.status` event.
+//
+// # Why this is standard rather than per-app
+//
+// Because it was already shared and nobody had said so. Two apps and a world
+// agreed on these values BY ACCIDENT:
+//
+//   - `hello` declared its own `Colour`: GREEN=1, AMBER=2, RED=3, OFF=4.
+//   - the badge hand-decoded slot 1 as 0=idle, 1=ok, 2=warning, 3=error.
+//
+// Those line up for 1, 2 and 3 and diverge at both ends — the shape that passes
+// testing and fails in the field. Concretely: `hello`'s `light off` sent 0, the
+// badge read 0 as IDLE, and asking for the light to go out turned it blue. The
+// command reported success, because 0 is a perfectly legal status.
+//
+// It passes all three tests above: two apps declared it, a world renders it, and
+// the disagreement was silent.
+//
+// # Why zero is not idle
+//
+// It used to be, and that was the second bug hiding here. proto3 makes 0 what
+// you get when nobody said anything, so "this app is idle" and "this app never
+// mentioned status" were the same byte and no reader could tell them apart.
+// IDLE has a number of its own now.
+enum StatusLevel {
+  // Nobody said. NOT idle — see above.
+  STATUS_LEVEL_UNSPECIFIED = 0;
+  // ALIVE WITH NOTHING TO DO, and it is a real answer rather than the absence
+  // of one. An app that has finished and is waiting has done everything asked of
+  // it; a world that could not distinguish that from "broken" or from "never
+  // started" would be unable to show the most common state a device is in.
+  STATUS_LEVEL_IDLE = 1;
+  // Working, or finished and fine.
+  STATUS_LEVEL_OK = 2;
+  // Worth a person's attention, and NOT a failure — a divide-by-zero the app
+  // handled, a value it clamped. An app that only had "ok" and "error" would
+  // have to lie in one direction or the other.
+  STATUS_LEVEL_WARNING = 3;
+  // It went wrong.
+  STATUS_LEVEL_ERROR = 4;
+  // Show nothing at all. DISTINCT FROM UNSPECIFIED: this is the app asking for
+  // the indicator to be dark, which is a decision; unspecified is silence.
+  STATUS_LEVEL_OFF = 5;
+}

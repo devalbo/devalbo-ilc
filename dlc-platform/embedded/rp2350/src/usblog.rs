@@ -68,7 +68,7 @@
 //! service across all of it would stall enumeration in the middle of the run.
 
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 /// Everything printed during a run.
 ///
@@ -380,6 +380,11 @@ fn service_locked(usb: &mut Usb) {
     // one.
     device.poll(&mut [serial, reset]);
 
+    // A REBOOT MAY BE DUE, and this is the first point at which taking one is
+    // safe: the transfer that asked for it has been serviced, and nothing here
+    // holds a guarded cell. It does not return if it fires.
+    reboot_if_due();
+
     // A HOST JUST OPENED THE PORT: replay the run for it, once.
     //
     // `dtr` rises when a terminal opens the device and falls when it closes, so
@@ -665,11 +670,107 @@ const RESET_PROTOCOL: u8 = 0x01;
 const RESET_REQUEST_BOOTSEL: u8 = 0x01;
 
 /// RP2350 bootrom reboot type: a normal restart, back into this firmware.
-#[cfg(badge_control)]
 const REBOOT_TYPE_NORMAL: u32 = 0x0000;
 
 /// RP2350 bootrom reboot type: into BOOTSEL. Datasheet 5.5.10.1.
 const REBOOT_TYPE_BOOTSEL: u32 = 0x0002;
+
+/// How long the BOOTROM waits before a reboot lands, per kind, in milliseconds.
+///
+/// # Why these are still here, and still different
+///
+/// This is the bootrom's own staged delay, and it was very nearly removed. The
+/// reasoning for removing it was sound — a staged reboot runs through the
+/// watchdog, and this firmware constructs a `hal::Watchdog` during clock setup,
+/// so the two could race — and replacing it with an immediate, non-returning
+/// reboot looked like a strict improvement.
+///
+/// IT WAS NOT TESTED SEPARATELY, and it should have been. It went in alongside
+/// the deferral below, in one change; the board then rebooted, re-enumerated USB
+/// and hung before writing a single log line. Two edits, one symptom, no way to
+/// say which caused it.
+///
+/// So the delays are back at the values they had, and only the CALL SITE has
+/// moved. If the staged path really is the problem, it now has to prove it on
+/// its own.
+const REBOOT_STAGE_MS_BOOTSEL: u32 = 10;
+const REBOOT_STAGE_MS_NORMAL: u32 = 20;
+
+/// How long to keep running after a reboot is asked for, so the answer gets out.
+///
+/// A control transfer's status stage and a queued log line both need the host to
+/// read them, and a board that vanished mid-answer is indistinguishable from one
+/// that crashed on the request. 10 ms is far longer than either needs at USB
+/// full speed and far shorter than a person notices.
+const REBOOT_GRACE_US: u32 = 10_000;
+
+/// When to reboot, as the low 32 bits of `now_us`, or `REBOOT_DISARMED`.
+///
+/// # Why the low 32 bits and not the whole thing
+///
+/// `now_us` is 64-bit and this is a Cortex-M33: there is no `AtomicU64`. The
+/// comparison below is a WRAPPING one, which is correct for any grace shorter
+/// than about 35 minutes and wrong only for one nobody would ask for.
+static REBOOT_AT_US: AtomicU32 = AtomicU32::new(REBOOT_DISARMED);
+/// Not `0`, because `0` is a real microsecond — the one right after power-on.
+const REBOOT_DISARMED: u32 = u32::MAX;
+/// Which reboot was asked for: BOOTSEL, or back into this firmware.
+static REBOOT_TO_BOOTSEL: AtomicBool = AtomicBool::new(false);
+
+/// Ask for a reboot, once the host has had `REBOOT_GRACE_US` to read the answer.
+///
+/// # Why this is deferred rather than done where it is asked for
+///
+/// Both callers are in the worst possible place to reboot from. The BOOTSEL
+/// request arrives inside a USB control transfer, which runs inside the USB
+/// interrupt; the control channel's own reboot verb is reached with the buffer
+/// cell borrowed. Rebooting from either meant the board went down mid-transfer
+/// or mid-borrow.
+///
+/// The bootrom's delay does not help with either: it SCHEDULES the reboot and
+/// RETURNS, so the firmware kept running for 10-20 ms in exactly the context
+/// that made rebooting unsafe — inside the interrupt, or with the cell still
+/// borrowed.
+///
+/// So the wait happens HERE instead, in ordinary code, before anything is asked
+/// of the bootrom. What the bootrom then does is unchanged (see
+/// `REBOOT_STAGE_MS_*`); only the place it is asked from has moved.
+fn arm_reboot(bootsel: bool) {
+    REBOOT_TO_BOOTSEL.store(bootsel, Ordering::Release);
+    let at = (crate::now_us() as u32).wrapping_add(REBOOT_GRACE_US);
+    // Never the disarmed sentinel, which would silently drop the request. One
+    // microsecond late is not a difference anything can observe.
+    let at = if at == REBOOT_DISARMED { 0 } else { at };
+    REBOOT_AT_US.store(at, Ordering::Release);
+}
+
+/// Take a reboot that is now due. Called from the USB service, after the poll.
+fn reboot_if_due() {
+    let at = REBOOT_AT_US.load(Ordering::Acquire);
+    if at == REBOOT_DISARMED {
+        return;
+    }
+    // WRAPPING, so this stays right across the low word's 71-minute rollover:
+    // "now is at or past `at`" is a small non-negative difference, and a
+    // deadline still in the future reads as a huge one.
+    if (crate::now_us() as u32).wrapping_sub(at) > i32::MAX as u32 {
+        return;
+    }
+    // DISARM BEFORE ASKING, because the staged form RETURNS. Left armed, every
+    // later poll would ask again and re-stage the reboot with a fresh delay —
+    // a board that promises to reboot and never quite does.
+    REBOOT_AT_US.store(REBOOT_DISARMED, Ordering::Release);
+
+    let (kind, delay_ms) = if REBOOT_TO_BOOTSEL.load(Ordering::Acquire) {
+        (REBOOT_TYPE_BOOTSEL, REBOOT_STAGE_MS_BOOTSEL)
+    } else {
+        (REBOOT_TYPE_NORMAL, REBOOT_STAGE_MS_NORMAL)
+    };
+    // p0 is the activity-LED gpio mask and p1 the interface-disable mask; zero
+    // for both means "no LED, leave mass storage and PicoBoot enabled", which is
+    // what a plain `picotool reboot -u -f` expects.
+    hal::rom_data::reboot(kind, delay_ms, 0, 0);
+}
 
 impl<'a, B: usb_device::bus::UsbBus> PicoToolReset<'a, B> {
     fn new(alloc: &'a usb_device::bus::UsbBusAllocator<B>) -> Self {
@@ -718,14 +819,12 @@ impl<B: usb_device::bus::UsbBus> usb_device::class::UsbClass<B> for PicoToolRese
         }
 
         if request.request == RESET_REQUEST_BOOTSEL {
-            // No accept/reject: the board is gone before a reply could be sent.
-            // A short delay lets the host finish the transfer first, which is
-            // what stops the reboot looking like a USB fault.
-            //
-            // p0 is the activity-LED gpio mask and p1 the interface-disable mask;
-            // zero for both means "no LED, leave mass storage and PicoBoot
-            // enabled", which is what a plain `picotool reboot -u -f` expects.
-            hal::rom_data::reboot(REBOOT_TYPE_BOOTSEL, 10, 0, 0);
+            // ARMED, NOT TAKEN. This runs inside the USB interrupt, in the middle
+            // of the very transfer that asked — the one context where rebooting
+            // is certain to leave the host holding a half-finished exchange.
+            // `arm_reboot` explains why the wait belongs in ordinary code rather
+            // than in a delay passed to the bootrom.
+            arm_reboot(true);
         }
     }
 }
@@ -1065,6 +1164,19 @@ fn answer(
     let id = request.id;
     use dlc_platform_embedded::control;
 
+    // CAN THIS WORLD DO THAT RIGHT NOW? Checked once, here, before any verb runs.
+    //
+    // A gate per handler is a gate somebody forgets — and the one that was
+    // forgotten cost three wrong answers in a row: a request taken by a world
+    // with no session went into a slot nobody would ever empty, and every later
+    // request was told "a request is already running". The refusal names the
+    // reason rather than the rule, because "no app is instantiated yet" is
+    // actionable and "phase 3" is a fact about this firmware.
+    let (phase, _) = crate::progress::get();
+    if let Err(why) = control::verb_allowed(request.verb, phase) {
+        return Some(control::Response { id, ok: false, error: why, payload: &[] }.encode());
+    }
+
     let payload = match request.verb {
         control::VERB_GET_WORLD_STATE => {
             let uptime_ms = dlc_platform_embedded::clock::installed()
@@ -1130,7 +1242,7 @@ fn answer(
             // error path — the answer arrives from main once the app has run.
             // NAME THE REASON. "Busy" and "there is no app running" are
             // different facts and lead a caller to do different things.
-            if !crate::passthrough::session_is_open() {
+            if !crate::passthrough::instance_is_open() {
                 return Some(control::frame(
                     control::KIND_RESPONSE,
                     &control::Response {
@@ -1538,6 +1650,7 @@ static REBOOT_WHEN_SENT: AtomicBool = AtomicBool::new(false);
 fn world_state(uptime_ms: u64) -> dlc_platform_embedded::control::WorldState<'static> {
     use dlc_platform_embedded::control;
 
+    let (phase, stage) = crate::progress::get();
     control::WorldState {
         world: crate::WORLD.code(),
         tier: control::TIER_RP2350,
@@ -1551,7 +1664,11 @@ fn world_state(uptime_ms: u64) -> dlc_platform_embedded::control::WorldState<'st
         uptime_ms,
         requests_offered: crate::passthrough::OFFERED.load(Ordering::Relaxed),
         requests_taken: crate::passthrough::TAKEN.load(Ordering::Relaxed),
-        session_open: crate::passthrough::session_is_open(),
+        instance_open: crate::passthrough::instance_is_open(),
+        phase,
+        stage,
+        phase_faults: crate::progress::faults(),
+        verdict: crate::progress::last_verdict(),
     }
 }
 
@@ -1639,11 +1756,11 @@ fn control_send(link: &mut impl dlc_platform_embedded::link::Link) -> bool {
             c.tx = alloc::vec::Vec::new();
             c.tx_sent = 0;
             // THE LAST BYTE IS OUT, so the promise made above has been kept and
-            // the board can go. `reboot` does not return.
+            // the board can go — but not from HERE, with the buffer cell still
+            // borrowed. Arming leaves the reboot to `reboot_if_due`, which runs
+            // after this closure has released it.
             if REBOOT_WHEN_SENT.load(Ordering::Acquire) {
-                // A short delay lets the host read what was just written before
-                // the device disappears, the same courtesy the BOOTSEL path pays.
-                hal::rom_data::reboot(REBOOT_TYPE_NORMAL, 20, 0, 0);
+                arm_reboot(false);
             }
             return false;
         }

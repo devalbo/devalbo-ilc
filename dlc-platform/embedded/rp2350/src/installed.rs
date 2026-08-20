@@ -96,14 +96,23 @@ pub fn each(mut f: impl FnMut(usize, &Payload)) -> Option<usize> {
 
 /// `Integrity` in control.proto.
 ///
-/// WRITTEN OUT, not cast. This enum's discriminants are a local detail and the
-/// proto numbers are a wire contract; a `as u32` here would silently re-map every
+/// WRITTEN OUT, not cast — and NAMED, not numbered.
+///
+/// The match is right: this enum's discriminants are a local detail and the
+/// proto numbers are a wire contract, so `as u32` would silently re-map every
 /// value the day somebody reorders the Rust enum.
+///
+/// The literals were not. `1, 2, 3, 4` in a match arm is the wire contract
+/// transcribed by hand, one file away from the generated constants that hold the
+/// same numbers — which is how `TextOutlet` came to say `uart` on a badge
+/// writing to its screen. Naming them means a renumbered proto stops compiling
+/// here rather than quietly re-labelling every payload a client lists.
 pub const fn integrity_code(integrity: Integrity) -> u32 {
+    use dlc_platform_embedded::control as c;
     match integrity {
-        Integrity::Verified => 1,
-        Integrity::Unverified => 2,
-        Integrity::Corrupt => 3,
-        Integrity::WrongEngine => 4,
+        Integrity::Verified => c::INTEGRITY_VERIFIED,
+        Integrity::Unverified => c::INTEGRITY_UNVERIFIED,
+        Integrity::Corrupt => c::INTEGRITY_CORRUPT,
+        Integrity::WrongEngine => c::INTEGRITY_WRONG_ENGINE,
     }
 }

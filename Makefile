@@ -22,23 +22,57 @@ gen: ## generate WIT + proto bindings (requires devbox shell)
 	buf generate --template buf.gen.platform.yaml dlc-platform/proto
 	buf generate --template buf.gen.yaml proto
 
-.PHONY: sync-template-proto
-sync-template-proto: ## copy the shared options.proto into the template AND the example apps
-	# A scaffolded app imports devalbo/options/v1/options.proto for `method_id`,
-	# but that file lives HERE — so it travels with the scaffold until it is
-	# published to a schema registry. Kept a pure byte-copy (provenance lives in
-	# the README beside it) so TestTemplateOptionsProtoInSync is exact equality
-	# and the eventual swap to a registry dep is a clean delete.
-	@cp dlc-platform/proto/devalbo/options/v1/options.proto \
-		templates/component-model/proto/devalbo/options/v1/options.proto.tmpl
-	# The example apps vendor it too, and they went stale the first time this
-	# file gained an option: notes' codegen failed with an error naming neither
-	# the file nor the app, because buf cancels every plugin when one fails.
-	# An example app demonstrates current practice or it teaches the wrong thing.
-	@for app in example-apps/*/proto/devalbo/options/v1/options.proto; do \
-		[ -f "$$app" ] && cp dlc-platform/proto/devalbo/options/v1/options.proto "$$app"; \
+.PHONY: sync-std-proto
+sync-std-proto: ## vendor the DLC STANDARD protos into the template AND the example apps
+	# THE DLC STANDARD SET: devalbo/options/v1 (the registry metadata every app
+	# annotates its rpcs with) and devalbo/dlc/v1 (the vocabulary every app may
+	# use — see status.proto for the three tests a definition passes to get there).
+	#
+	# COPIED RATHER THAN DEPENDED ON, because an app is a separate Go module with
+	# its own buf workspace and there is no schema registry to point at yet. When
+	# there is, these become deps and the copies are a clean delete — which is why
+	# they stay pure byte-copies with no templating.
+	#
+	# THIS GOING STALE IS NOT HYPOTHETICAL: the first time options.proto gained an
+	# option, notes' codegen failed with an error naming neither the file nor the
+	# app, because buf cancels every plugin when one fails. An example app
+	# demonstrates current practice or it teaches the wrong thing.
+	@for src in $(STD_PROTOS); do \
+		rel=$${src#dlc-platform/proto/}; \
+		mkdir -p "templates/component-model/proto/$$(dirname $$rel)"; \
+		cp "$$src" "templates/component-model/proto/$$rel.tmpl"; \
+		for app in example-apps/*/proto; do \
+			[ -d "$$app" ] || continue; \
+			mkdir -p "$$app/$$(dirname $$rel)"; \
+			cp "$$src" "$$app/$$rel"; \
+		done; \
 	done
+	@echo "  synced $(words $(STD_PROTOS)) standard proto(s)"
 
+# EVERY FILE AN APP MAY IMPORT. Adding one here is what makes it standard;
+# `verify-std-proto` then holds every copy to it.
+STD_PROTOS := \
+	dlc-platform/proto/devalbo/options/v1/options.proto \
+	dlc-platform/proto/devalbo/dlc/std/v1/status.proto
+
+.PHONY: verify-std-proto
+verify-std-proto: ## fail if any vendored copy has drifted from the source
+	# THE GATE THAT MAKES VENDORING SAFE. Without it a copy is just a fork that
+	# has not diverged yet, and the divergence surfaces as a codegen error in an
+	# app nobody changed.
+	@status=0; \
+	for src in $(STD_PROTOS); do \
+		rel=$${src#dlc-platform/proto/}; \
+		for copy in "templates/component-model/proto/$$rel.tmpl" example-apps/*/proto/$$rel; do \
+			[ -f "$$copy" ] || continue; \
+			cmp -s "$$src" "$$copy" || { echo "  x $$copy has drifted from $$src"; status=1; }; \
+		done; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "  standard protos in sync"; else echo "  run 'make sync-std-proto'"; exit 1; fi
+
+# The old name, kept so nothing that calls it breaks mid-change.
+.PHONY: sync-template-proto
+sync-template-proto: sync-std-proto
 .PHONY: build-host
 build-host: sync-template-proto ## native dlc binary — engine linked in-process (Decision 26)
 	go build -o $(DLC) $(HOST_SRC)

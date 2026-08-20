@@ -129,7 +129,14 @@ pub struct Report<'a, U: Write> {
     uart: &'a mut U,
     screen: &'a mut Option<Display>,
     line: i32,
-    stage: u32,
+    /// HOW MANY STAGES HAVE RUN — a count, used only for the verdict tally.
+    ///
+    /// Deliberately NOT the number a stage prints. That number is the stage's own
+    /// identity from the `Stage` enum, and the two diverge the moment a stage is
+    /// skipped: `VERIFY_PAYLOAD` only runs when a payload is corrupt, so a
+    /// healthy boot runs eight stages whose identities go up to nine. Naming this
+    /// `stage` was what let one be quietly used for the other.
+    ran: u32,
     failures: u32,
     /// Counted apart from the total, because these are the ones worth reporting
     /// to somebody else.
@@ -153,7 +160,7 @@ impl<'a, U: Write> Report<'a, U> {
             uart,
             screen,
             line: 0,
-            stage: 0,
+            ran: 0,
             failures: 0,
             hardware_checks: 0,
             hardware_passed: 0,
@@ -199,6 +206,48 @@ impl<'a, U: Write> Report<'a, U> {
         TOP + self.line * LINE_H
     }
 
+    /// Enter a PHASE — the high-level step the stages below it belong to.
+    ///
+    /// # Why this is on the report rather than beside it
+    ///
+    /// Because there must be exactly one way to advance. The phase was briefly
+    /// published by a `progress::enter` call sitting next to the report's stage
+    /// calls, which is two trackers for one sequence: the panel showed a flat
+    /// list of nine stages while the wire carried a phase nothing on the panel
+    /// mentioned, and keeping them agreeing was a discipline rather than a
+    /// property.
+    ///
+    /// Now a phase is announced the same way a stage is — one call that both
+    /// SHOWS it and PUBLISHES it — so the log, the panel and `GetWorldState`
+    /// cannot disagree about where the world has got to.
+    ///
+    /// The stage counter keeps running across phases rather than restarting. A
+    /// stage number is a position in the whole bring-up, and it is what the log
+    /// and the runbook both refer to; restarting it per phase would make "stage
+    /// 2" ambiguous in the one place people quote it.
+    pub fn phase(&mut self, which: u32, name: Arguments<'_>) {
+        let fault = crate::progress::enter(which);
+        let y = self.y();
+        self.draw(y, 0, format_args!("- {name}"), NAME_COLOR);
+        self.line += 1;
+        let _ = writeln!(self.uart, "\r\n-- {name} --");
+        // A TRANSITION THE WORLD SHOULD NOT HAVE BEEN ABLE TO TAKE.
+        //
+        // Counted as a FAILURE, so the verdict goes red and the badge says so
+        // across a room. This is a firmware bug by construction — the phases are
+        // entered from four places in one function — and the alternative to
+        // shouting is a badge that quietly reports a phase it is not in, which is
+        // worse than the bug it is covering for.
+        if let Some((from, to)) = fault {
+            self.failures += 1;
+            let _ = writeln!(
+                self.uart,
+                "\r\n!! phase {from} -> {to} is not a transition this world has"
+            );
+            self.note(format_args!("phase fault: {from} -> {to}"));
+        }
+    }
+
     /// Announce what is about to be tested — **before** running it.
     ///
     /// A board that hangs then shows the name of the thing it hung in, which is
@@ -209,9 +258,14 @@ impl<'a, U: Write> Report<'a, U> {
     /// written into the middle of a stage a compile error rather than a mangled
     /// line (see the module header).
     pub fn stage(&mut self, which: u32, scope: Scope, name: Arguments<'_>) -> Open<'_, 'a, U> {
-        self.stage += 1;
         self.last_was_hardware = scope == Scope::HardwareOnly;
         self.scope_code = scope.code();
+        // PUBLISHED HERE, so no caller has to remember to. A stage announced to
+        // the log but not to `progress` would be invisible to anyone who asks
+        // later — which is everyone, once the thing being diagnosed is a world
+        // that stopped before its listener arrived.
+        crate::progress::begin(which);
+        self.ran += 1;
         // ANNOUNCE IT BEFORE ATTEMPTING IT. If this stage hangs, this frame is
         // the last thing a control client hears, and it NAMES what the world was
         // doing — the one diagnosis a stream of completed lines cannot give,
@@ -224,7 +278,20 @@ impl<'a, U: Write> Report<'a, U> {
             self.hardware_checks += 1;
         }
         let y = self.y();
-        let n = self.stage;
+        // THE STAGE'S OWN NUMBER, from the `Stage` enum — not a running count.
+        //
+        // It WAS a count (`self.stage += 1`), and the two disagree the moment a
+        // stage does not run. `VERIFY_PAYLOAD` only prints when a payload is
+        // corrupt, so on every healthy boot the badge numbered instantiate 6,
+        // manifest 7 and execute 8, while the proto, the docs and the runbook
+        // all call them 7, 8 and 9.
+        //
+        // That is two numbering schemes sharing the word "stage" — the exact
+        // hazard BRINGUP.md's vocabulary table exists to prevent, reintroduced
+        // one layer down. A number that shifts depending on what else happened
+        // cannot be quoted, and quoting it ("stage 3 failed") is the whole
+        // reason stages are numbered.
+        let n = which;
         // `*` marks a check only the board can answer. On the UART it is spelled
         // out, because a log is read later by someone who did not watch the run.
         let mark = if self.last_was_hardware { "*" } else { " " };
@@ -332,6 +399,10 @@ impl<'a, U: Write> Report<'a, U> {
     /// status colour — so the summary is read, then replaced by the signal that
     /// stays visible across the room.
     pub fn finish(&mut self, status: Status) {
+        // PUBLISHED HERE, so no caller has to remember to — the same arrangement
+        // that keeps the stage honest. The verdict's other two outlets, a colour
+        // and a word, both reach a person; this is the one a client can read.
+        crate::progress::verdict(status.code());
         let y = self.y() + LINE_H;
         let color = if self.failures == 0 { OK_COLOR } else { FAIL_COLOR };
         // THE NUMBER WORTH REPORTING is not "all checks passed" — QEMU already
@@ -351,8 +422,8 @@ impl<'a, U: Write> Report<'a, U> {
         // watched, and the starred count is the part that carries new
         // information — and neither has to be inferred from the other.
         // Read out before `draw`, which takes `&mut self`.
-        let stages = self.stage;
-        let stages_ok = self.stage - self.failures;
+        let stages = self.ran;
+        let stages_ok = self.ran - self.failures;
         self.draw(
             y,
             0,
@@ -363,8 +434,8 @@ impl<'a, U: Write> Report<'a, U> {
             self.uart,
             "verdict: {} — {}/{} stages passed; *{}/{} hardware-only (the rest are QEMU regressions)",
             status.name(),
-            self.stage - self.failures,
-            self.stage,
+            self.ran - self.failures,
+            self.ran,
             self.hardware_passed,
             self.hardware_checks
         );

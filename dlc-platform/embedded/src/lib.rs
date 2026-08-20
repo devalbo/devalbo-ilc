@@ -37,6 +37,7 @@ pub mod names;
 mod names_gen;
 pub mod uart;
 pub mod pulley;
+pub mod ramfs;
 pub mod request;
 pub mod spec;
 

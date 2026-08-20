@@ -8,6 +8,13 @@
 // syntax error. A generated file has to be valid in the place it is used, not
 // only on its own.
 
+// Verdict
+pub const VERDICT_UNSPECIFIED: u32 = 0;
+pub const VERDICT_OK: u32 = 1;
+pub const VERDICT_FAILED: u32 = 2;
+pub const VERDICT_IDLE: u32 = 3;
+pub const VERDICT_BROKEN: u32 = 4;
+
 // Activity
 pub const ACTIVITY_UNSPECIFIED: u32 = 0;
 pub const ACTIVITY_STARTING: u32 = 1;
@@ -26,6 +33,17 @@ pub const SCREEN_LAYOUT_NONE: u32 = 3;
 pub const INPUT_MODE_UNSPECIFIED: u32 = 0;
 pub const INPUT_MODE_OFF: u32 = 1;
 pub const INPUT_MODE_KEYBOARD: u32 = 2;
+
+// Phase
+pub const PHASE_UNSPECIFIED: u32 = 0;
+pub const PHASE_HARDWARE: u32 = 1;
+pub const PHASE_PAYLOADS: u32 = 2;
+pub const PHASE_INSTANCE_STARTING: u32 = 3;
+pub const PHASE_INSTANCE_RUNNING: u32 = 4;
+pub const PHASE_INSTANCE_STOPPING: u32 = 8;
+pub const PHASE_IDLE: u32 = 5;
+pub const PHASE_FAULT: u32 = 6;
+pub const PHASE_DEGRADED: u32 = 7;
 
 // Stage
 pub const STAGE_UNSPECIFIED: u32 = 0;
